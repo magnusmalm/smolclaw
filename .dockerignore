@@ -1,0 +1,14 @@
+build/
+build-*/
+deps/static/
+deps/static-build/
+deps/musl-static-*/
+deps/musl-build-*/
+deps/musl-toolchain-*/
+deps/musl-cross-make/
+.config
+.config.old
+.git
+*.deb
+*.o
+*.a

@@ -1,0 +1,156 @@
+mainmenu "smolclaw configuration"
+
+menu "Channels"
+
+config SC_ENABLE_TELEGRAM
+	bool "Telegram channel (long-polling bot)"
+	default y
+	select NEED_PTHREADS
+	help
+	  Enable the Telegram channel. Requires a bot token in config.
+	  Uses long-polling + REST API in a dedicated thread.
+
+config SC_ENABLE_DISCORD
+	bool "Discord channel (Gateway WebSocket)"
+	default y
+	select NEED_OPENSSL
+	select NEED_PTHREADS
+	help
+	  Enable the Discord channel. Requires a bot token in config.
+	  Uses a custom WebSocket client over TLS (OpenSSL).
+
+config SC_ENABLE_IRC
+	bool "IRC channel (TCP/TLS socket)"
+	default y
+	select NEED_OPENSSL
+	select NEED_PTHREADS
+	help
+	  Enable the IRC channel with optional TLS.
+	  Responds to nick highlights and DMs.
+
+config SC_ENABLE_SLACK
+	bool "Slack channel (Socket Mode WebSocket)"
+	default y
+	select NEED_OPENSSL
+	select NEED_PTHREADS
+	help
+	  Enable the Slack channel via Socket Mode (WSS receive)
+	  and Web API (send). Requires bot_token and app_token.
+
+config SC_ENABLE_WEB
+	bool "Web channel (REST API + embedded chat)"
+	default y
+	select NEED_PTHREADS
+	help
+	  Enable the Web channel with HTTP REST API and embedded
+	  chat UI. Runs on its own event loop thread.
+	  No TLS — use a reverse proxy (nginx/caddy) for HTTPS.
+
+endmenu
+
+menu "Tools"
+
+config SC_ENABLE_GIT
+	bool "Git tool (subcommand allowlist, fork+exec)"
+	default y
+	help
+	  Enable the git tool for safe git operations.
+	  Uses a subcommand allowlist and fork+execvp (no shell).
+
+config SC_ENABLE_WEB_TOOLS
+	bool "Web search and fetch tools"
+	default y
+	help
+	  Enable web_search (Brave/SearXNG/DuckDuckGo) and web_fetch tools.
+	  Includes SSRF protection with private IP blocking.
+
+config SC_ENABLE_VOICE
+	bool "Voice transcription (Groq Whisper)"
+	default y
+	help
+	  Enable voice message transcription via Groq Whisper API.
+	  Used by Telegram voice messages and Discord audio attachments.
+
+config SC_ENABLE_BACKGROUND
+	bool "Background process management tools"
+	default y
+	help
+	  Enable exec_background, bg_poll, and bg_kill tools for
+	  running and managing background processes.
+
+endmenu
+
+menu "Services"
+
+config SC_ENABLE_CRON
+	bool "Cron scheduling service"
+	default y
+	help
+	  Enable the cron tool and scheduling service.
+	  The LLM can add, list, and remove scheduled jobs.
+
+config SC_ENABLE_HEARTBEAT
+	bool "Heartbeat service"
+	default y
+	help
+	  Enable periodic idle prompts. Sends a configurable prompt
+	  to the agent at a set interval when idle.
+
+config SC_ENABLE_SPAWN
+	bool "Subagent spawning tool"
+	default y
+	help
+	  Enable the spawn tool for creating subagent instances
+	  on separate sessions. Depth limited to 3.
+
+config SC_ENABLE_MEMORY_SEARCH
+	bool "Memory full-text search (SQLite FTS5)"
+	default y
+	help
+	  Enable full-text search across memory files via SQLite FTS5.
+	  Adds the memory_search tool for keyword-based retrieval.
+	  Uses a vendored SQLite amalgamation (no external dependency).
+
+endmenu
+
+menu "Integration"
+
+config SC_ENABLE_STREAMING
+	bool "SSE streaming for LLM responses"
+	default y
+	help
+	  Enable Server-Sent Events streaming for real-time
+	  LLM output display.
+
+config SC_ENABLE_MCP
+	bool "MCP client for external tool servers"
+	default y
+	help
+	  Enable the Model Context Protocol client.
+	  Extends tools via external JSON-RPC 2.0 servers
+	  communicating over stdin/stdout.
+
+endmenu
+
+menu "Security"
+
+config SC_ENABLE_VAULT
+	bool "Encrypted API key vault (AES-256-GCM)"
+	default y
+	select NEED_OPENSSL
+	help
+	  Enable the encrypted vault for storing API keys and secrets.
+	  Uses AES-256-GCM with PBKDF2 key derivation (OpenSSL).
+	  Config references secrets as vault://key_name.
+	  Adds the 'vault' CLI subcommand.
+
+endmenu
+
+# Hidden dependency symbols — auto-selected by features that need them
+config NEED_OPENSSL
+	bool
+	default n
+
+config NEED_PTHREADS
+	bool
+	default n

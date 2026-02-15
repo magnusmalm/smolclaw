@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        profile: [full, minimal]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential python3-pip \
+            libcurl4-openssl-dev libevent-dev libssl-dev \
+            libreadline-dev libsqlite3-dev
+          pip3 install kconfiglib
+
+      - name: Install clang
+        if: matrix.compiler == 'clang'
+        run: sudo apt-get install -y clang
+
+      - name: Configure (minimal)
+        if: matrix.profile == 'minimal'
+        run: |
+          cp configs/defconfig.minimal .config
+          cmake -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Configure (full)
+        if: matrix.profile == 'full'
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Binary info
+        run: |
+          ls -lh build/smolclaw
+          file build/smolclaw
+          ./build/smolclaw version

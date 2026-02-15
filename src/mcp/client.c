@@ -1,0 +1,586 @@
+/*
+ * mcp/client.c - MCP (Model Context Protocol) client
+ *
+ * Manages an MCP server subprocess. Communication is JSON-RPC 2.0 over
+ * newline-delimited JSON on stdin (write) / stdout (read).
+ */
+
+#include "mcp/client.h"
+
+#include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/select.h>
+#include <sys/wait.h>
+
+#include "cJSON.h"
+#include "constants.h"
+#include "logger.h"
+#include "util/str.h"
+#include "util/json_helpers.h"
+
+#define LOG_TAG "mcp"
+
+struct sc_mcp_client {
+    char *name;
+    pid_t pid;
+    int stdin_fd;    /* write to server */
+    int stdout_fd;   /* read from server */
+    int next_id;
+    int alive;
+};
+
+/* ---------- Internal helpers ---------- */
+
+/* Send a JSON object as a newline-delimited message to the server's stdin */
+static int mcp_send(sc_mcp_client_t *client, cJSON *msg)
+{
+    char *str = cJSON_PrintUnformatted(msg);
+    if (!str) return -1;
+
+    size_t len = strlen(str);
+    /* Append newline */
+    char *buf = malloc(len + 2);
+    if (!buf) { free(str); return -1; }
+    memcpy(buf, str, len);
+    buf[len] = '\n';
+    buf[len + 1] = '\0';
+    free(str);
+
+    ssize_t written = 0;
+    size_t total = len + 1;
+    while ((size_t)written < total) {
+        ssize_t n = write(client->stdin_fd, buf + written, total - (size_t)written);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            SC_LOG_ERROR(LOG_TAG, "[%s] write failed: %s", client->name, strerror(errno));
+            free(buf);
+            return -1;
+        }
+        written += n;
+    }
+    free(buf);
+    return 0;
+}
+
+/* Read a single newline-delimited line from server stdout with timeout.
+ * Returns parsed cJSON or NULL on error/timeout. Caller owns result. */
+static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
+{
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+
+    int remaining_ms = timeout_ms;
+
+    while (remaining_ms > 0) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(client->stdout_fd, &fds);
+
+        struct timeval tv;
+        tv.tv_sec = remaining_ms / 1000;
+        tv.tv_usec = (remaining_ms % 1000) * 1000;
+
+        int ret = select(client->stdout_fd + 1, &fds, NULL, NULL, &tv);
+        if (ret < 0) {
+            if (errno == EINTR) continue;
+            SC_LOG_ERROR(LOG_TAG, "[%s] select failed: %s", client->name, strerror(errno));
+            sc_strbuf_free(&sb);
+            return NULL;
+        }
+        if (ret == 0) {
+            SC_LOG_ERROR(LOG_TAG, "[%s] read timeout (%dms)", client->name, timeout_ms);
+            sc_strbuf_free(&sb);
+            return NULL;
+        }
+
+        char buf[4096];
+        ssize_t n = read(client->stdout_fd, buf, sizeof(buf));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            SC_LOG_ERROR(LOG_TAG, "[%s] read failed: %s", client->name, strerror(errno));
+            sc_strbuf_free(&sb);
+            return NULL;
+        }
+        if (n == 0) {
+            SC_LOG_ERROR(LOG_TAG, "[%s] server closed stdout", client->name);
+            sc_strbuf_free(&sb);
+            return NULL;
+        }
+
+        /* Append to buffer, check for newline */
+        for (ssize_t i = 0; i < n; i++) {
+            if (buf[i] == '\n') {
+                /* Parse the accumulated line */
+                char *line = sc_strbuf_finish(&sb);
+                if (!line || line[0] == '\0') {
+                    free(line);
+                    sc_strbuf_init(&sb);
+                    continue; /* skip empty lines */
+                }
+                cJSON *json = cJSON_Parse(line);
+                free(line);
+                if (!json) {
+                    SC_LOG_ERROR(LOG_TAG, "[%s] failed to parse JSON response", client->name);
+                    return NULL;
+                }
+                return json;
+            }
+            sc_strbuf_append_char(&sb, buf[i]);
+
+            /* Cap response size to prevent OOM from malicious server */
+            if (sb.len > SC_MCP_MAX_RESPONSE_SIZE) {
+                SC_LOG_ERROR(LOG_TAG, "[%s] response too large", client->name);
+                sc_strbuf_free(&sb);
+                return NULL;
+            }
+        }
+
+        /* Rough timeout tracking — decrement by a guess since select consumed some */
+        remaining_ms -= 100;
+        if (remaining_ms < 100) remaining_ms = 100;
+    }
+
+    SC_LOG_ERROR(LOG_TAG, "[%s] read timeout (%dms)", client->name, timeout_ms);
+    sc_strbuf_free(&sb);
+    return NULL;
+}
+
+/* Send a JSON-RPC request and read the response */
+static cJSON *mcp_request(sc_mcp_client_t *client, const char *method,
+                           cJSON *params, int timeout_ms)
+{
+    cJSON *req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "jsonrpc", "2.0");
+    cJSON_AddNumberToObject(req, "id", client->next_id++);
+    cJSON_AddStringToObject(req, "method", method);
+    if (params)
+        cJSON_AddItemToObject(req, "params", params);
+    else
+        cJSON_AddItemToObject(req, "params", cJSON_CreateObject());
+
+    SC_LOG_DEBUG(LOG_TAG, "[%s] -> %s (id=%d)", client->name, method, client->next_id - 1);
+
+    if (mcp_send(client, req) < 0) {
+        cJSON_Delete(req);
+        return NULL;
+    }
+    cJSON_Delete(req);
+
+    /* Read response — skip notifications (no "id" field) */
+    for (int attempts = 0; attempts < 50; attempts++) {
+        cJSON *resp = mcp_read_line(client, timeout_ms);
+        if (!resp) return NULL;
+
+        /* JSON-RPC response must have "id" field */
+        if (cJSON_HasObjectItem(resp, "id")) {
+            return resp;
+        }
+
+        /* It's a notification — log and skip */
+        const char *notif_method = sc_json_get_string(resp, "method", "unknown");
+        SC_LOG_DEBUG(LOG_TAG, "[%s] skipping notification: %s", client->name, notif_method);
+        cJSON_Delete(resp);
+    }
+
+    SC_LOG_ERROR(LOG_TAG, "[%s] too many notifications without response", client->name);
+    return NULL;
+}
+
+/* Send a JSON-RPC notification (no id, no response expected) */
+static int mcp_notify(sc_mcp_client_t *client, const char *method, cJSON *params)
+{
+    cJSON *notif = cJSON_CreateObject();
+    cJSON_AddStringToObject(notif, "jsonrpc", "2.0");
+    cJSON_AddStringToObject(notif, "method", method);
+    if (params)
+        cJSON_AddItemToObject(notif, "params", params);
+
+    SC_LOG_DEBUG(LOG_TAG, "[%s] -> notification: %s", client->name, method);
+
+    int ret = mcp_send(client, notif);
+    cJSON_Delete(notif);
+    return ret;
+}
+
+/* ---------- Public API ---------- */
+
+sc_mcp_client_t *sc_mcp_client_start(const char *name,
+                                      char **command, int command_count,
+                                      char **env_keys, char **env_values,
+                                      int env_count)
+{
+    if (!name || !command || command_count < 1) return NULL;
+
+    /* Ignore SIGPIPE so pipe writes return EPIPE instead of killing us */
+    signal(SIGPIPE, SIG_IGN);
+
+    /* Create pipes: parent writes to child stdin, reads from child stdout */
+    int pipe_stdin[2];   /* [0]=child reads, [1]=parent writes */
+    int pipe_stdout[2];  /* [0]=parent reads, [1]=child writes */
+
+    if (pipe(pipe_stdin) < 0) {
+        SC_LOG_ERROR(LOG_TAG, "[%s] pipe(stdin) failed: %s", name, strerror(errno));
+        return NULL;
+    }
+    if (pipe(pipe_stdout) < 0) {
+        SC_LOG_ERROR(LOG_TAG, "[%s] pipe(stdout) failed: %s", name, strerror(errno));
+        close(pipe_stdin[0]);
+        close(pipe_stdin[1]);
+        return NULL;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        SC_LOG_ERROR(LOG_TAG, "[%s] fork failed: %s", name, strerror(errno));
+        close(pipe_stdin[0]); close(pipe_stdin[1]);
+        close(pipe_stdout[0]); close(pipe_stdout[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        /* Child process */
+        close(pipe_stdin[1]);   /* close parent's write end */
+        close(pipe_stdout[0]);  /* close parent's read end */
+
+        dup2(pipe_stdin[0], STDIN_FILENO);
+        dup2(pipe_stdout[1], STDOUT_FILENO);
+        close(pipe_stdin[0]);
+        close(pipe_stdout[1]);
+
+        /* Redirect stderr to /dev/null to prevent server logs polluting our stdout */
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+
+        /* Close inherited file descriptors (bus pipes, sockets, etc.) */
+        int max_fd = (int)sysconf(_SC_OPEN_MAX);
+        if (max_fd < 0) max_fd = 1024;
+        for (int fd = 3; fd < max_fd; fd++)
+            close(fd);
+
+        /* Block dangerous environment variables */
+        static const char *blocked_env[] = {
+            "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+            "PYTHONPATH", "RUBYLIB", "NODE_PATH", "PERL5LIB",
+            "BASH_ENV", "ENV", "SHELLOPTS",
+        };
+        for (size_t b = 0; b < sizeof(blocked_env) / sizeof(blocked_env[0]); b++)
+            unsetenv(blocked_env[b]);
+
+        /* Set environment variables */
+        for (int i = 0; i < env_count; i++) {
+            if (!env_keys[i] || !env_values[i]) continue;
+            /* Skip if it's a blocked var */
+            int skip = 0;
+            for (size_t b = 0; b < sizeof(blocked_env) / sizeof(blocked_env[0]); b++) {
+                if (strcmp(env_keys[i], blocked_env[b]) == 0) { skip = 1; break; }
+            }
+            if (!skip)
+                setenv(env_keys[i], env_values[i], 1);
+        }
+
+        /* Build argv — null-terminated */
+        char **argv = calloc((size_t)(command_count + 1), sizeof(char *));
+        if (!argv) _exit(127);
+        for (int i = 0; i < command_count; i++)
+            argv[i] = command[i];
+        argv[command_count] = NULL;
+
+        execvp(argv[0], argv);
+        _exit(127); /* exec failed */
+    }
+
+    /* Parent process */
+    close(pipe_stdin[0]);   /* close child's read end */
+    close(pipe_stdout[1]);  /* close child's write end */
+
+    sc_mcp_client_t *client = calloc(1, sizeof(*client));
+    if (!client) {
+        close(pipe_stdin[1]);
+        close(pipe_stdout[0]);
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+        return NULL;
+    }
+
+    client->name = sc_strdup(name);
+    client->pid = pid;
+    client->stdin_fd = pipe_stdin[1];
+    client->stdout_fd = pipe_stdout[0];
+    client->next_id = 1;
+    client->alive = 1;
+
+    SC_LOG_INFO(LOG_TAG, "[%s] started server (pid=%d, cmd=%s)", name, pid, command[0]);
+
+    /* Initialize handshake */
+    cJSON *init_params = cJSON_CreateObject();
+    cJSON_AddStringToObject(init_params, "protocolVersion", SC_MCP_PROTOCOL_VERSION);
+    cJSON *caps = cJSON_AddObjectToObject(init_params, "capabilities");
+    (void)caps; /* empty capabilities object */
+    cJSON *client_info = cJSON_AddObjectToObject(init_params, "clientInfo");
+    cJSON_AddStringToObject(client_info, "name", SC_NAME);
+    cJSON_AddStringToObject(client_info, "version", SC_VERSION);
+
+    cJSON *resp = mcp_request(client, "initialize", init_params, SC_MCP_INIT_TIMEOUT_MS);
+    if (!resp) {
+        SC_LOG_ERROR(LOG_TAG, "[%s] init handshake failed", name);
+        sc_mcp_client_free(client);
+        return NULL;
+    }
+
+    /* Check for error */
+    cJSON *error = cJSON_GetObjectItem(resp, "error");
+    if (error) {
+        const char *msg = sc_json_get_string(error, "message", "unknown error");
+        SC_LOG_ERROR(LOG_TAG, "[%s] init error: %s", name, msg);
+        cJSON_Delete(resp);
+        sc_mcp_client_free(client);
+        return NULL;
+    }
+
+    cJSON_Delete(resp);
+
+    /* Send initialized notification */
+    if (mcp_notify(client, "notifications/initialized", NULL) < 0) {
+        SC_LOG_WARN(LOG_TAG, "[%s] failed to send initialized notification", name);
+        /* Non-fatal — some servers may not require it */
+    }
+
+    SC_LOG_INFO(LOG_TAG, "[%s] init handshake completed", name);
+    return client;
+}
+
+sc_mcp_tool_def_t *sc_mcp_client_list_tools(sc_mcp_client_t *client, int *out_count)
+{
+    if (!client || !out_count) return NULL;
+    *out_count = 0;
+
+    cJSON *resp = mcp_request(client, "tools/list", NULL, SC_MCP_CALL_TIMEOUT_MS);
+    if (!resp) return NULL;
+
+    cJSON *error = cJSON_GetObjectItem(resp, "error");
+    if (error) {
+        const char *msg = sc_json_get_string(error, "message", "unknown error");
+        SC_LOG_ERROR(LOG_TAG, "[%s] tools/list error: %s", client->name, msg);
+        cJSON_Delete(resp);
+        return NULL;
+    }
+
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    cJSON *tools = result ? cJSON_GetObjectItem(result, "tools") : NULL;
+    if (!tools || !cJSON_IsArray(tools)) {
+        SC_LOG_WARN(LOG_TAG, "[%s] tools/list returned no tools array", client->name);
+        cJSON_Delete(resp);
+        return NULL;
+    }
+
+    int n = cJSON_GetArraySize(tools);
+    if (n == 0) {
+        cJSON_Delete(resp);
+        return NULL;
+    }
+
+    sc_mcp_tool_def_t *defs = calloc((size_t)n, sizeof(sc_mcp_tool_def_t));
+    if (!defs) {
+        cJSON_Delete(resp);
+        return NULL;
+    }
+
+    int count = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, tools) {
+        const char *tname = sc_json_get_string(item, "name", NULL);
+        if (!tname) continue;
+
+        defs[count].name = sc_strdup(tname);
+        defs[count].description = sc_strdup(
+            sc_json_get_string(item, "description", ""));
+
+        cJSON *schema = cJSON_GetObjectItem(item, "inputSchema");
+        if (schema)
+            defs[count].input_schema = cJSON_Duplicate(schema, 1);
+
+        count++;
+    }
+
+    cJSON_Delete(resp);
+    *out_count = count;
+
+    SC_LOG_INFO(LOG_TAG, "[%s] discovered %d tools", client->name, count);
+    return defs;
+}
+
+char *sc_mcp_client_call_tool(sc_mcp_client_t *client,
+                               const char *tool_name, cJSON *args,
+                               int *is_error)
+{
+    if (!client || !tool_name) {
+        if (is_error) *is_error = 1;
+        return sc_strdup("MCP client error: invalid arguments");
+    }
+    if (is_error) *is_error = 0;
+
+    if (!sc_mcp_client_is_alive(client)) {
+        if (is_error) *is_error = 1;
+        return sc_strdup("MCP server is not running");
+    }
+
+    cJSON *params = cJSON_CreateObject();
+    cJSON_AddStringToObject(params, "name", tool_name);
+    if (args)
+        cJSON_AddItemToObject(params, "arguments", cJSON_Duplicate(args, 1));
+    else
+        cJSON_AddItemToObject(params, "arguments", cJSON_CreateObject());
+
+    cJSON *resp = mcp_request(client, "tools/call", params, SC_MCP_CALL_TIMEOUT_MS);
+    if (!resp) {
+        if (is_error) *is_error = 1;
+        return sc_strdup("MCP server did not respond");
+    }
+
+    /* Check JSON-RPC error */
+    cJSON *error = cJSON_GetObjectItem(resp, "error");
+    if (error) {
+        const char *msg = sc_json_get_string(error, "message", "unknown error");
+        if (is_error) *is_error = 1;
+        char *result = sc_strdup(msg);
+        cJSON_Delete(resp);
+        return result;
+    }
+
+    cJSON *result = cJSON_GetObjectItem(resp, "result");
+    if (!result) {
+        cJSON_Delete(resp);
+        if (is_error) *is_error = 1;
+        return sc_strdup("MCP server returned empty result");
+    }
+
+    /* Check isError flag in result */
+    int tool_error = sc_json_get_bool(result, "isError", 0);
+    if (is_error) *is_error = tool_error;
+
+    /* Extract text content from content array */
+    cJSON *content = cJSON_GetObjectItem(result, "content");
+    if (content && cJSON_IsArray(content)) {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+
+        cJSON *piece;
+        cJSON_ArrayForEach(piece, content) {
+            const char *type = sc_json_get_string(piece, "type", "");
+            if (strcmp(type, "text") == 0) {
+                const char *text = sc_json_get_string(piece, "text", "");
+                if (sb.len > 0) sc_strbuf_append(&sb, "\n");
+                sc_strbuf_append(&sb, text);
+            }
+        }
+
+        char *text = sc_strbuf_finish(&sb);
+        cJSON_Delete(resp);
+        return text;
+    }
+
+    cJSON_Delete(resp);
+    return sc_strdup("");
+}
+
+int sc_mcp_client_is_alive(sc_mcp_client_t *client)
+{
+    if (!client || !client->alive) return 0;
+
+    int status;
+    pid_t ret = waitpid(client->pid, &status, WNOHANG);
+    if (ret == 0) return 1;  /* still running */
+
+    /* Process exited */
+    client->alive = 0;
+    if (WIFEXITED(status)) {
+        SC_LOG_WARN(LOG_TAG, "[%s] server exited (code=%d)",
+                    client->name, WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        SC_LOG_WARN(LOG_TAG, "[%s] server killed by signal %d",
+                    client->name, WTERMSIG(status));
+    }
+    return 0;
+}
+
+void sc_mcp_client_stop(sc_mcp_client_t *client)
+{
+    if (!client) return;
+
+    /* Close stdin to signal server to exit */
+    if (client->stdin_fd >= 0) {
+        close(client->stdin_fd);
+        client->stdin_fd = -1;
+    }
+
+    if (!client->alive) goto close_stdout;
+
+    /* Wait briefly for graceful exit */
+    int waited_ms = 0;
+    while (waited_ms < SC_MCP_SHUTDOWN_WAIT_MS) {
+        int status;
+        pid_t ret = waitpid(client->pid, &status, WNOHANG);
+        if (ret != 0) {
+            client->alive = 0;
+            SC_LOG_INFO(LOG_TAG, "[%s] server stopped gracefully", client->name);
+            goto close_stdout;
+        }
+        usleep(50000); /* 50ms */
+        waited_ms += 50;
+    }
+
+    /* SIGTERM */
+    SC_LOG_WARN(LOG_TAG, "[%s] sending SIGTERM to pid %d", client->name, client->pid);
+    kill(client->pid, SIGTERM);
+    usleep(500000); /* 500ms grace */
+
+    {
+        int status;
+        pid_t ret = waitpid(client->pid, &status, WNOHANG);
+        if (ret != 0) {
+            client->alive = 0;
+            SC_LOG_INFO(LOG_TAG, "[%s] server stopped after SIGTERM", client->name);
+            goto close_stdout;
+        }
+    }
+
+    /* SIGKILL */
+    SC_LOG_WARN(LOG_TAG, "[%s] sending SIGKILL to pid %d", client->name, client->pid);
+    kill(client->pid, SIGKILL);
+    waitpid(client->pid, NULL, 0);
+    client->alive = 0;
+
+close_stdout:
+    if (client->stdout_fd >= 0) {
+        close(client->stdout_fd);
+        client->stdout_fd = -1;
+    }
+}
+
+void sc_mcp_client_free(sc_mcp_client_t *client)
+{
+    if (!client) return;
+    sc_mcp_client_stop(client);
+    free(client->name);
+    free(client);
+}
+
+void sc_mcp_tool_defs_free(sc_mcp_tool_def_t *defs, int count)
+{
+    if (!defs) return;
+    for (int i = 0; i < count; i++) {
+        free(defs[i].name);
+        free(defs[i].description);
+        if (defs[i].input_schema)
+            cJSON_Delete(defs[i].input_schema);
+    }
+    free(defs);
+}

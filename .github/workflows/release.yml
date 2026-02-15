@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential python3-pip \
+            libcurl4-openssl-dev libevent-dev libssl-dev \
+            libreadline-dev libsqlite3-dev
+          pip3 install kconfiglib
+
+      - name: Install QEMU for cross-arch testing
+        if: matrix.arch != 'x86_64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Cache musl toolchain
+        uses: actions/cache@v4
+        with:
+          path: deps/musl-toolchain-${{ matrix.arch }}
+          key: musl-toolchain-${{ matrix.arch }}-${{ hashFiles('scripts/build_musl_deps.sh') }}
+
+      - name: Cache musl static deps
+        uses: actions/cache@v4
+        with:
+          path: deps/musl-static-${{ matrix.arch }}
+          key: musl-static-${{ matrix.arch }}-${{ hashFiles('scripts/build_musl_deps.sh') }}
+
+      - name: Build musl static deps
+        run: ./scripts/build_musl_deps.sh ${{ matrix.arch }}
+
+      - name: Configure
+        run: |
+          TOOLCHAIN="deps/musl-toolchain-${{ matrix.arch }}"
+          TRIPLE=$(ls "$TOOLCHAIN/bin/" | head -1 | sed 's/-gcc$//')
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSC_MUSL_STATIC=ON \
+            -DSC_STRIP=ON \
+            -DCMAKE_C_COMPILER="$TOOLCHAIN/bin/${TRIPLE}-gcc" \
+            -DCMAKE_PREFIX_PATH="$(pwd)/deps/musl-static-${{ matrix.arch }}"
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test (native)
+        if: matrix.arch == 'x86_64'
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Binary info
+        run: |
+          ls -lh build/smolclaw
+          file build/smolclaw
+
+      - name: Package
+        run: |
+          ARTIFACT="smolclaw-${GITHUB_REF_NAME}-linux-${{ matrix.arch }}"
+          mkdir -p "$ARTIFACT"
+          cp build/smolclaw "$ARTIFACT/"
+          cp LICENSE README.md "$ARTIFACT/"
+          tar czf "${ARTIFACT}.tar.gz" "$ARTIFACT"
+          sha256sum "${ARTIFACT}.tar.gz" > "${ARTIFACT}.tar.gz.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smolclaw-${{ matrix.arch }}
+          path: smolclaw-*.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            smolclaw-*.tar.gz
+            smolclaw-*.tar.gz.sha256
