@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <curl/curl.h>
+#include "util/curl_common.h"
 
 #include "cJSON.h"
 #include "constants.h"
@@ -87,7 +88,7 @@ static cJSON *discord_post(const discord_data_t *dd, const char *endpoint,
 
     char *body_str = cJSON_PrintUnformatted(payload);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) { free(url); free(body_str); return NULL; }
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -389,7 +390,7 @@ static char *get_gateway_url(const discord_data_t *dd)
     sc_strbuf_appendf(&url_buf, "%s/gateway/bot", dd->api_base);
     char *url = sc_strbuf_finish(&url_buf);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) { free(url); return NULL; }
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");

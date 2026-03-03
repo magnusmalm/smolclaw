@@ -12,6 +12,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <curl/curl.h>
+#include "util/curl_common.h"
 
 #include "cJSON.h"
 #include "constants.h"
@@ -80,7 +81,7 @@ char *sc_transcribe(sc_transcriber_t *t, const char *file_path)
 
     SC_LOG_INFO(VOICE_TAG, "Transcribing: %s", file_path);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return NULL;
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -200,7 +201,7 @@ char *sc_download_to_temp(const char *url, const char *auth_header)
         return NULL;
     }
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) {
         fclose(fp);
         remove(tmp_path);

@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <curl/curl.h>
+#include "util/curl_common.h"
 
 #include "cJSON.h"
 #include "constants.h"
@@ -64,7 +65,7 @@ static cJSON *slack_api_post(const slack_data_t *sd, const char *method,
 
     char *body = cJSON_PrintUnformatted(payload);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) { free(url); free(body); return NULL; }
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -114,7 +115,7 @@ static cJSON *slack_api_post(const slack_data_t *sd, const char *method,
 /* Get Socket Mode WSS URL via apps.connections.open */
 static char *slack_get_wss_url(const slack_data_t *sd)
 {
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return NULL;
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");

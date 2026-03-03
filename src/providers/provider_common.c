@@ -7,28 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <unistd.h>
 
 #include "providers/provider_common.h"
+#include "util/curl_common.h"
 #include "constants.h"
-
-static const char *sc_find_ca_bundle(void)
-{
-    const char *env = getenv("CURL_CA_BUNDLE");
-    if (env && access(env, R_OK) == 0) return env;
-
-    static const char *paths[] = {
-        "/etc/ssl/certs/ca-certificates.crt",  /* Debian/Ubuntu */
-        "/etc/pki/tls/certs/ca-bundle.crt",    /* RHEL/Fedora */
-        "/etc/ssl/cert.pem",                    /* Alpine/macOS */
-        "/etc/ssl/certs/ca-bundle.crt",         /* openSUSE */
-        NULL
-    };
-    for (const char **p = paths; *p; p++) {
-        if (access(*p, R_OK) == 0) return *p;
-    }
-    return NULL;
-}
 
 int sc_curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                         curl_off_t ultotal, curl_off_t ulnow)
@@ -85,15 +67,7 @@ void sc_provider_trim_base_url(char *url)
 
 CURL *sc_provider_init_curl(void)
 {
-    CURL *curl = curl_easy_init();
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-        curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-        const char *ca = sc_find_ca_bundle();
-        if (ca)
-            curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
-    }
-    return curl;
+    return sc_curl_init();
 }
 
 struct curl_slist *sc_provider_setup_curl(CURL *curl, const char *url,
@@ -107,11 +81,7 @@ struct curl_slist *sc_provider_setup_curl(CURL *curl, const char *url,
                                            const char **extra_headers)
 {
     curl_easy_reset(curl);
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-    const char *ca = sc_find_ca_bundle();
-    if (ca)
-        curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
+    sc_curl_apply_defaults(curl);
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");

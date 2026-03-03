@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <curl/curl.h>
 
+#include "util/curl_common.h"
 #include "tools/web.h"
 #include "audit.h"
 #include "tools/types.h"
@@ -73,7 +74,7 @@ static void curl_buf_free(curl_buf_t *buf)
 static char *http_get(const char *url, const char *const *headers, int header_count,
                       long *status_out, const char *pin_host, const char *pin_ip)
 {
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return NULL;
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -155,7 +156,7 @@ static char *http_get_no_follow(const char *url, const char *const *headers, int
                                  long *status_out, const char *pin_host, const char *pin_ip,
                                  char **redirect_url_out)
 {
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return NULL;
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -237,7 +238,7 @@ static char *http_get_no_follow(const char *url, const char *const *headers, int
 /* URL-encode a string. Caller owns result. */
 static char *url_encode(const char *str)
 {
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return sc_strdup(str);
     char *encoded = curl_easy_escape(curl, str, 0);
     char *result = sc_strdup(encoded);
@@ -507,7 +508,7 @@ static char *parse_ddg_results(const char *html, const char *query, int max_resu
         char *actual_url = url_str;
         char *uddg = strstr(url_str, "uddg=");
         if (uddg) {
-            CURL *dec = curl_easy_init();
+            CURL *dec = sc_curl_init();
             if (dec) {
                 int out_len = 0;
                 char *decoded = curl_easy_unescape(dec, uddg + 5, 0, &out_len);

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <curl/curl.h>
+#include "util/curl_common.h"
 
 #include <unistd.h>
 
@@ -68,7 +69,7 @@ static cJSON *telegram_get(const telegram_data_t *td, const char *method,
     }
     char *url = sc_strbuf_finish(&url_buf);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) { free(url); return NULL; }
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
@@ -110,7 +111,7 @@ static cJSON *telegram_post(const telegram_data_t *td, const char *method,
     char *url = build_url(td, method);
     char *body_str = cJSON_PrintUnformatted(payload);
 
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) { free(url); free(body_str); return NULL; }
 
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");

@@ -178,6 +178,7 @@ set(SC_SOURCES
     src/util/uuid.c
     src/util/base64.c
     src/util/secrets.c
+    src/util/curl_common.c
     src/util/prompt_guard.c
     src/util/sandbox.c
     src/logger.c
