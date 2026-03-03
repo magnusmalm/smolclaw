@@ -18,4 +18,9 @@ CURL *sc_curl_init(void);
 /* Re-apply protocol restrictions and CA bundle after curl_easy_reset(). */
 void sc_curl_apply_defaults(CURL *curl);
 
+/* Find the CA certificate bundle path. Checks CURL_CA_BUNDLE and
+ * SSL_CERT_FILE env vars, then probes known distro paths.
+ * Returns NULL if no bundle found. */
+const char *sc_curl_find_ca_bundle(void);
+
 #endif /* SC_CURL_COMMON_H */

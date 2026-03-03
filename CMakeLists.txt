@@ -373,6 +373,7 @@ set(TEST_SOURCES
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_memory_tools.c
+    tests/test_curl_common.c
 )
 
 if(SC_ENABLE_STREAMING)
