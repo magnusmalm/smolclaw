@@ -107,6 +107,11 @@ struct curl_slist *sc_provider_setup_curl(CURL *curl, const char *url,
                                            const char **extra_headers)
 {
     curl_easy_reset(curl);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+    const char *ca = sc_find_ca_bundle();
+    if (ca)
+        curl_easy_setopt(curl, CURLOPT_CAINFO, ca);
 
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "Content-Type: application/json");
