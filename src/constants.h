@@ -71,6 +71,8 @@ static inline int sc_is_internal_channel(const char *channel) {
 
 /* Web fetch */
 #define SC_WEB_MAX_REDIRECTS     5
+#define SC_WEB_FETCH_RETRIES     2  /* retry once on transient failure */
+#define SC_WEB_FETCH_RETRY_DELAY 1  /* seconds between retries */
 
 /* Graceful shutdown — strong definition in main.c, weak fallback in logger.c */
 int sc_shutdown_requested(void);

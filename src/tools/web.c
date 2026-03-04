@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <unistd.h>
 #include <curl/curl.h>
 
 #include "util/curl_common.h"
@@ -25,6 +26,98 @@
 #include "logger.h"
 #include "constants.h"
 #include "cJSON.h"
+
+/* ---------- realistic browser headers ---------- */
+
+/* Rotate through recent Chrome UAs to avoid fingerprinting on a stale version */
+static const char *const BROWSER_UAS[] = {
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+};
+#define NUM_UAS (sizeof(BROWSER_UAS) / sizeof(BROWSER_UAS[0]))
+
+static const char *get_browser_ua(void)
+{
+    static unsigned idx = 0;
+    return BROWSER_UAS[idx++ % NUM_UAS];
+}
+
+/* Standard browser headers that real Chrome sends */
+static struct curl_slist *append_browser_headers(struct curl_slist *list)
+{
+    list = curl_slist_append(list, "Accept: text/html,application/xhtml+xml,"
+        "application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8");
+    list = curl_slist_append(list, "Accept-Language: en-US,en;q=0.9");
+    list = curl_slist_append(list, "Accept-Encoding: gzip, deflate, br");
+    list = curl_slist_append(list, "Sec-Fetch-Dest: document");
+    list = curl_slist_append(list, "Sec-Fetch-Mode: navigate");
+    list = curl_slist_append(list, "Sec-Fetch-Site: none");
+    list = curl_slist_append(list, "Sec-Fetch-User: ?1");
+    list = curl_slist_append(list, "Upgrade-Insecure-Requests: 1");
+    return list;
+}
+
+/* Build a Google search referer from a URL's domain.
+ * Returns static "" for IPs/localhost, or an allocated string. Caller frees. */
+static char *generate_referer(const char *url)
+{
+    const char *start = strstr(url, "://");
+    if (!start) return NULL;
+    start += 3;
+    /* Skip userinfo */
+    const char *at = strchr(start, '@');
+    const char *slash = strchr(start, '/');
+    if (at && (!slash || at < slash)) start = at + 1;
+    if (*start == '[') return NULL; /* IPv6 literal */
+
+    const char *end = start;
+    while (*end && *end != '/' && *end != ':' && *end != '?') end++;
+    size_t len = (size_t)(end - start);
+    if (len == 0) return NULL;
+
+    /* Skip IP addresses and localhost */
+    int all_digits_dots = 1;
+    for (size_t i = 0; i < len; i++) {
+        if (!isdigit((unsigned char)start[i]) && start[i] != '.')
+            { all_digits_dots = 0; break; }
+    }
+    if (all_digits_dots) return NULL;
+    if (len == 9 && strncmp(start, "localhost", 9) == 0) return NULL;
+
+    /* Extract the main domain (strip subdomain, keep TLD).
+     * For "www.example.com" → "example", "sub.deep.example.co.uk" → "example" */
+    char host[256];
+    if (len >= sizeof(host)) return NULL;
+    memcpy(host, start, len);
+    host[len] = '\0';
+
+    /* Find second-to-last dot to get domain name */
+    const char *last_dot = strrchr(host, '.');
+    if (!last_dot || last_dot == host) {
+        /* No TLD (e.g. "localhost") — use as-is */
+        char buf[512];
+        snprintf(buf, sizeof(buf), "https://www.google.com/search?q=%s", host);
+        return sc_strdup(buf);
+    }
+    const char *domain_start = host;
+    for (const char *p = last_dot - 1; p >= host; p--) {
+        if (*p == '.') { domain_start = p + 1; break; }
+    }
+    /* domain_start now points to "example.com" or similar — extract just the name */
+    size_t dlen = (size_t)(last_dot - domain_start);
+    if (dlen == 0 || dlen >= 128) return NULL;
+    char domain[128];
+    memcpy(domain, domain_start, dlen);
+    domain[dlen] = '\0';
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), "https://www.google.com/search?q=%s", domain);
+    return sc_strdup(buf);
+}
 
 /* ---------- curl write callback ---------- */
 
@@ -90,9 +183,8 @@ static char *http_get(const char *url, const char *const *headers, int header_co
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, get_browser_ua());
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, ""); /* let curl handle */
 
     /* Pin DNS resolution to prevent rebinding between check and fetch */
     struct curl_slist *resolve_list = NULL;
@@ -171,9 +263,8 @@ static char *http_get_no_follow(const char *url, const char *const *headers, int
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT,
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, get_browser_ua());
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
 
     /* Pin DNS resolution to prevent rebinding between check and fetch */
     struct curl_slist *resolve_list = NULL;
@@ -200,7 +291,16 @@ static char *http_get_no_follow(const char *url, const char *const *headers, int
         curl_easy_setopt(curl, CURLOPT_RESOLVE, resolve_list);
     }
 
-    struct curl_slist *hlist = NULL;
+    /* Browser-like headers: Accept, Sec-Fetch-*, etc. */
+    struct curl_slist *hlist = append_browser_headers(NULL);
+    /* Google search referer for organic-looking traffic */
+    char *referer = generate_referer(url);
+    if (referer) {
+        char refhdr[600];
+        snprintf(refhdr, sizeof(refhdr), "Referer: %s", referer);
+        hlist = curl_slist_append(hlist, refhdr);
+        free(referer);
+    }
     for (int i = 0; i < header_count; i++)
         hlist = curl_slist_append(hlist, headers[i]);
     if (hlist)
@@ -899,47 +999,66 @@ static sc_tool_result_t *web_fetch_execute(sc_tool_t *self, cJSON *args, void *c
     int max_chars = sc_json_get_int(args, "maxChars", d->max_chars);
     if (max_chars < 100) max_chars = d->max_chars;
 
-    /* Manual redirect loop with SSRF re-check at each hop */
-    char *current_url = sc_strdup(url_str);
+    /* Retry loop with redirect following and SSRF re-check at each hop */
     char *body = NULL;
     long status = 0;
 
-    for (int hop = 0; hop <= SC_WEB_MAX_REDIRECTS; hop++) {
-        ssrf_result_t hop_ssrf = (hop == 0) ? ssrf : check_ssrf(current_url);
-        if (hop_ssrf.error) {
-            sc_audit_log_ext("web_fetch", hop_ssrf.error, 1, 0,
-                             NULL, NULL, "ssrf_redirect");
-            free(current_url);
-            return sc_tool_result_error(hop_ssrf.error);
+    for (int attempt = 0; attempt <= SC_WEB_FETCH_RETRIES; attempt++) {
+        if (attempt > 0)
+            sleep(SC_WEB_FETCH_RETRY_DELAY);
+
+        char *current_url = sc_strdup(url_str);
+        int fetch_ok = 0;
+
+        for (int hop = 0; hop <= SC_WEB_MAX_REDIRECTS; hop++) {
+            ssrf_result_t hop_ssrf = (hop == 0) ? ssrf : check_ssrf(current_url);
+            if (hop_ssrf.error) {
+                sc_audit_log_ext("web_fetch", hop_ssrf.error, 1, 0,
+                                 NULL, NULL, "ssrf_redirect");
+                free(current_url);
+                return sc_tool_result_error(hop_ssrf.error);
+            }
+
+            const char *pin_host = hop_ssrf.hostname[0] ? hop_ssrf.hostname : NULL;
+            const char *pin_ip = hop_ssrf.resolved_ip[0] ? hop_ssrf.resolved_ip : NULL;
+
+            char *redirect_url = NULL;
+            body = http_get_no_follow(current_url, NULL, 0, &status,
+                                       pin_host, pin_ip, &redirect_url);
+
+            if (!body && !redirect_url) {
+                /* Transient failure — break to retry loop */
+                break;
+            }
+
+            if (redirect_url) {
+                free(body);
+                body = NULL;
+                free(current_url);
+                current_url = redirect_url;
+                continue;
+            }
+
+            fetch_ok = 1;
+            break; /* Not a redirect — we have the body */
         }
 
-        const char *pin_host = hop_ssrf.hostname[0] ? hop_ssrf.hostname : NULL;
-        const char *pin_ip = hop_ssrf.resolved_ip[0] ? hop_ssrf.resolved_ip : NULL;
+        free(current_url);
 
-        char *redirect_url = NULL;
-        body = http_get_no_follow(current_url, NULL, 0, &status,
-                                   pin_host, pin_ip, &redirect_url);
+        if (fetch_ok && body)
+            break;
 
-        if (!body && !redirect_url) {
-            free(current_url);
-            return sc_tool_result_error("request failed");
-        }
+        /* Clean up before retry */
+        free(body);
+        body = NULL;
 
-        if (redirect_url) {
-            free(body);
-            body = NULL;
-            free(current_url);
-            current_url = redirect_url;
-            continue;
-        }
-
-        break; /* Not a redirect — we have the body */
+        if (attempt < SC_WEB_FETCH_RETRIES)
+            sc_log(SC_LOG_WARN, "web_fetch: attempt %d failed, retrying...",
+                   attempt + 1);
     }
 
-    free(current_url);
-
     if (!body)
-        return sc_tool_result_error("too many redirects");
+        return sc_tool_result_error("request failed after retries");
 
     /* Determine content type heuristically and extract text */
     char *text;
