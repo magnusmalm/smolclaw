@@ -74,7 +74,7 @@ static void test_cron_add_list_remove(void)
     ASSERT_INT_EQ(count, 1);
 
     /* Add a second job */
-    sc_cron_schedule_t sched2 = { .kind = "at", .at_ms = 9999999999L };
+    sc_cron_schedule_t sched2 = { .kind = "at", .at_ms = 2000000000L };
     sc_cron_job_t *job2 = sc_cron_service_add_job(cs, "at-job", sched2,
                                                     "at message", 0, NULL, NULL);
     ASSERT_NOT_NULL(job2);
