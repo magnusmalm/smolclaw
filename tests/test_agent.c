@@ -694,6 +694,81 @@ static void test_agent_multi_tool_calls(void)
     destroy_test_agent(&ctx);
 }
 
+static void test_agent_hourly_rate_limit(void)
+{
+    /* Cross-turn rate limiting: hourly tool call cap */
+    test_agent_ctx_t ctx = create_test_agent(100);
+    ctx.agent->max_tool_calls_per_hour = 3;
+
+    sc_tool_t *tool = calloc(1, sizeof(*tool));
+    tool->name = "echo_test";
+    tool->description = "A test tool";
+    tool->parameters = mock_tool_params;
+    tool->execute = mock_tool_exec;
+    tool->destroy = mock_tool_destroy;
+    sc_tool_registry_register(ctx.agent->tools, tool);
+
+    mock_tool_executed = 0;
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+
+    /* Turn 1: 2 tool calls (within limit) */
+    cJSON *args1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(args1, "query", "a");
+    cJSON *args2 = cJSON_CreateObject();
+    cJSON_AddStringToObject(args2, "query", "b");
+    sc_tool_call_t calls1[2] = {
+        { .id = "c1", .name = "echo_test", .arguments = args1 },
+        { .id = "c2", .name = "echo_test", .arguments = args2 },
+    };
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls1, .tool_call_count = 2, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Turn 1 done.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *r1 = sc_agent_process_direct(ctx.agent, "First turn", "test-hourly");
+    ASSERT_NOT_NULL(r1);
+    ASSERT_STR_EQ(r1, "Turn 1 done.");
+    ASSERT_INT_EQ(mock_tool_executed, 2);
+    free(r1);
+
+    /* Turn 2: 2 more tool calls — should hit limit after 1 (total would be 4 > 3) */
+    cJSON *args3 = cJSON_CreateObject();
+    cJSON_AddStringToObject(args3, "query", "c");
+    cJSON *args4 = cJSON_CreateObject();
+    cJSON_AddStringToObject(args4, "query", "d");
+    sc_tool_call_t calls2[2] = {
+        { .id = "c3", .name = "echo_test", .arguments = args3 },
+        { .id = "c4", .name = "echo_test", .arguments = args4 },
+    };
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls2, .tool_call_count = 2, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Should not reach.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+    ctx.mpd->call_index = 0;
+    ctx.mpd->chat_call_count = 0;
+
+    char *r2 = sc_agent_process_direct(ctx.agent, "Second turn", "test-hourly");
+    ASSERT_NOT_NULL(r2);
+    ASSERT(strstr(r2, "hourly tool call limit") != NULL,
+           "Should stop with hourly limit message");
+
+    free(r2);
+    cJSON_Delete(args1);
+    cJSON_Delete(args2);
+    cJSON_Delete(args3);
+    cJSON_Delete(args4);
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -711,6 +786,7 @@ int main(void)
     RUN_TEST(test_session_summarization);
     RUN_TEST(test_agent_tool_call_limit);
     RUN_TEST(test_agent_multi_tool_calls);
+    RUN_TEST(test_agent_hourly_rate_limit);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

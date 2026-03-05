@@ -255,6 +255,13 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
 #define SC_SECCOMP_JEQ(nr, i) \
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), (SC_SECCOMP_NSYSCALLS - (i)), 0)
 
+/*
+ * KNOWN LIMITATION: This is a denylist (block specific syscalls, allow all
+ * others). New kernel syscalls are automatically allowed. For high-security
+ * deployments, consider an allowlist-based seccomp policy instead. The
+ * denylist approach is chosen here for broad compatibility — an allowlist
+ * would break many common tools (git, compilers, package managers, etc.).
+ */
 static struct sock_filter sc_seccomp_filter[] = {
     /* [0] Load architecture */
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),

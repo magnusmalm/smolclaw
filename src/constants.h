@@ -55,6 +55,7 @@ static inline int sc_is_internal_channel(const char *channel) {
 #define SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN 50
 #define SC_DEFAULT_MAX_TURN_SECS           300  /* 5 minutes */
 #define SC_DEFAULT_MAX_OUTPUT_TOTAL         500000  /* 500 KB cumulative tool output */
+#define SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR 200
 
 /* Gateway rate limiting */
 #define SC_DEFAULT_RATE_LIMIT_PER_MINUTE   20

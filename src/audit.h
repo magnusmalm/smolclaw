@@ -17,4 +17,7 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
                       const char *channel, const char *user_id,
                       const char *event);
 
+/* Set the current LLM model for inclusion in audit log entries. */
+void sc_audit_set_model(const char *model);
+
 #endif /* SC_AUDIT_H */

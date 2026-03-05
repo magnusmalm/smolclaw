@@ -352,6 +352,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_tool_calls_per_turn = cfg->max_tool_calls_per_turn;
     agent->max_turn_secs = cfg->max_turn_secs;
     agent->max_output_total = cfg->max_output_total;
+    agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
     agent->running = 0;
 
@@ -506,6 +507,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_tool_calls_per_turn = cfg->max_tool_calls_per_turn;
     agent->max_turn_secs = cfg->max_turn_secs;
     agent->max_output_total = cfg->max_output_total;
+    agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;
     agent->max_fetch_chars = cfg->max_fetch_chars;

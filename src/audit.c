@@ -19,6 +19,7 @@
 #define LOG_TAG "audit"
 
 static FILE *audit_file;
+static const char *audit_model;  /* current LLM model, set per-turn */
 
 /* Ensure parent directory exists (single level) */
 static void ensure_parent_dir(const char *path)
@@ -128,6 +129,10 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
         fputs(",\"user\":", audit_file);
         write_json_string(audit_file, user_id);
     }
+    if (audit_model) {
+        fputs(",\"model\":", audit_file);
+        write_json_string(audit_file, audit_model);
+    }
     fputs("}\n", audit_file);
     fflush(audit_file);
 }
@@ -136,4 +141,9 @@ void sc_audit_log(const char *tool, const char *args_summary,
                   int is_error, long ms)
 {
     sc_audit_log_ext(tool, args_summary, is_error, ms, NULL, NULL, NULL);
+}
+
+void sc_audit_set_model(const char *model)
+{
+    audit_model = model;
 }

@@ -25,6 +25,72 @@
 #include "analytics.h"
 #endif
 
+/* ---------- Cross-turn rate tracking ---------- */
+
+#define SC_HOURLY_SLOTS 16
+
+typedef struct {
+    uint32_t key_hash;
+    int tool_calls;
+    time_t window_start;
+} sc_hourly_slot_t;
+
+static sc_hourly_slot_t hourly_slots[SC_HOURLY_SLOTS];
+
+static uint32_t fnv1a_str(const char *s)
+{
+    uint32_t h = 2166136261u;
+    for (; s && *s; s++)
+        h = (h ^ (uint8_t)*s) * 16777619u;
+    return h;
+}
+
+/* Record tool calls for cross-turn tracking. Returns remaining budget (< 0 if over). */
+static int hourly_record(const char *session_key, int calls, int limit)
+{
+    if (limit <= 0) return limit;  /* disabled */
+
+    uint32_t h = fnv1a_str(session_key);
+    time_t now = time(NULL);
+    int oldest = 0;
+    time_t oldest_time = now + 1;
+
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        if (hourly_slots[i].key_hash == h &&
+            (now - hourly_slots[i].window_start) < 3600) {
+            hourly_slots[i].tool_calls += calls;
+            return limit - hourly_slots[i].tool_calls;
+        }
+        if (hourly_slots[i].window_start < oldest_time) {
+            oldest_time = hourly_slots[i].window_start;
+            oldest = i;
+        }
+    }
+
+    /* Expired or new — use oldest slot */
+    hourly_slots[oldest].key_hash = h;
+    hourly_slots[oldest].tool_calls = calls;
+    hourly_slots[oldest].window_start = now;
+    return limit - calls;
+}
+
+/* Check hourly budget without recording. Returns remaining budget. */
+static int hourly_remaining(const char *session_key, int limit)
+{
+    if (limit <= 0) return limit;
+
+    uint32_t h = fnv1a_str(session_key);
+    time_t now = time(NULL);
+
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        if (hourly_slots[i].key_hash == h &&
+            (now - hourly_slots[i].window_start) < 3600) {
+            return limit - hourly_slots[i].tool_calls;
+        }
+    }
+    return limit;
+}
+
 /* ---------- Helpers ---------- */
 
 static int is_valid_response(const sc_llm_response_t *resp)
@@ -110,6 +176,14 @@ static const char *check_turn_limits(const sc_agent_t *agent,
         SC_LOG_WARN("agent", "Output size limit reached (%d bytes)",
                     agent->max_output_total);
         return "Stopped: cumulative output size limit exceeded.";
+    }
+    if (agent->max_tool_calls_per_hour > 0 &&
+        hourly_remaining(tc->session_key, agent->max_tool_calls_per_hour) <= 0) {
+        SC_LOG_WARN("agent", "Hourly tool call limit reached (%d/hour)",
+                    agent->max_tool_calls_per_hour);
+        sc_audit_log_ext("agent", "hourly_tool_limit", 1, 0,
+                         tc->channel, tc->chat_id, "rate_limit");
+        return "Stopped: hourly tool call limit exceeded. Try again later.";
     }
     return NULL;
 }
@@ -319,6 +393,7 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
     for (int t = 0; t < resp->tool_call_count; t++) {
         sc_tool_call_t *call = &resp->tool_calls[t];
         tc->total_tool_calls++;
+        hourly_record(tc->session_key, 1, agent->max_tool_calls_per_hour);
 
         if (sc_shutdown_requested()) {
             SC_LOG_INFO("agent", "Shutdown requested, aborting turn");
@@ -433,6 +508,8 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            const char *channel, const char *chat_id,
                            int *out_iterations)
 {
+    sc_audit_set_model(model);
+
     int iteration = 0;
     char *final_content = NULL;
 

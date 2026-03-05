@@ -137,6 +137,9 @@ typedef struct {
     int max_turn_secs;
     int max_output_total;
 
+    /* Cross-turn rate limiting */
+    int max_tool_calls_per_hour;
+
     /* Gateway rate limiting */
     int rate_limit_per_minute;
 

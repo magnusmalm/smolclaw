@@ -402,6 +402,7 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_int(&cfg->max_tool_calls_per_turn, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_CALLS_PER_TURN");
     env_override_int(&cfg->max_turn_secs, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TURN_SECS");
     env_override_int(&cfg->max_output_total, "SMOLCLAW_AGENTS_DEFAULTS_MAX_OUTPUT_TOTAL");
+    env_override_int(&cfg->max_tool_calls_per_hour, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_CALLS_PER_HOUR");
     env_override_int(&cfg->rate_limit_per_minute, "SMOLCLAW_AGENTS_DEFAULTS_RATE_LIMIT_PER_MINUTE");
     env_override_bool(&cfg->restrict_message_tool, "SMOLCLAW_AGENTS_DEFAULTS_RESTRICT_MESSAGE_TOOL");
     env_override_bool(&cfg->sandbox_enabled, "SMOLCLAW_AGENTS_DEFAULTS_SANDBOX");
@@ -587,6 +588,7 @@ sc_config_t *sc_config_default(void)
     cfg->max_tool_calls_per_turn = SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN;
     cfg->max_turn_secs        = SC_DEFAULT_MAX_TURN_SECS;
     cfg->max_output_total     = SC_DEFAULT_MAX_OUTPUT_TOTAL;
+    cfg->max_tool_calls_per_hour = SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR;
     cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
     cfg->sandbox_enabled      = 1;
     cfg->memory_consolidation = 1;
@@ -709,6 +711,8 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
         "max_turn_secs", cfg->max_turn_secs);
     cfg->max_output_total = sc_json_get_int(defaults,
         "max_output_total", cfg->max_output_total);
+    cfg->max_tool_calls_per_hour = sc_json_get_int(defaults,
+        "max_tool_calls_per_hour", cfg->max_tool_calls_per_hour);
     cfg->rate_limit_per_minute = sc_json_get_int(defaults,
         "rate_limit_per_minute", cfg->rate_limit_per_minute);
 
@@ -980,6 +984,7 @@ sc_config_t *sc_config_load(const char *path)
     if (cfg->max_tool_calls_per_turn < 1) cfg->max_tool_calls_per_turn = SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN;
     if (cfg->max_turn_secs < 1) cfg->max_turn_secs = SC_DEFAULT_MAX_TURN_SECS;
     if (cfg->max_output_total < 1) cfg->max_output_total = SC_DEFAULT_MAX_OUTPUT_TOTAL;
+    if (cfg->max_tool_calls_per_hour < 1) cfg->max_tool_calls_per_hour = SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR;
     if (cfg->rate_limit_per_minute < 0) cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
     if (cfg->temperature < 0.0) cfg->temperature = 0.0;
     if (cfg->temperature > 2.0) cfg->temperature = 2.0;
@@ -1054,6 +1059,7 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddNumberToObject(defaults, "max_tool_calls_per_turn", cfg->max_tool_calls_per_turn);
     cJSON_AddNumberToObject(defaults, "max_turn_secs", cfg->max_turn_secs);
     cJSON_AddNumberToObject(defaults, "max_output_total", cfg->max_output_total);
+    cJSON_AddNumberToObject(defaults, "max_tool_calls_per_hour", cfg->max_tool_calls_per_hour);
     cJSON_AddNumberToObject(defaults, "rate_limit_per_minute", cfg->rate_limit_per_minute);
     if (cfg->allowed_tool_count > 0) {
         cJSON *at_arr = cJSON_AddArrayToObject(defaults, "allowed_tools");
