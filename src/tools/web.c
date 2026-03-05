@@ -12,6 +12,7 @@
 #include <strings.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <ctype.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -51,7 +52,7 @@ static const char *const BROWSER_UAS[] = {
 
 static const char *get_browser_ua(void)
 {
-    static unsigned idx = 0;
+    static _Atomic unsigned idx = 0;
     return BROWSER_UAS[idx++ % NUM_UAS];
 }
 
@@ -173,7 +174,10 @@ static void curl_buf_free(curl_buf_t *buf)
 }
 
 /* Perform a GET request. pin_host/pin_ip: if both non-NULL, set CURLOPT_RESOLVE
- * to pin DNS resolution (prevents DNS rebinding). Returns allocated body or NULL. */
+ * to pin DNS resolution (prevents DNS rebinding). Returns allocated body or NULL.
+ * NOTE: Follows redirects without SSRF re-check — only use for trusted URLs
+ * (e.g. search API endpoints). For untrusted URLs, use http_get_no_follow()
+ * with per-hop SSRF validation (as web_fetch does). */
 static char *http_get(const char *url, const char *const *headers, int header_count,
                       long *status_out, const char *pin_host, const char *pin_ip)
 {
@@ -807,6 +811,16 @@ static int is_private_ipv4(const struct in_addr *addr)
     if ((ip >> 16) == (169 << 8 | 254)) return 1;
     /* 0.0.0.0 */
     if (ip == 0) return 1;
+    /* 100.64.0.0/10 (CGNAT, RFC 6598) */
+    if ((ip >> 22) == (100 << 2 | 1)) return 1;
+    /* 198.51.100.0/24 (TEST-NET-2) */
+    if ((ip >> 8) == (198 << 16 | 51 << 8 | 100)) return 1;
+    /* 203.0.113.0/24 (TEST-NET-3) */
+    if ((ip >> 8) == (203 << 16 | 0 << 8 | 113)) return 1;
+    /* 240.0.0.0/4 (reserved/future) */
+    if ((ip >> 28) == 15) return 1;
+    /* 255.255.255.255 (broadcast) */
+    if (ip == 0xFFFFFFFF) return 1;
     return 0;
 }
 

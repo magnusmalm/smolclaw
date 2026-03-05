@@ -395,7 +395,7 @@ static sc_tool_result_t *bg_kill_execute(sc_tool_t *self, cJSON *args, void *ctx
     if (proc->alive) {
         kill(proc->pid, SIGTERM);
         /* Brief wait then force kill if needed */
-        int status;
+        int status = 0;
         pid_t w = waitpid(proc->pid, &status, WNOHANG);
         if (w == 0) {
             usleep(100000); /* 100ms */

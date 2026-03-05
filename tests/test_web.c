@@ -389,11 +389,51 @@ static void test_web_fetch_truncation(void)
     sc_mock_http_stop(mock);
 }
 
+/* --- SSRF protection tests (run with bypass OFF) --- */
+
+static int is_ssrf_blocked(sc_tool_result_t *r)
+{
+    return r && r->is_error &&
+           (strstr(r->for_llm, "private") != NULL ||
+            strstr(r->for_llm, "SSRF") != NULL ||
+            strstr(r->for_llm, "blocked") != NULL);
+}
+
+static void test_ssrf_cgnat(void)
+{
+    sc_tool_t *tool = sc_tool_web_fetch_new(50000);
+    ASSERT_NOT_NULL(tool);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "url", "http://100.64.0.1/");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT(is_ssrf_blocked(r), "100.64.0.1 (CGNAT) should be SSRF-blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+}
+
+static void test_ssrf_reserved(void)
+{
+    sc_tool_t *tool = sc_tool_web_fetch_new(50000);
+    ASSERT_NOT_NULL(tool);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "url", "http://240.0.0.1/");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT(is_ssrf_blocked(r), "240.0.0.1 (reserved) should be SSRF-blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+}
+
 int main(void)
 {
     printf("test_web\n");
 
-    /* Disable SSRF protection for tests (mock server is on localhost) */
+    /* SSRF tests run with bypass OFF (real IP checks against literals) */
+    RUN_TEST(test_ssrf_cgnat);
+    RUN_TEST(test_ssrf_reserved);
+
+    /* Disable SSRF protection for remaining tests (mock server is on localhost) */
     sc_web_set_ssrf_bypass(1);
 
     RUN_TEST(test_web_search_brave);

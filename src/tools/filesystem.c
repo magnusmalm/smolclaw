@@ -90,7 +90,7 @@ static int is_bootstrap_file(const char *path)
     const char *base = strrchr(path, '/');
     base = base ? base + 1 : path;
     for (int i = 0; i < 5; i++)
-        if (strcmp(base, names[i]) == 0) return 1;
+        if (strcasecmp(base, names[i]) == 0) return 1;
     return 0;
 }
 
@@ -122,6 +122,21 @@ static int is_sensitive_path(const char *resolved)
             !str_ends_with(resolved, "/.smolclaw/workspace"))
             return 1;
     }
+
+    /* Cloud provider credential directories */
+    if (strstr(resolved, "/.docker/") || str_ends_with(resolved, "/.docker"))
+        return 1;
+    if (strstr(resolved, "/.gcloud/") || str_ends_with(resolved, "/.gcloud"))
+        return 1;
+    if (strstr(resolved, "/.azure/") || str_ends_with(resolved, "/.azure"))
+        return 1;
+    /* GitHub CLI tokens */
+    if (strstr(resolved, "/.config/gh/") || str_ends_with(resolved, "/.config/gh"))
+        return 1;
+    /* GNOME keyring */
+    if (strstr(resolved, "/.local/share/keyrings/") ||
+        str_ends_with(resolved, "/.local/share/keyrings"))
+        return 1;
 
     /* Sensitive dotfiles */
     const char *basename = strrchr(resolved, '/');
@@ -565,10 +580,13 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
         return sc_tool_result_error("failed to open file for writing");
     }
 
-    fwrite(new_content, 1, result_len, f);
+    size_t written = fwrite(new_content, 1, result_len, f);
     fclose(f);
     free(new_content);
     free(resolved);
+
+    if (written != result_len)
+        return sc_tool_result_error("failed to write complete content");
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);

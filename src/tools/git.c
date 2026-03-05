@@ -86,7 +86,7 @@ static int split_args(const char *args, char **out, int max)
         if (!*p) break;
 
         if (*p == '"') {
-            /* Quoted argument */
+            /* Double-quoted argument */
             p++;
             const char *start = p;
             while (*p && *p != '"') p++;
@@ -97,6 +97,18 @@ static int split_args(const char *args, char **out, int max)
             out[count][len] = '\0';
             count++;
             if (*p == '"') p++;
+        } else if (*p == '\'') {
+            /* Single-quoted argument */
+            p++;
+            const char *start = p;
+            while (*p && *p != '\'') p++;
+            size_t len = (size_t)(p - start);
+            out[count] = malloc(len + 1);
+            if (!out[count]) return count;
+            memcpy(out[count], start, len);
+            out[count][len] = '\0';
+            count++;
+            if (*p == '\'') p++;
         } else {
             /* Unquoted argument */
             const char *start = p;

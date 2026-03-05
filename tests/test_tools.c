@@ -1554,6 +1554,67 @@ static void test_symlink_nofollow(void)
     system(cmd);
 }
 
+static void test_sensitive_path_cloud_credentials(void)
+{
+    char tmpdir[] = "/tmp/sc_test_senspath_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_t *read_tool = sc_tool_read_file_new(tmpdir, 0);
+    ASSERT_NOT_NULL(read_tool);
+
+    /* Test each new sensitive path */
+    const char *paths[] = {
+        "/home/user/.docker/config.json",
+        "/home/user/.gcloud/credentials.db",
+        "/home/user/.azure/accessTokens.json",
+        "/home/user/.config/gh/hosts.yml",
+        "/home/user/.local/share/keyrings/login.keyring",
+    };
+    for (int i = 0; i < 5; i++) {
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "path", paths[i]);
+        sc_tool_result_t *r = read_tool->execute(read_tool, args, NULL);
+        ASSERT_NOT_NULL(r);
+        ASSERT_INT_EQ(r->is_error, 1);
+        ASSERT(strstr(r->for_llm, "sensitive") != NULL,
+               "should block sensitive cloud credential path");
+        sc_tool_result_free(r);
+        cJSON_Delete(args);
+    }
+
+    read_tool->destroy(read_tool);
+    rmdir(tmpdir);
+}
+
+static void test_bootstrap_case_insensitive(void)
+{
+    char tmpdir[] = "/tmp/sc_test_bootstrap_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_t *write_tool = sc_tool_write_file_new(tmpdir, 0);
+    ASSERT_NOT_NULL(write_tool);
+
+    /* Lowercase variant should still be blocked */
+    const char *names[] = {"agents.md", "soul.md", "Agents.MD", "Soul.Md"};
+    for (int i = 0; i < 4; i++) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s", tmpdir, names[i]);
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "path", path);
+        cJSON_AddStringToObject(args, "content", "test");
+        sc_tool_result_t *r = write_tool->execute(write_tool, args, NULL);
+        ASSERT_NOT_NULL(r);
+        ASSERT_INT_EQ(r->is_error, 1);
+        ASSERT(strstr(r->for_llm, "read-only") != NULL,
+               "should block case-variant bootstrap file writes");
+        sc_tool_result_free(r);
+        cJSON_Delete(args);
+    }
+
+    write_tool->destroy(write_tool);
+    rmdir(tmpdir);
+}
+
 int main(void)
 {
     printf("test_tools\n");
@@ -1594,6 +1655,8 @@ int main(void)
 #endif
     RUN_TEST(test_exec_blocks_control_chars);
     RUN_TEST(test_symlink_nofollow);
+    RUN_TEST(test_sensitive_path_cloud_credentials);
+    RUN_TEST(test_bootstrap_case_insensitive);
 
     TEST_REPORT();
 }

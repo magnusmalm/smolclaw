@@ -1034,7 +1034,11 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
                 int new_cap = tc->msgs_cap + 16;
                 sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
                     (size_t)new_cap * sizeof(sc_llm_message_t));
-                if (new_msgs) { tc->msgs = new_msgs; tc->msgs_cap = new_cap; }
+                if (new_msgs) {
+                    tc->msgs = new_msgs; tc->msgs_cap = new_cap;
+                } else {
+                    SC_LOG_ERROR("agent", "OOM growing message array for hint");
+                }
             }
             if (tc->msgs_len < tc->msgs_cap) {
                 tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&hint_msg);
