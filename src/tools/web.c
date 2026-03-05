@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -138,6 +139,7 @@ typedef struct {
 static size_t curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     curl_buf_t *buf = userdata;
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
     if (buf->len + total > SC_CURL_MAX_RESPONSE) return 0;
 
@@ -1062,8 +1064,8 @@ static sc_tool_result_t *web_fetch_execute(sc_tool_t *self, cJSON *args, void *c
         body = NULL;
 
         if (attempt < SC_WEB_FETCH_RETRIES)
-            sc_log(SC_LOG_WARN, "web_fetch: attempt %d failed, retrying...",
-                   attempt + 1);
+            SC_LOG_WARN("web_fetch", "attempt %d failed, retrying...",
+                        attempt + 1);
     }
 
     if (!body)

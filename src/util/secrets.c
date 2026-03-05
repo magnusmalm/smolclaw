@@ -10,6 +10,7 @@
 #include <regex.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #define REDACTED_STR "[REDACTED]"
 #define REDACTED_LEN 10
@@ -46,19 +47,22 @@ static const char *secret_patterns[] = {
 
 #define PATTERN_COUNT (sizeof(secret_patterns) / sizeof(secret_patterns[0]))
 
-/* Compiled patterns (lazy init) */
+/* Compiled patterns (lazy init, thread-safe via pthread_once) */
 static regex_t compiled[PATTERN_COUNT];
 static int compiled_ok[PATTERN_COUNT];
-static int initialized;
+static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 
-static void ensure_init(void)
+static void do_init(void)
 {
-    if (initialized) return;
     for (int i = 0; i < (int)PATTERN_COUNT; i++) {
         compiled_ok[i] = (regcomp(&compiled[i], secret_patterns[i],
                                    REG_EXTENDED | REG_ICASE) == 0);
     }
-    initialized = 1;
+}
+
+static void ensure_init(void)
+{
+    pthread_once(&init_once, do_init);
 }
 
 int sc_scan_secrets(const char *text)

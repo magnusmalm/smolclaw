@@ -5,6 +5,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <curl/curl.h>
 
 #include "providers/http.h"
@@ -572,6 +573,7 @@ static void http_stream_event(const char *data, void *ctx)
 static size_t curl_sse_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     sc_sse_parser_t *sse = userdata;
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
     sc_sse_feed(sse, ptr, total);
     return total;

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <pthread.h>
 #include <curl/curl.h>
 #include "util/curl_common.h"
@@ -36,6 +37,7 @@ typedef struct {
 /* CURL write callback */
 static size_t write_cb(void *data, size_t size, size_t nmemb, void *userp)
 {
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
     sc_strbuf_t *sb = userp;
     if (sb->len + total > SC_CURL_MAX_RESPONSE) return 0;

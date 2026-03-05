@@ -652,7 +652,7 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     const char *use_model = agent->model;
 
     const char *override_rest = NULL;
-    const char *alias = sc_parse_model_override(user_message, &override_rest);
+    char *alias = sc_parse_model_override(user_message, &override_rest);
     if (alias) {
         for (int i = 0; i < agent->alias_count; i++) {
             if (strcasecmp(alias, agent->alias_names[i]) == 0) {
@@ -664,6 +664,7 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                 break;
             }
         }
+        free(alias);
     }
 
     /* Build messages */
@@ -1219,7 +1220,7 @@ static void update_tool_contexts(sc_agent_t *agent, const char *channel, const c
  * Returns alias name (pointer into content) or NULL if no match.
  * Sets *rest to point to the actual message content after the prefix.
  */
-const char *sc_parse_model_override(const char *content, const char **rest)
+char *sc_parse_model_override(const char *content, const char **rest)
 {
     if (!content || !rest) return NULL;
 
@@ -1236,17 +1237,17 @@ const char *sc_parse_model_override(const char *content, const char **rest)
             const char *p = alias_start;
             while (p < colon && !isspace((unsigned char)*p)) p++;
             if (p == colon) {
-                /* Store alias in static buffer (aliases are short) */
-                static char alias_buf[64];
                 size_t len = (size_t)(colon - alias_start);
-                if (len >= sizeof(alias_buf)) return NULL;
-                memcpy(alias_buf, alias_start, len);
-                alias_buf[len] = '\0';
+                if (len >= 64) return NULL;
+                char *alias = malloc(len + 1);
+                if (!alias) return NULL;
+                memcpy(alias, alias_start, len);
+                alias[len] = '\0';
                 /* Skip ": " */
                 const char *msg = colon + 1;
                 while (*msg == ' ') msg++;
                 *rest = msg;
-                return alias_buf;
+                return alias;
             }
         }
     }
@@ -1259,15 +1260,16 @@ const char *sc_parse_model_override(const char *content, const char **rest)
         while (*end && !isspace((unsigned char)*end)) end++;
         if (end == alias_start) return NULL;
 
-        static char at_alias_buf[64];
         size_t len = (size_t)(end - alias_start);
-        if (len >= sizeof(at_alias_buf)) return NULL;
-        memcpy(at_alias_buf, alias_start, len);
-        at_alias_buf[len] = '\0';
+        if (len >= 64) return NULL;
+        char *alias = malloc(len + 1);
+        if (!alias) return NULL;
+        memcpy(alias, alias_start, len);
+        alias[len] = '\0';
         /* Skip space after alias */
         while (*end == ' ') end++;
         *rest = end;
-        return at_alias_buf;
+        return alias;
     }
 
     return NULL;

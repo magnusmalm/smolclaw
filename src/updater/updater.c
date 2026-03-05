@@ -261,7 +261,7 @@ int sc_updater_verify(const char *path, const sc_update_artifact_t *artifact)
         snprintf(hex + i * 2, 3, "%02x", hash[i]);
     hex[64] = '\0';
 
-    if (strcmp(hex, artifact->sha256) != 0) {
+    if (sc_timing_safe_cmp(hex, artifact->sha256) != 0) {
         SC_LOG_ERROR(LOG_TAG, "SHA-256 mismatch: expected %s, got %s",
                      artifact->sha256, hex);
         return -1;

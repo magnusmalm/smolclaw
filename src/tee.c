@@ -64,8 +64,14 @@ static void tee_cleanup(const sc_tee_config_t *cfg)
 
         if (count >= cap) {
             cap = cap ? cap * 2 : 64;
-            names = realloc(names, (size_t)cap * sizeof(char *));
-            if (!names) { closedir(d); return; }
+            char **tmp = realloc(names, (size_t)cap * sizeof(char *));
+            if (!tmp) {
+                for (int i = 0; i < count; i++) free(names[i]);
+                free(names);
+                closedir(d);
+                return;
+            }
+            names = tmp;
         }
         names[count++] = sc_strdup(ent->d_name);
     }

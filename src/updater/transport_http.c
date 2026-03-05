@@ -6,6 +6,8 @@
  * binaries in memory.
  */
 
+#include <stdint.h>
+
 #include "updater/transport_http.h"
 #include "updater/updater.h"
 #include "constants.h"
@@ -34,6 +36,7 @@ typedef struct {
 static size_t mem_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     mem_buf_t *buf = userdata;
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
 
     if (buf->size + total + 1 > buf->capacity) {
@@ -60,6 +63,7 @@ typedef struct {
 static size_t file_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
     file_write_ctx_t *ctx = userdata;
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
 
     if (ctx->written + total > (size_t)SC_UPDATE_MAX_BINARY_SIZE)

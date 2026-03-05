@@ -1181,6 +1181,69 @@ static void test_expanded_deny_patterns(void)
     sc_tool_result_free(r);
     cJSON_Delete(args);
 
+    /* exec (shell process replacement) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "exec /bin/sh");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* nsenter (namespace escape) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "nsenter --target 1 --mount");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* unshare (namespace creation) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "unshare --mount --pid /bin/sh");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* install to system dir */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "install malware /usr/bin/");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* script (session capture) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "script /tmp/output.log");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* screen (terminal multiplexer) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "screen -S session");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* tmux (terminal multiplexer) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "tmux new-session");
+    r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
     /* Safe commands should still work */
     args = cJSON_CreateObject();
     cJSON_AddStringToObject(args, "command", "echo safe");
@@ -1431,6 +1494,66 @@ static void test_exec_blocks_control_chars(void)
     system(cmd);
 }
 
+static void test_symlink_nofollow(void)
+{
+    char tmpdir[] = "/tmp/sc_test_symlink_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Create a regular file */
+    char realfile[256], linkfile[256];
+    snprintf(realfile, sizeof(realfile), "%s/real.txt", tmpdir);
+    snprintf(linkfile, sizeof(linkfile), "%s/link.txt", tmpdir);
+
+    FILE *f = fopen(realfile, "w");
+    ASSERT_NOT_NULL(f);
+    fprintf(f, "real content");
+    fclose(f);
+
+    /* Create a symlink */
+    ASSERT_INT_EQ(symlink(realfile, linkfile), 0);
+
+    /* read_file on symlink should fail */
+    sc_tool_t *read_tool = sc_tool_read_file_new(tmpdir, 0);
+    ASSERT_NOT_NULL(read_tool);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", linkfile);
+    sc_tool_result_t *r = read_tool->execute(read_tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    read_tool->destroy(read_tool);
+
+    /* write_file on symlink should fail */
+    sc_tool_t *write_tool = sc_tool_write_file_new(tmpdir, 0);
+    ASSERT_NOT_NULL(write_tool);
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", linkfile);
+    cJSON_AddStringToObject(args, "content", "evil");
+    r = write_tool->execute(write_tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    write_tool->destroy(write_tool);
+
+    /* read_file on regular file should succeed */
+    read_tool = sc_tool_read_file_new(tmpdir, 0);
+    ASSERT_NOT_NULL(read_tool);
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", realfile);
+    r = read_tool->execute(read_tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    read_tool->destroy(read_tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
 int main(void)
 {
     printf("test_tools\n");
@@ -1470,6 +1593,7 @@ int main(void)
     RUN_TEST(test_git_blocks_config_flag);
 #endif
     RUN_TEST(test_exec_blocks_control_chars);
+    RUN_TEST(test_symlink_nofollow);
 
     TEST_REPORT();
 }

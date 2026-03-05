@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -261,8 +262,10 @@ static void strbuf_grow(sc_strbuf_t *sb, size_t need)
     if (sb->len + need + 1 <= sb->cap)
         return;
     size_t new_cap = sb->cap ? sb->cap : STRBUF_INIT_CAP;
-    while (new_cap < sb->len + need + 1)
+    while (new_cap < sb->len + need + 1) {
+        if (new_cap > SIZE_MAX / 2) { sb->oom = 1; return; }
         new_cap *= 2;
+    }
     char *new_data = realloc(sb->data, new_cap);
     if (!new_data) {
         sb->oom = 1;

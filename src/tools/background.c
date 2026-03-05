@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 #include "tools/background.h"
 #include "tools/types.h"
@@ -43,6 +44,7 @@ typedef struct {
 
 static sc_bg_process_t *bg_procs;
 static int bg_max_procs;
+static pthread_mutex_t bg_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int bg_find_free_slot(void)
 {
@@ -64,6 +66,7 @@ static void bg_clear_slot(int slot)
 
 void sc_bg_cleanup_all(void)
 {
+    pthread_mutex_lock(&bg_lock);
     for (int i = 0; i < bg_max_procs; i++) {
         if (bg_procs[i].pid > 0) {
             kill(bg_procs[i].pid, SIGTERM);
@@ -74,6 +77,7 @@ void sc_bg_cleanup_all(void)
     free(bg_procs);
     bg_procs = NULL;
     bg_max_procs = 0;
+    pthread_mutex_unlock(&bg_lock);
 }
 
 /* ---------- exec_background tool ---------- */
@@ -142,12 +146,14 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
         return sc_tool_result_error(guard_err);
 
     /* Opportunistically reap finished processes before allocating a slot */
+    pthread_mutex_lock(&bg_lock);
     bg_reap_finished();
 
     /* Find free slot */
     int slot = bg_find_free_slot();
     if (slot < 0)
     {
+        pthread_mutex_unlock(&bg_lock);
         sc_strbuf_t esb;
         sc_strbuf_init(&esb);
         sc_strbuf_appendf(&esb, "Maximum background processes reached (limit: %d)",
@@ -160,11 +166,14 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
 
     /* Create pipe for stdout+stderr */
     int pipefd[2];
-    if (pipe(pipefd) != 0)
+    if (pipe(pipefd) != 0) {
+        pthread_mutex_unlock(&bg_lock);
         return sc_tool_result_error("Failed to create pipe");
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
+        pthread_mutex_unlock(&bg_lock);
         close(pipefd[0]);
         close(pipefd[1]);
         return sc_tool_result_error("Failed to fork");
@@ -188,6 +197,7 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
     bg_procs[slot].fd = pipefd[0];
     bg_procs[slot].alive = 1;
     bg_procs[slot].exit_code = 0;
+    pthread_mutex_unlock(&bg_lock);
 
     SC_LOG_INFO(LOG_TAG, "Started background process slot=%d pid=%d: %s",
                 slot, (int)pid, command);
@@ -219,6 +229,13 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
     bg_max_procs = max_procs > 0 ? max_procs : SC_BG_MAX_PROCS;
     free(bg_procs);
     bg_procs = calloc((size_t)bg_max_procs, sizeof(sc_bg_process_t));
+    if (!bg_procs) {
+        sc_deny_list_free(&d->deny);
+        free(d->workspace);
+        free(d);
+        free(t);
+        return NULL;
+    }
 
     t->name = "exec_background";
     t->description = "Start a shell command in the background. Returns a slot "
@@ -248,12 +265,18 @@ static sc_tool_result_t *bg_poll_execute(sc_tool_t *self, cJSON *args, void *ctx
     (void)ctx;
 
     int slot = sc_json_get_int(args, "slot", -1);
-    if (slot < 0 || slot >= bg_max_procs)
+
+    pthread_mutex_lock(&bg_lock);
+    if (slot < 0 || slot >= bg_max_procs) {
+        pthread_mutex_unlock(&bg_lock);
         return sc_tool_result_error("Invalid slot number");
+    }
 
     sc_bg_process_t *proc = &bg_procs[slot];
-    if (proc->pid == 0)
+    if (proc->pid == 0) {
+        pthread_mutex_unlock(&bg_lock);
         return sc_tool_result_error("No process in this slot");
+    }
 
     /* Read available output (non-blocking) */
     sc_strbuf_t output;
@@ -275,7 +298,10 @@ static sc_tool_result_t *bg_poll_execute(sc_tool_t *self, cJSON *args, void *ctx
         }
     }
 
+    int is_alive = proc->alive;
+    int exit_code = proc->exit_code;
     char *out_str = sc_strbuf_finish(&output);
+    pthread_mutex_unlock(&bg_lock);
 
     /* Truncate if too long */
     size_t len = out_str ? strlen(out_str) : 0;
@@ -304,9 +330,9 @@ static sc_tool_result_t *bg_poll_execute(sc_tool_t *self, cJSON *args, void *ctx
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-    sc_strbuf_appendf(&sb, "Status: %s", proc->alive ? "running" : "exited");
-    if (!proc->alive)
-        sc_strbuf_appendf(&sb, " (exit code: %d)", proc->exit_code);
+    sc_strbuf_appendf(&sb, "Status: %s", is_alive ? "running" : "exited");
+    if (!is_alive)
+        sc_strbuf_appendf(&sb, " (exit code: %d)", exit_code);
     sc_strbuf_append(&sb, "\nOutput:\n");
     sc_strbuf_append(&sb, (out_str && out_str[0]) ? out_str : "(no new output)");
 
@@ -353,12 +379,18 @@ static sc_tool_result_t *bg_kill_execute(sc_tool_t *self, cJSON *args, void *ctx
     (void)ctx;
 
     int slot = sc_json_get_int(args, "slot", -1);
-    if (slot < 0 || slot >= bg_max_procs)
+
+    pthread_mutex_lock(&bg_lock);
+    if (slot < 0 || slot >= bg_max_procs) {
+        pthread_mutex_unlock(&bg_lock);
         return sc_tool_result_error("Invalid slot number");
+    }
 
     sc_bg_process_t *proc = &bg_procs[slot];
-    if (proc->pid == 0)
+    if (proc->pid == 0) {
+        pthread_mutex_unlock(&bg_lock);
         return sc_tool_result_error("No process in this slot");
+    }
 
     if (proc->alive) {
         kill(proc->pid, SIGTERM);
@@ -377,18 +409,21 @@ static sc_tool_result_t *bg_kill_execute(sc_tool_t *self, cJSON *args, void *ctx
         proc->exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
 
+    pid_t killed_pid = proc->pid;
+    bg_clear_slot(slot);
+    pthread_mutex_unlock(&bg_lock);
+
     SC_LOG_INFO(LOG_TAG, "Killed background process slot=%d pid=%d",
-                slot, (int)proc->pid);
+                slot, (int)killed_pid);
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
     sc_strbuf_appendf(&sb, "Process in slot %d (pid %d) terminated",
-                      slot, (int)proc->pid);
+                      slot, (int)killed_pid);
     char *msg = sc_strbuf_finish(&sb);
     sc_tool_result_t *r = sc_tool_result_new(msg);
     free(msg);
 
-    bg_clear_slot(slot);
     return r;
 }
 

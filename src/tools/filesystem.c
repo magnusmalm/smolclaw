@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <limits.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <libgen.h>
@@ -174,6 +176,17 @@ static int mkdirp(const char *filepath)
     return 0;
 }
 
+/* Open a file with O_NOFOLLOW to prevent symlink TOCTOU races.
+ * If the target is a symlink, open() fails with ELOOP. */
+static FILE *fs_open_nofollow(const char *path, int flags, const char *mode)
+{
+    int fd = open(path, flags | O_NOFOLLOW, 0644);
+    if (fd < 0) return NULL;
+    FILE *f = fdopen(fd, mode);
+    if (!f) { close(fd); return NULL; }
+    return f;
+}
+
 /* ---------- Shared path validation ---------- */
 
 #define FS_CHECK_BOOTSTRAP  0x01
@@ -252,10 +265,12 @@ static sc_tool_result_t *read_file_execute(sc_tool_t *self, cJSON *args, void *c
     if (!resolved)
         return sc_tool_result_error(err);
 
-    FILE *f = fopen(resolved, "rb");
+    FILE *f = fs_open_nofollow(resolved, O_RDONLY, "rb");
     if (!f) {
         free(resolved);
-        return sc_tool_result_error("failed to read file");
+        return sc_tool_result_error(errno == ELOOP
+            ? "access denied: path is a symlink"
+            : "failed to read file");
     }
 
     /* Verify it's a regular file */
@@ -266,14 +281,12 @@ static sc_tool_result_t *read_file_execute(sc_tool_t *self, cJSON *args, void *c
         return sc_tool_result_error("not a regular file");
     }
 
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
+    off_t size = st.st_size;
     if (size > SC_MAX_READ_FILE_SIZE) {
         fclose(f);
         free(resolved);
         return sc_tool_result_error("file too large (max 10 MB)");
     }
-    fseek(f, 0, SEEK_SET);
 
     char *content = malloc((size_t)size + 1);
     if (!content) {
@@ -332,10 +345,12 @@ static sc_tool_result_t *write_file_execute(sc_tool_t *self, cJSON *args, void *
         return sc_tool_result_error("failed to create directory");
     }
 
-    FILE *f = fopen(resolved, "wb");
+    FILE *f = fs_open_nofollow(resolved, O_WRONLY | O_CREAT | O_TRUNC, "wb");
     if (!f) {
         free(resolved);
-        return sc_tool_result_error("failed to open file for writing");
+        return sc_tool_result_error(errno == ELOOP
+            ? "access denied: path is a symlink"
+            : "failed to open file for writing");
     }
 
     /* Verify target is a regular file (reject FIFOs, devices, etc.) */
@@ -478,15 +493,21 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
         return sc_tool_result_error(err);
 
     /* Read file */
-    FILE *f = fopen(resolved, "rb");
+    FILE *f = fs_open_nofollow(resolved, O_RDONLY, "rb");
     if (!f) {
         free(resolved);
-        return sc_tool_result_error("file not found");
+        return sc_tool_result_error(errno == ELOOP
+            ? "access denied: path is a symlink"
+            : "file not found");
     }
 
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    struct stat est;
+    if (fstat(fileno(f), &est) != 0) {
+        fclose(f);
+        free(resolved);
+        return sc_tool_result_error("failed to stat file");
+    }
+    off_t size = est.st_size;
 
     char *content = malloc((size_t)size + 1);
     if (!content) {
@@ -508,7 +529,7 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
     }
 
     /* Check if old_text appears more than once */
-    char *second = strstr(first + 1, old_text);
+    char *second = strstr(first + strlen(old_text), old_text);
     if (second) {
         free(content);
         free(resolved);
@@ -537,7 +558,7 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
     free(content);
 
     /* Write back */
-    f = fopen(resolved, "wb");
+    f = fs_open_nofollow(resolved, O_WRONLY | O_CREAT | O_TRUNC, "wb");
     if (!f) {
         free(new_content);
         free(resolved);
@@ -594,10 +615,12 @@ static sc_tool_result_t *append_file_execute(sc_tool_t *self, cJSON *args, void 
     if (!resolved)
         return sc_tool_result_error(err);
 
-    FILE *f = fopen(resolved, "ab");
+    FILE *f = fs_open_nofollow(resolved, O_WRONLY | O_APPEND | O_CREAT, "a");
     if (!f) {
         free(resolved);
-        return sc_tool_result_error("failed to open file for appending");
+        return sc_tool_result_error(errno == ELOOP
+            ? "access denied: path is a symlink"
+            : "failed to open file for appending");
     }
 
     /* Verify target is a regular file (reject FIFOs, devices, etc.) */

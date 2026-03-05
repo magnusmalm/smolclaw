@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdint.h>
 
 #include "providers/provider_common.h"
 #include "util/curl_common.h"
@@ -22,6 +23,7 @@ int sc_curl_progress_cb(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
 size_t sc_curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     sc_strbuf_t *sb = userdata;
+    if (nmemb > 0 && size > SIZE_MAX / nmemb) return 0;
     size_t total = size * nmemb;
     if (sb->len + total > SC_CURL_MAX_RESPONSE) return 0;
     char *tmp = malloc(total + 1);

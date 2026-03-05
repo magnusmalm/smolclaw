@@ -78,7 +78,7 @@ void sc_agent_register_tool(sc_agent_t *agent, sc_tool_t *tool);
 
 /* Parse "Use <alias>: <msg>" or "@<alias> <msg>" prefix from user content.
  * Returns alias name or NULL. Sets *rest to the message after the prefix. */
-const char *sc_parse_model_override(const char *content, const char **rest);
+char *sc_parse_model_override(const char *content, const char **rest);
 
 /* Enable streaming: agent will call stream_cb with text deltas during LLM calls */
 void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx);

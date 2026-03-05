@@ -148,6 +148,14 @@ static const char *sc_deny_patterns[] = {
     "\\b7z[[:space:]]+x\\b",
     /* Mail exfiltration (data sent to arbitrary recipients) */
     "\\b(sendmail|mailx?|msmtp|mutt)[[:space:]]",
+    /* Dangerous commands missing from blocklist (H-6) */
+    "\\bexec[[:space:]]",                     /* replaces shell process */
+    "\\bnsenter[[:space:]]",                  /* namespace escape */
+    "\\bunshare[[:space:]]",                  /* namespace creation */
+    "\\binstall[[:space:]].*/(etc|bin|sbin|usr)/",  /* install to system dirs */
+    "\\bscript[[:space:]]",                   /* typescript session capture */
+    "\\bscreen[[:space:]]",                   /* interactive terminal multiplexer */
+    "\\btmux[[:space:]]",                     /* interactive terminal multiplexer */
     /* Writes to smolclaw config directory (prevent OpenClaw-style config destruction) */
     ">.*\\.smolclaw/",
     "\\b(cp|mv|tee|sed)[[:space:]].*\\.smolclaw/",

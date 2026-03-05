@@ -34,10 +34,11 @@ static void test_parse_use_prefix(void)
     const char *rest = NULL;
 
     /* "Use opus: hello world" */
-    const char *alias = sc_parse_model_override("Use opus: hello world", &rest);
+    char *alias = sc_parse_model_override("Use opus: hello world", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "opus");
     ASSERT_STR_EQ(rest, "hello world");
+    free(alias);
 }
 
 static void test_parse_use_case_insensitive(void)
@@ -45,16 +46,18 @@ static void test_parse_use_case_insensitive(void)
     const char *rest = NULL;
 
     /* Case-insensitive: "USE SONNET: msg" */
-    const char *alias = sc_parse_model_override("USE SONNET: msg", &rest);
+    char *alias = sc_parse_model_override("USE SONNET: msg", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "SONNET");
     ASSERT_STR_EQ(rest, "msg");
+    free(alias);
 
     /* Mixed case */
     alias = sc_parse_model_override("use Haiku: test", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "Haiku");
     ASSERT_STR_EQ(rest, "test");
+    free(alias);
 }
 
 static void test_parse_at_prefix(void)
@@ -62,10 +65,11 @@ static void test_parse_at_prefix(void)
     const char *rest = NULL;
 
     /* "@sonnet what's up" */
-    const char *alias = sc_parse_model_override("@sonnet what's up", &rest);
+    char *alias = sc_parse_model_override("@sonnet what's up", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "sonnet");
     ASSERT_STR_EQ(rest, "what's up");
+    free(alias);
 }
 
 static void test_parse_no_match(void)
@@ -73,7 +77,7 @@ static void test_parse_no_match(void)
     const char *rest = NULL;
 
     /* Regular message */
-    const char *alias = sc_parse_model_override("Hello world", &rest);
+    char *alias = sc_parse_model_override("Hello world", &rest);
     ASSERT_NULL(alias);
 
     /* "use" without colon */
@@ -102,15 +106,17 @@ static void test_parse_leading_whitespace(void)
     const char *rest = NULL;
 
     /* Leading spaces should be skipped */
-    const char *alias = sc_parse_model_override("  Use gpt4o: question", &rest);
+    char *alias = sc_parse_model_override("  Use gpt4o: question", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "gpt4o");
     ASSERT_STR_EQ(rest, "question");
+    free(alias);
 
     alias = sc_parse_model_override("  @haiku hi", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "haiku");
     ASSERT_STR_EQ(rest, "hi");
+    free(alias);
 }
 
 static void test_parse_extra_spaces(void)
@@ -118,15 +124,17 @@ static void test_parse_extra_spaces(void)
     const char *rest = NULL;
 
     /* Extra spaces after colon */
-    const char *alias = sc_parse_model_override("Use opus:   spaced message", &rest);
+    char *alias = sc_parse_model_override("Use opus:   spaced message", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "opus");
     ASSERT_STR_EQ(rest, "spaced message");
+    free(alias);
 
     /* Extra spaces between "use" and alias */
     alias = sc_parse_model_override("Use   opus: message", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "opus");
+    free(alias);
 }
 
 static void test_parse_at_no_message(void)
@@ -134,10 +142,11 @@ static void test_parse_at_no_message(void)
     const char *rest = NULL;
 
     /* "@alias" with no message after */
-    const char *alias = sc_parse_model_override("@opus", &rest);
+    char *alias = sc_parse_model_override("@opus", &rest);
     ASSERT_NOT_NULL(alias);
     ASSERT_STR_EQ(alias, "opus");
     ASSERT_STR_EQ(rest, "");
+    free(alias);
 }
 
 /* ======================================================================

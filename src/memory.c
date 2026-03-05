@@ -46,7 +46,8 @@ static int write_file(const char *path, const char *content)
 static char *today_path(const sc_memory_t *mem)
 {
     time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
+    struct tm tm_buf;
+    struct tm *tm = localtime_r(&now, &tm_buf);
 
     char date[9];   /* YYYYMMDD */
     char month[7];  /* YYYYMM */
@@ -61,7 +62,8 @@ static char *today_path(const sc_memory_t *mem)
 
 static char *date_path(const sc_memory_t *mem, time_t t)
 {
-    struct tm *tm = localtime(&t);
+    struct tm tm_buf;
+    struct tm *tm = localtime_r(&t, &tm_buf);
 
     char date[9];
     char month[7];
@@ -166,7 +168,8 @@ int sc_memory_append_today(const sc_memory_t *mem, const char *content)
     if (!existing || strlen(existing) == 0) {
         /* New file: add date header */
         time_t now = time(NULL);
-        struct tm *tm = localtime(&now);
+        struct tm tm_buf;
+        struct tm *tm = localtime_r(&now, &tm_buf);
         char hdr[32];
         strftime(hdr, sizeof(hdr), "# %Y-%m-%d", tm);
         sc_strbuf_appendf(&sb, "%s\n\n%s", hdr, content);
@@ -181,7 +184,8 @@ int sc_memory_append_today(const sc_memory_t *mem, const char *content)
     if (ret == 0 && mem->index_cb) {
         /* Derive source key from date (YYYYMMDD) */
         time_t now = time(NULL);
-        struct tm *tm_now = localtime(&now);
+        struct tm tm_now_buf;
+        struct tm *tm_now = localtime_r(&now, &tm_now_buf);
         char date_key[9];
         strftime(date_key, sizeof(date_key), "%Y%m%d", tm_now);
         mem->index_cb(date_key, result, mem->index_ctx);
