@@ -17,7 +17,14 @@
 #include "util/json_helpers.h"
 #include "logger.h"
 
+#include "cJSON.h"
+
 #define COST_TAG "cost"
+
+struct sc_cost_tracker {
+    char *state_path;  /* {workspace}/state/costs.json */
+    cJSON *data;       /* {"models":{...}, "total_turns":N} */
+};
 
 /* Load JSON from file, return NULL if missing or invalid */
 static cJSON *load_json(const char *path)

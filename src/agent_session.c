@@ -2,10 +2,13 @@
  * agent_session.c - Session summarization and memory consolidation
  *
  * Extracted from agent.c (M-15) to reduce God Object complexity.
+ * Summarization runs on a detached worker thread (L-15) to avoid
+ * blocking the agent loop during synchronous LLM calls.
  */
 
 #include "agent_internal.h"
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -19,7 +22,18 @@
 #include "util/secrets.h"
 #include "util/prompt_guard.h"
 
-static void maybe_consolidate(sc_agent_t *agent, const char *session_key)
+/* Arguments passed to the summarization worker thread */
+typedef struct {
+    sc_agent_t *agent;
+    char *session_key;
+    char *transcript;
+    char *existing_summary;
+    int session_keep_last;
+    int memory_consolidation;
+    int summary_max_transcript;
+} sc_summarize_args_t;
+
+static void do_consolidate(sc_agent_t *agent, const char *session_key)
 {
     if (!agent->memory_consolidation) return;
 
@@ -82,53 +96,9 @@ static void maybe_consolidate(sc_agent_t *agent, const char *session_key)
     sc_llm_message_free_fields(&msgs[1]);
 }
 
-void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
+static void do_summarize(sc_agent_t *agent, const char *session_key,
+                           char *transcript_str)
 {
-    int count = 0;
-    sc_llm_message_t *history = sc_session_get_history(agent->sessions,
-                                                        session_key, &count);
-
-    if (count <= agent->session_summary_threshold)
-        return;
-
-    SC_LOG_INFO("agent", "Session %s has %d messages, summarizing before truncation",
-                session_key, count);
-
-    int discard_count = count - agent->session_keep_last;
-    sc_strbuf_t transcript;
-    sc_strbuf_init(&transcript);
-
-    const char *existing_summary = sc_session_get_summary(agent->sessions,
-                                                           session_key);
-    if (existing_summary && existing_summary[0]) {
-        sc_strbuf_appendf(&transcript, "Previous summary: %s\n\n", existing_summary);
-    }
-
-    for (int i = 0; i < discard_count; i++) {
-        const char *role = history[i].role;
-        if (!role || strcmp(role, "system") == 0)
-            continue;
-
-        const char *label = role;
-        if (history[i].tool_call_id) {
-            label = "tool_result";
-        } else if (history[i].tool_call_count > 0) {
-            label = "assistant (tool_use)";
-        }
-
-        const char *content = history[i].content;
-        if (!content) content = "";
-
-        sc_strbuf_appendf(&transcript, "[%s] %s\n", label, content);
-
-        if ((int)transcript.len >= agent->summary_max_transcript) {
-            sc_strbuf_append(&transcript, "\n[...truncated...]");
-            break;
-        }
-    }
-
-    char *transcript_str = sc_strbuf_finish(&transcript);
-
     char *redacted_transcript = sc_redact_secrets(transcript_str);
     if (redacted_transcript) {
         free(transcript_str);
@@ -178,5 +148,94 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
     sc_session_truncate(agent->sessions, session_key, agent->session_keep_last);
     sc_session_save(agent->sessions, session_key);
 
-    maybe_consolidate(agent, session_key);
+    do_consolidate(agent, session_key);
+}
+
+/* Worker thread function for async summarization */
+static void *summarize_thread_fn(void *arg)
+{
+    sc_summarize_args_t *args = arg;
+    do_summarize(args->agent, args->session_key, args->transcript);
+    free(args->session_key);
+    free(args);
+    return NULL;
+}
+
+void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
+{
+    int count = 0;
+    sc_llm_message_t *history = sc_session_get_history(agent->sessions,
+                                                        session_key, &count);
+
+    if (count <= agent->session_summary_threshold)
+        return;
+
+    SC_LOG_INFO("agent", "Session %s has %d messages, scheduling async summarization",
+                session_key, count);
+
+    /* Build transcript while we still have the history */
+    int discard_count = count - agent->session_keep_last;
+    sc_strbuf_t transcript;
+    sc_strbuf_init(&transcript);
+
+    const char *existing_summary = sc_session_get_summary(agent->sessions,
+                                                           session_key);
+    if (existing_summary && existing_summary[0]) {
+        sc_strbuf_appendf(&transcript, "Previous summary: %s\n\n", existing_summary);
+    }
+
+    for (int i = 0; i < discard_count; i++) {
+        const char *role = history[i].role;
+        if (!role || strcmp(role, "system") == 0)
+            continue;
+
+        const char *label = role;
+        if (history[i].tool_call_id) {
+            label = "tool_result";
+        } else if (history[i].tool_call_count > 0) {
+            label = "assistant (tool_use)";
+        }
+
+        const char *content = history[i].content;
+        if (!content) content = "";
+
+        sc_strbuf_appendf(&transcript, "[%s] %s\n", label, content);
+
+        if ((int)transcript.len >= agent->summary_max_transcript) {
+            sc_strbuf_append(&transcript, "\n[...truncated...]");
+            break;
+        }
+    }
+
+    char *transcript_str = sc_strbuf_finish(&transcript);
+
+    /* Join previous summarization thread if still active */
+    if (agent->summarize_thread_active) {
+        pthread_join(agent->summarize_thread, NULL);
+        agent->summarize_thread_active = 0;
+    }
+
+    /* Pack args and launch worker thread */
+    sc_summarize_args_t *args = calloc(1, sizeof(*args));
+    if (!args) {
+        /* Fallback: run synchronously */
+        do_summarize(agent, session_key, transcript_str);
+        return;
+    }
+
+    args->agent = agent;
+    args->session_key = sc_strdup(session_key);
+    args->transcript = transcript_str;
+
+    if (pthread_create(&agent->summarize_thread, NULL,
+                        summarize_thread_fn, args) != 0) {
+        SC_LOG_WARN("agent", "Failed to create summarization thread, running synchronously");
+        do_summarize(agent, session_key, args->transcript);
+        free(args->session_key);
+        free(args);
+        return;
+    }
+
+    agent->summarize_thread_active = 1;
+    SC_LOG_DEBUG("agent", "Summarization thread launched for session %s", session_key);
 }

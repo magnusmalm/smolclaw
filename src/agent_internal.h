@@ -15,6 +15,16 @@
 #include <stdint.h>
 #include <time.h>
 
+/* ---------- Cross-turn hourly rate tracking ---------- */
+
+#define SC_HOURLY_SLOTS 16
+
+typedef struct {
+    uint32_t key_hash;
+    int tool_calls;
+    time_t window_start;
+} sc_hourly_slot_t;
+
 /* ---------- Turn context ---------- */
 
 #define SC_MAX_RECENT_CALLS 10

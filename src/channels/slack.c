@@ -437,21 +437,8 @@ sc_channel_t *sc_channel_slack_new(sc_slack_config_t *cfg, sc_bus_t *bus)
     ch->running = 0;
     ch->data = sd;
 
-    /* Copy allow list */
-    if (cfg->allow_from_count > 0 && cfg->allow_from) {
-        ch->allow_list_count = cfg->allow_from_count;
-        ch->allow_list = calloc((size_t)cfg->allow_from_count, sizeof(char *));
-        for (int i = 0; i < cfg->allow_from_count; i++)
-            ch->allow_list[i] = sc_strdup(cfg->allow_from[i]);
-    }
-
-    /* DM policy + pairing store */
-    ch->dm_policy = sc_dm_policy_from_str(cfg->dm_policy);
-    if (ch->dm_policy == SC_DM_POLICY_PAIRING) {
-        char *dir = sc_expand_home("~/.smolclaw/pairing");
-        ch->pairing_store = sc_pairing_store_new("slack", dir);
-        free(dir);
-    }
+    sc_channel_init_security(ch, cfg->dm_policy, cfg->allow_from,
+                              cfg->allow_from_count, "slack");
 
     return ch;
 }

@@ -3,24 +3,18 @@
 
 #include "providers/types.h"
 
-/* Session: stores conversation history */
-typedef struct {
-    char *key;
-    sc_llm_message_t *messages;
-    int message_count;
-    int message_cap;
-    char *summary;
-    long created;  /* unix timestamp */
-    long updated;
-} sc_session_t;
+/* Opaque session types (struct bodies in session.c) */
+typedef struct sc_session sc_session_t;
 
-/* Session manager */
-typedef struct {
-    sc_session_t **sessions;
-    int count;
-    int cap;
-    char *storage_dir;
-} sc_session_manager_t;
+/*
+ * Thread safety: NOT thread-safe. All access must be serialized by the caller.
+ * Currently guaranteed by the single-threaded agent loop (sc_agent_run /
+ * run_agent_loop). Async summarization (L-15) accesses sessions from a worker
+ * thread, but only after the main loop has finished with that session for the
+ * current turn, so no concurrent access occurs. If multi-threaded message
+ * processing is added, per-session or manager-level locking will be required.
+ */
+typedef struct sc_session_manager sc_session_manager_t;
 
 /* Create/destroy session manager */
 sc_session_manager_t *sc_session_manager_new(const char *storage_dir);

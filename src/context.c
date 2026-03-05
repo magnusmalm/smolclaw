@@ -22,6 +22,12 @@
 #include "util/str.h"
 #include "util/secrets.h"
 
+struct sc_context_builder {
+    char *workspace;
+    sc_memory_t *memory;
+    sc_tool_registry_t *tools;
+};
+
 sc_context_builder_t *sc_context_builder_new(const char *workspace)
 {
     sc_context_builder_t *cb = calloc(1, sizeof(*cb));

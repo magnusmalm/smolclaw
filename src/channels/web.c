@@ -543,15 +543,8 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
     ch->running = 0;
     ch->data = wd;
 
-    /* Copy allow list */
-    if (cfg->allow_from_count > 0 && cfg->allow_from) {
-        ch->allow_list_count = cfg->allow_from_count;
-        ch->allow_list = calloc((size_t)cfg->allow_from_count, sizeof(char *));
-        for (int i = 0; i < cfg->allow_from_count; i++)
-            ch->allow_list[i] = sc_strdup(cfg->allow_from[i]);
-    }
-
-    ch->dm_policy = sc_dm_policy_from_str(cfg->dm_policy);
+    sc_channel_init_security(ch, cfg->dm_policy, cfg->allow_from,
+                              cfg->allow_from_count, "web");
 
     return ch;
 }

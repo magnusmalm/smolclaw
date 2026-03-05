@@ -14,6 +14,23 @@
 #define INITIAL_MSG_CAP  16
 #define INITIAL_SESS_CAP 8
 
+struct sc_session {
+    char *key;
+    sc_llm_message_t *messages;
+    int message_count;
+    int message_cap;
+    char *summary;
+    long created;  /* unix timestamp */
+    long updated;
+};
+
+struct sc_session_manager {
+    sc_session_t **sessions;
+    int count;
+    int cap;
+    char *storage_dir;
+};
+
 /* ---- Internal helpers ---- */
 
 static sc_session_t *session_create(const char *key)

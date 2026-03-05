@@ -15,6 +15,7 @@
 #include "util/str.h"
 #include "cJSON.h"
 #include "sc_features.h"
+#include "agent_internal.h"
 
 #if SC_ENABLE_SPAWN
 #include "tools/spawn.h"
@@ -292,6 +293,7 @@ static test_agent_ctx_t create_test_agent(int summary_threshold)
     ctx.agent->tools = sc_tool_registry_new();
     ctx.agent->context_builder = sc_context_builder_new(ctx.tmpdir);
     sc_context_builder_set_tools(ctx.agent->context_builder, ctx.agent->tools);
+    ctx.agent->hourly_slots = calloc(SC_HOURLY_SLOTS, sizeof(sc_hourly_slot_t));
 
     return ctx;
 }
@@ -302,6 +304,7 @@ static void destroy_test_agent(test_agent_ctx_t *ctx)
     sc_state_free(ctx->agent->state);
     sc_tool_registry_free(ctx->agent->tools);
     sc_context_builder_free(ctx->agent->context_builder);
+    free(ctx->agent->hourly_slots);
     free(ctx->agent->workspace);
     free(ctx->agent->model);
     free(ctx->agent);
@@ -483,6 +486,9 @@ static void test_session_summarization(void)
                                               "test-summarize");
     ASSERT_NOT_NULL(response);
     ASSERT_STR_EQ(response, "Here's the answer.");
+
+    /* Summarization runs on a background thread — wait for it to complete */
+    sc_agent_wait_summarize(ctx.agent);
 
     /* Provider should be called twice: once for the query, once for summarization */
     ASSERT_INT_EQ(ctx.mpd->chat_call_count, 2);

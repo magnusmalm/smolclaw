@@ -1,6 +1,7 @@
 #ifndef SC_AGENT_H
 #define SC_AGENT_H
 
+#include <pthread.h>
 #include "bus.h"
 #include "config.h"
 #include "context.h"
@@ -56,6 +57,11 @@ typedef struct sc_agent {
     void *tee_cfg;
     /* Analytics (owned, NULL when SC_ENABLE_ANALYTICS is off) */
     void *analytics;
+    /* Cross-turn hourly rate tracking (defined in agent_internal.h) */
+    void *hourly_slots;
+    /* Async summarization thread */
+    pthread_t summarize_thread;
+    int summarize_thread_active;
 } sc_agent_t;
 
 /* Create agent loop */
@@ -83,6 +89,9 @@ char *sc_parse_model_override(const char *content, const char **rest);
 
 /* Enable streaming: agent will call stream_cb with text deltas during LLM calls */
 void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx);
+
+/* Wait for any pending async summarization to complete */
+void sc_agent_wait_summarize(sc_agent_t *agent);
 
 /* Hot-reload safe config fields (limits, allowlist, rate limits) */
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);

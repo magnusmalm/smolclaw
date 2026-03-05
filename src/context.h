@@ -8,12 +8,8 @@
 /* Forward declarations */
 typedef struct sc_tool_registry sc_tool_registry_t;
 
-/* Context builder */
-typedef struct {
-    char *workspace;
-    sc_memory_t *memory;
-    sc_tool_registry_t *tools;
-} sc_context_builder_t;
+/* Opaque context builder */
+typedef struct sc_context_builder sc_context_builder_t;
 
 /* Create/destroy */
 sc_context_builder_t *sc_context_builder_new(const char *workspace);

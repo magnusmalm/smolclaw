@@ -12,6 +12,31 @@
 #include "logger.h"
 #include "util/str.h"
 
+void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
+                               char **allow_from, int allow_from_count,
+                               const char *channel_name)
+{
+    if (!ch) return;
+
+    /* Copy allow list */
+    if (allow_from_count > 0 && allow_from) {
+        ch->allow_list_count = allow_from_count;
+        ch->allow_list = calloc((size_t)allow_from_count, sizeof(char *));
+        if (ch->allow_list) {
+            for (int i = 0; i < allow_from_count; i++)
+                ch->allow_list[i] = sc_strdup(allow_from[i]);
+        }
+    }
+
+    /* DM policy + pairing store */
+    ch->dm_policy = sc_dm_policy_from_str(dm_policy);
+    if (ch->dm_policy == SC_DM_POLICY_PAIRING) {
+        char *dir = sc_expand_home("~/.smolclaw/pairing");
+        ch->pairing_store = sc_pairing_store_new(channel_name, dir);
+        free(dir);
+    }
+}
+
 int sc_channel_is_allowed(sc_channel_t *ch, const char *sender_id)
 {
     if (!ch || !sender_id) return 0;

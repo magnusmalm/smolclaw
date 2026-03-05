@@ -45,6 +45,11 @@ struct sc_channel {
     sc_transcriber_t *transcriber;
 };
 
+/* Initialize common security fields: allow list, DM policy, pairing store */
+void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
+                               char **allow_from, int allow_from_count,
+                               const char *channel_name);
+
 /* Check if sender is in allow list (empty list = allow all) */
 int sc_channel_is_allowed(sc_channel_t *ch, const char *sender_id);
 

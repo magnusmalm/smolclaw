@@ -20,8 +20,11 @@ static void test_session_create(void)
     /* Get or create a new session */
     sc_session_t *s = sc_session_get_or_create(sm, "test-session");
     ASSERT_NOT_NULL(s);
-    ASSERT_STR_EQ(s->key, "test-session");
-    ASSERT_INT_EQ(s->message_count, 0);
+
+    /* Verify via public API: no messages yet */
+    int msg_count = 0;
+    sc_session_get_history(sm, "test-session", &msg_count);
+    ASSERT_INT_EQ(msg_count, 0);
 
     sc_session_manager_free(sm);
 

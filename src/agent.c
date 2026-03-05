@@ -355,6 +355,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
     agent->running = 0;
+    agent->hourly_slots = calloc(SC_HOURLY_SLOTS, sizeof(sc_hourly_slot_t));
 
     /* Session manager */
     sc_strbuf_t sb;
@@ -402,6 +403,11 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 void sc_agent_free(sc_agent_t *agent)
 {
     if (!agent) return;
+    /* Join outstanding summarization thread before freeing resources */
+    if (agent->summarize_thread_active) {
+        pthread_join(agent->summarize_thread, NULL);
+        agent->summarize_thread_active = 0;
+    }
     sc_cost_tracker_free(agent->cost_tracker);
 #if SC_ENABLE_ANALYTICS
     if (agent->analytics)
@@ -448,6 +454,7 @@ void sc_agent_free(sc_agent_t *agent)
     free(agent->alias_providers);
     free(agent->alias_names);
     free(agent->alias_models);
+    free(agent->hourly_slots);
     /* provider and bus are borrowed */
     free(agent);
 }
@@ -497,6 +504,15 @@ void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx)
     if (!agent) return;
     agent->stream_cb = cb;
     agent->stream_ctx = ctx;
+}
+
+void sc_agent_wait_summarize(sc_agent_t *agent)
+{
+    if (!agent) return;
+    if (agent->summarize_thread_active) {
+        pthread_join(agent->summarize_thread, NULL);
+        agent->summarize_thread_active = 0;
+    }
 }
 
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)

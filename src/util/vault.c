@@ -321,6 +321,7 @@ int sc_vault_unlock(sc_vault_t *v, const char *password)
 
     if (!v->data || !cJSON_IsObject(v->data)) {
         SC_LOG_ERROR(LOG_TAG, "Vault JSON parse failed");
+        if (v->data) cjson_cleanse_strings(v->data);
         cJSON_Delete(v->data);
         v->data = NULL;
         OPENSSL_cleanse(v->key, VAULT_KEY_LEN);
@@ -345,7 +346,11 @@ int sc_vault_set(sc_vault_t *v, const char *key, const char *value)
 {
     if (!v || !v->unlocked || !v->data || !key || !value) return -1;
 
-    cJSON_DeleteItemFromObjectCaseSensitive(v->data, key);
+    cJSON *old = cJSON_DetachItemFromObjectCaseSensitive(v->data, key);
+    if (old) {
+        cjson_cleanse_strings(old);
+        cJSON_Delete(old);
+    }
     cJSON_AddStringToObject(v->data, key, value);
     return 0;
 }
@@ -354,10 +359,11 @@ int sc_vault_remove(sc_vault_t *v, const char *key)
 {
     if (!v || !v->unlocked || !v->data || !key) return -1;
 
-    cJSON *item = cJSON_GetObjectItemCaseSensitive(v->data, key);
+    cJSON *item = cJSON_DetachItemFromObjectCaseSensitive(v->data, key);
     if (!item) return -1;
 
-    cJSON_DeleteItemFromObjectCaseSensitive(v->data, key);
+    cjson_cleanse_strings(item);
+    cJSON_Delete(item);
     return 0;
 }
 
