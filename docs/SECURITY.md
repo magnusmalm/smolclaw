@@ -56,7 +56,7 @@ Denylist always runs even in allowlist mode (defense in depth). First command wo
 - IPv6: ::1, ::ffff:mapped-private, fe80::/10, fc00::/7
 - Cloud metadata hostnames
 
-DNS rebinding is prevented via `CURLOPT_RESOLVE` pinning (resolved IP from SSRF check is passed to curl). Redirect bypass prevented via `http_get_no_follow()` + manual redirect loop with per-hop `check_ssrf()`. Set `SC_TEST_DISABLE_SSRF=1` to bypass in tests.
+DNS rebinding is prevented via `CURLOPT_RESOLVE` pinning (resolved IP from SSRF check is passed to curl). Redirect bypass prevented via `http_get_no_follow()` + manual redirect loop with per-hop `check_ssrf()`. Tests bypass SSRF via `sc_web_set_ssrf_bypass(1)` (internal API, not settable via environment).
 
 ## Message Restriction
 

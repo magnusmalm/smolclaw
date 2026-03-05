@@ -86,9 +86,9 @@ static int is_cmd_separator(char c)
     return c == ';' || c == '|' || c == '&';
 }
 
-/* Normalize command for pattern matching: lowercase, newlines→';', strip non-ASCII.
- * Returns malloc'd string. Caller owns. */
-static char *normalize_command(const char *command)
+/* Normalize command for deny pattern matching: lowercase, newlines→';',
+ * strip non-ASCII bytes. Returns malloc'd string. Caller owns. */
+char *sc_exec_normalize_command(const char *command)
 {
     char *lower = sc_strdup(command);
     if (!lower) return NULL;
@@ -162,24 +162,36 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
                                    int allowed_count,
                                    int restrict_to_workspace)
 {
-    char *lower = normalize_command(command);
-    if (!lower) return "out of memory";
+    /* Reject commands with control characters that could cause
+     * normalization-vs-execution mismatch (C-2 hardening) */
+    for (const char *p = command; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 && c != '\n' && c != '\t')
+            return "Command blocked: contains control characters";
+    }
+
+    char *normalized = sc_exec_normalize_command(command);
+    if (!normalized) return "out of memory";
 
     if (use_allowlist && allowed_commands) {
-        const char *err = check_allowlist(lower, allowed_commands, allowed_count);
-        if (err) { free(lower); return err; }
+        const char *err = check_allowlist(normalized, allowed_commands,
+                                          allowed_count);
+        if (err) { free(normalized); return err; }
     }
 
-    if (sc_deny_list_matches(deny, lower)) {
-        free(lower);
+    if (sc_deny_list_matches(deny, normalized)) {
+        free(normalized);
         return "Command blocked by safety guard (dangerous pattern detected)";
     }
-    free(lower);
 
+    /* Check path traversal on the normalized form */
     if (restrict_to_workspace) {
-        if (strstr(command, "../") || strstr(command, "..\\"))
+        if (strstr(normalized, "../") || strstr(normalized, "..\\")) {
+            free(normalized);
             return "Command blocked by safety guard (path traversal detected)";
+        }
     }
+    free(normalized);
     return NULL;
 }
 
@@ -211,9 +223,23 @@ void sc_exec_child(const char *command, const char *working_dir,
     if (working_dir && *working_dir)
         if (chdir(working_dir) != 0) { /* ignore */ }
 
+    /* Strip non-ASCII from command before exec so that the shell sees
+     * the same bytes the deny patterns analyzed (C-2 hardening). */
+    char *safe_cmd = sc_strdup(command);
+    if (safe_cmd) {
+        char *dst = safe_cmd, *src = safe_cmd;
+        while (*src) {
+            if (!((unsigned char)*src & 0x80))
+                *dst++ = *src;
+            src++;
+        }
+        *dst = '\0';
+    }
+
     char *envp[SC_EXEC_MAX_SAFE_ENV];
     sc_exec_build_safe_envp(envp);
-    execle("/bin/sh", "sh", "-c", command, (char *)NULL, envp);
+    execle("/bin/sh", "sh", "-c", safe_cmd ? safe_cmd : command,
+           (char *)NULL, envp);
     _exit(127);
 }
 

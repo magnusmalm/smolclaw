@@ -111,7 +111,8 @@ static int is_valid_mcp_name(const char *name)
 /* ---------- Public API ---------- */
 
 sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
-                                      sc_tool_registry_t *registry)
+                                      sc_tool_registry_t *registry,
+                                      const char *workspace)
 {
     if (!cfg || cfg->server_count == 0 || !registry) return NULL;
 
@@ -140,7 +141,8 @@ sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
 
         sc_mcp_client_t *client = sc_mcp_client_start(
             srv->name, srv->command, srv->command_count,
-            srv->env_keys, srv->env_values, srv->env_count);
+            srv->env_keys, srv->env_values, srv->env_count,
+            workspace);
 
         if (!client) {
             SC_LOG_WARN(LOG_TAG, "Failed to start MCP server '%s', skipping", srv->name);

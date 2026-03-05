@@ -24,6 +24,12 @@
 #include "constants.h"
 #include "cJSON.h"
 
+#include "sc_features.h"
+#if SC_ENABLE_TEE
+#include "tee.h"
+static sc_tee_config_t *bg_tee_cfg;
+#endif
+
 #define LOG_TAG "background"
 
 /* ---------- Process registry ---------- */
@@ -274,7 +280,26 @@ static sc_tool_result_t *bg_poll_execute(sc_tool_t *self, cJSON *args, void *ctx
     /* Truncate if too long */
     size_t len = out_str ? strlen(out_str) : 0;
     if (len > (size_t)SC_MAX_OUTPUT_CHARS) {
-        out_str[SC_MAX_OUTPUT_CHARS] = '\0';
+#if SC_ENABLE_TEE
+        if (bg_tee_cfg) {
+            char *tee_path = sc_tee_save(bg_tee_cfg, out_str, len, "bg_poll");
+            if (tee_path) {
+                out_str[SC_MAX_OUTPUT_CHARS] = '\0';
+                sc_strbuf_t hint;
+                sc_strbuf_init(&hint);
+                sc_strbuf_append(&hint, out_str);
+                sc_strbuf_appendf(&hint, "\n[full output: %s]", tee_path);
+                free(out_str);
+                out_str = sc_strbuf_finish(&hint);
+                free(tee_path);
+            } else {
+                out_str[SC_MAX_OUTPUT_CHARS] = '\0';
+            }
+        } else
+#endif
+        {
+            out_str[SC_MAX_OUTPUT_CHARS] = '\0';
+        }
     }
 
     sc_strbuf_t sb;
@@ -400,4 +425,13 @@ void sc_tool_exec_bg_set_sandbox(sc_tool_t *t, int enabled)
     if (!t || !t->data) return;
     exec_bg_data_t *d = (exec_bg_data_t *)t->data;
     d->sandbox_enabled = enabled;
+}
+
+void sc_tool_bg_poll_set_tee(struct sc_tee_config *tee_cfg)
+{
+#if SC_ENABLE_TEE
+    bg_tee_cfg = tee_cfg;
+#else
+    (void)tee_cfg;
+#endif
 }

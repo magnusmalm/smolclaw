@@ -394,7 +394,7 @@ int main(void)
     printf("test_web\n");
 
     /* Disable SSRF protection for tests (mock server is on localhost) */
-    setenv("SC_TEST_DISABLE_SSRF", "1", 1);
+    sc_web_set_ssrf_bypass(1);
 
     RUN_TEST(test_web_search_brave);
     RUN_TEST(test_web_search_brave_empty);

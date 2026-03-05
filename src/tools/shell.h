@@ -14,4 +14,10 @@ void sc_tool_exec_set_allowlist(sc_tool_t *t, int use_allowlist,
 /* Enable/disable OS-level sandbox (Landlock + seccomp) for exec children */
 void sc_tool_exec_set_sandbox(sc_tool_t *t, int enabled);
 
+/* Forward declaration for tee config */
+struct sc_tee_config;
+
+/* Set tee config for saving full output on truncation */
+void sc_tool_exec_set_tee(sc_tool_t *t, struct sc_tee_config *tee_cfg);
+
 #endif /* SC_TOOL_SHELL_H */

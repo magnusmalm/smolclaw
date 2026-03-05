@@ -51,6 +51,10 @@ typedef struct sc_agent {
     void *memory_index;
     /* Cost tracking (owned, NULL if workspace unavailable) */
     void *cost_tracker;
+    /* Tee config (owned, NULL when SC_ENABLE_TEE is off) */
+    void *tee_cfg;
+    /* Analytics (owned, NULL when SC_ENABLE_ANALYTICS is off) */
+    void *analytics;
 } sc_agent_t;
 
 /* Create agent loop */

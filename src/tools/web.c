@@ -27,6 +27,14 @@
 #include "constants.h"
 #include "cJSON.h"
 
+/* Test-only SSRF bypass flag — not settable via environment (H-1 hardening) */
+static int ssrf_bypass_enabled = 0;
+
+void sc_web_set_ssrf_bypass(int enabled)
+{
+    ssrf_bypass_enabled = enabled;
+}
+
 /* ---------- realistic browser headers ---------- */
 
 /* Rotate through recent Chrome UAs to avoid fingerprinting on a stale version */
@@ -883,8 +891,9 @@ static ssrf_result_t check_ssrf(const char *url)
     res.resolved_ip[0] = '\0';
     res.hostname[0] = '\0';
 
-    /* Allow tests to bypass SSRF checks for mock server on localhost */
-    if (getenv("SC_TEST_DISABLE_SSRF")) return res;
+    /* Allow tests to bypass SSRF checks for mock server on localhost.
+     * Uses internal flag (not env var) to prevent injection (H-1). */
+    if (ssrf_bypass_enabled) return res;
 
     char *host = extract_hostname(url);
     if (!host) { res.error = "could not parse hostname from URL"; return res; }

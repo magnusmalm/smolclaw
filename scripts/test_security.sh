@@ -86,8 +86,8 @@ elif [ -n "$SSH_HOST" ]; then
 
     header "Running test_security_prod on $SSH_HOST"
 
-    # Ensure SSRF checks are active (not bypassed)
-    if ssh "$SSH_HOST" "cd $REMOTE_DIR && unset SC_TEST_DISABLE_SSRF && ./build/test_security_prod"; then
+    # SSRF bypass is now internal API (not env var) — always active in prod
+    if ssh "$SSH_HOST" "cd $REMOTE_DIR && ./build/test_security_prod"; then
         echo ""
         echo "  C tests: PASSED"
         PASS=$((PASS + 1))

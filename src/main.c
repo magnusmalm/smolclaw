@@ -43,6 +43,9 @@
 #include "updater/transport_http.h"
 #endif
 #include "cost.h"
+#if SC_ENABLE_ANALYTICS
+#include "analytics.h"
+#endif
 #include <curl/curl.h>
 
 /* Global for signal handling */
@@ -743,6 +746,55 @@ static void cmd_cost(int argc, char **argv)
     sc_cost_tracker_free(ct);
 }
 
+#if SC_ENABLE_ANALYTICS
+static void cmd_analytics(int argc, char **argv)
+{
+    char *config_path = sc_config_get_path();
+    sc_config_t *cfg = sc_config_load(config_path);
+    free(config_path);
+
+    if (!cfg) {
+        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
+        return;
+    }
+
+    char *workspace = sc_config_workspace_path(cfg);
+    sc_analytics_t *a = sc_analytics_new(workspace);
+    free(workspace);
+    sc_config_free(cfg);
+
+    if (!a) {
+        fprintf(stderr, "Error: could not initialize analytics\n");
+        return;
+    }
+
+    const char *subcmd = (argc >= 3) ? argv[2] : "summary";
+    char *output = NULL;
+
+    if (strcmp(subcmd, "summary") == 0)       output = sc_analytics_summary(a);
+    else if (strcmp(subcmd, "today") == 0)     output = sc_analytics_today(a);
+    else if (strcmp(subcmd, "week") == 0)      output = sc_analytics_period(a, 7);
+    else if (strcmp(subcmd, "month") == 0)     output = sc_analytics_period(a, 30);
+    else if (strcmp(subcmd, "model") == 0)     output = sc_analytics_by_model(a, 30);
+    else if (strcmp(subcmd, "channel") == 0)   output = sc_analytics_by_channel(a, 30);
+    else if (strcmp(subcmd, "reset") == 0) {
+        sc_analytics_reset(a);
+        printf("Analytics data reset.\n");
+    } else {
+        fprintf(stderr, "Unknown analytics subcommand: %s\n"
+                "Usage: %s analytics [summary|today|week|month|model|channel|reset]\n",
+                subcmd, SC_NAME);
+    }
+
+    if (output) {
+        printf("%s", output);
+        free(output);
+    }
+
+    sc_analytics_free(a);
+}
+#endif /* SC_ENABLE_ANALYTICS */
+
 #if SC_ENABLE_UPDATER
 static void cmd_update(int argc, char **argv)
 {
@@ -1352,6 +1404,10 @@ int main(int argc, char **argv)
         cmd_pairing(argc, argv);
     } else if (strcmp(command, "cost") == 0) {
         cmd_cost(argc, argv);
+#if SC_ENABLE_ANALYTICS
+    } else if (strcmp(command, "analytics") == 0) {
+        cmd_analytics(argc, argv);
+#endif
     } else if (strcmp(command, "doctor") == 0) {
         cmd_doctor();
 #if SC_ENABLE_VAULT

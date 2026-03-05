@@ -14,9 +14,11 @@
 typedef struct sc_mcp_bridge sc_mcp_bridge_t;
 
 /* Start all configured MCP servers and register their tools.
+ * workspace is used for sandbox restrictions on server subprocesses.
  * Returns bridge handle (or NULL if no servers configured/started). */
 sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
-                                      sc_tool_registry_t *registry);
+                                      sc_tool_registry_t *registry,
+                                      const char *workspace);
 
 /* Stop all MCP servers and free bridge */
 void sc_mcp_bridge_free(sc_mcp_bridge_t *bridge);

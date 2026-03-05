@@ -22,6 +22,7 @@
 #include "logger.h"
 #include "util/str.h"
 #include "util/json_helpers.h"
+#include "util/sandbox.h"
 
 #define LOG_TAG "mcp"
 
@@ -212,7 +213,8 @@ static int mcp_notify(sc_mcp_client_t *client, const char *method, cJSON *params
 sc_mcp_client_t *sc_mcp_client_start(const char *name,
                                       char **command, int command_count,
                                       char **env_keys, char **env_values,
-                                      int env_count)
+                                      int env_count,
+                                      const char *workspace)
 {
     if (!name || !command || command_count < 1) return NULL;
 
@@ -264,6 +266,16 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         if (max_fd < 0) max_fd = 1024;
         for (int fd = 3; fd < max_fd; fd++)
             close(fd);
+
+        /* Apply OS-level sandbox (Landlock + seccomp) — restrict MCP
+         * server to workspace + /tmp + standard read-only paths (C-3) */
+        if (workspace) {
+            sc_sandbox_opts_t sandbox_opts = {
+                .workspace = workspace,
+                .tmpdir = NULL,
+            };
+            sc_sandbox_apply(&sandbox_opts);
+        }
 
         /* Block dangerous environment variables */
         static const char *blocked_env[] = {

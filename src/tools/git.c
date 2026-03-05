@@ -166,11 +166,22 @@ static int git_build_argv(const char *dir, const char *subcmd,
     }
     argv_out[argc] = NULL;
 
-    /* Block dangerous flag patterns in args */
+    /* Block dangerous flag patterns in args.
+     * -c/--config can execute arbitrary commands via core.pager, core.editor,
+     * core.sshCommand, credential.helper, etc.
+     * --git-dir/--work-tree escape workspace restrictions.
+     * --exec/--upload-pack/--receive-pack execute arbitrary commands. */
     for (int i = 4; i < argc; i++) {
-        if (strncmp(argv_out[i], "--exec", 6) == 0 ||
-            strncmp(argv_out[i], "--upload-pack", 13) == 0 ||
-            strncmp(argv_out[i], "--receive-pack", 14) == 0)
+        const char *a = argv_out[i];
+        if (strncmp(a, "--exec", 6) == 0 ||
+            strncmp(a, "--upload-pack", 13) == 0 ||
+            strncmp(a, "--receive-pack", 14) == 0 ||
+            strncmp(a, "--config", 8) == 0 ||
+            strncmp(a, "--git-dir", 9) == 0 ||
+            strncmp(a, "--work-tree", 11) == 0 ||
+            strncmp(a, "--replace-object", 16) == 0 ||
+            (a[0] == '-' && a[1] == 'c' && (a[2] == '\0' || a[2] == ' ')) ||
+            (a[0] == '-' && a[1] == 'p' && (a[2] == '\0' || a[2] == ' ')))
             return -1;
     }
     return argc;
@@ -202,7 +213,9 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
 
-        for (int fd = 3; fd < 256; fd++)
+        int max_fd = (int)sysconf(_SC_OPEN_MAX);
+        if (max_fd < 0) max_fd = 1024;
+        for (int fd = 3; fd < max_fd; fd++)
             close(fd);
 
         execvp("git", argv);

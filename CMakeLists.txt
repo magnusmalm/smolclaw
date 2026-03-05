@@ -165,8 +165,8 @@ add_custom_command(
 add_library(cjson STATIC deps/cJSON/cJSON.c)
 target_include_directories(cjson PUBLIC deps/cJSON)
 
-# Vendored SQLite (for FTS5 memory search)
-if(SC_ENABLE_MEMORY_SEARCH)
+# Vendored SQLite (for FTS5 memory search and/or analytics)
+if(SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
     add_library(sqlite3 STATIC deps/sqlite3/sqlite3.c)
     target_include_directories(sqlite3 PUBLIC deps/sqlite3)
     target_compile_definitions(sqlite3 PRIVATE
@@ -289,6 +289,18 @@ if(SC_ENABLE_UPDATER)
     list(APPEND SC_SOURCES src/updater/updater.c src/updater/transport_http.c)
 endif()
 
+if(SC_ENABLE_TEE)
+    list(APPEND SC_SOURCES src/tee.c)
+endif()
+
+if(SC_ENABLE_OUTPUT_FILTER)
+    list(APPEND SC_SOURCES src/tools/output_filter.c)
+endif()
+
+if(SC_ENABLE_ANALYTICS)
+    list(APPEND SC_SOURCES src/analytics.c)
+endif()
+
 # ========================================================================
 # Library target
 # ========================================================================
@@ -351,8 +363,8 @@ else()
     endif()
 endif()
 
-# SQLite for memory search (all build modes)
-if(SC_ENABLE_MEMORY_SEARCH)
+# SQLite for memory search and/or analytics (all build modes)
+if(SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
     target_link_libraries(smolclaw_lib PUBLIC sqlite3)
 endif()
 
@@ -442,6 +454,18 @@ if(SC_ENABLE_UPDATER)
     list(APPEND TEST_SOURCES tests/test_updater.c)
 endif()
 
+if(SC_ENABLE_TEE)
+    list(APPEND TEST_SOURCES tests/test_tee.c)
+endif()
+
+if(SC_ENABLE_OUTPUT_FILTER)
+    list(APPEND TEST_SOURCES tests/test_output_filter.c)
+endif()
+
+if(SC_ENABLE_ANALYTICS)
+    list(APPEND TEST_SOURCES tests/test_analytics.c)
+endif()
+
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
@@ -505,6 +529,9 @@ message(STATUS "  Git tool ........... ${SC_ENABLE_GIT}")
 message(STATUS "  Slack channel ...... ${SC_ENABLE_SLACK}")
 message(STATUS "  Web channel ........ ${SC_ENABLE_WEB}")
 message(STATUS "  Self-updater ....... ${SC_ENABLE_UPDATER}")
+message(STATUS "  Tee-on-truncation .. ${SC_ENABLE_TEE}")
+message(STATUS "  Output filter ...... ${SC_ENABLE_OUTPUT_FILTER}")
+message(STATUS "  Analytics .......... ${SC_ENABLE_ANALYTICS}")
 message(STATUS "  Static linking ...... ${SC_STATIC}")
 message(STATUS "  Musl static ......... ${SC_MUSL_STATIC}")
 message(STATUS "  Strip binary ........ ${SC_STRIP}")

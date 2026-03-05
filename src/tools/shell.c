@@ -24,6 +24,14 @@
 #include "constants.h"
 #include "cJSON.h"
 
+#include "sc_features.h"
+#if SC_ENABLE_TEE
+#include "tee.h"
+#endif
+#if SC_ENABLE_OUTPUT_FILTER
+#include "tools/output_filter.h"
+#endif
+
 /* Shell tool data */
 typedef struct {
     char *working_dir;
@@ -35,6 +43,9 @@ typedef struct {
     char **allowed_commands;
     int allowed_count;
     int sandbox_enabled;
+#if SC_ENABLE_TEE
+    sc_tee_config_t *tee_cfg;
+#endif
 } shell_data_t;
 
 /* ---------- Tool implementation ---------- */
@@ -244,6 +255,43 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
     int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     char *out_str = sc_strbuf_finish(&output);
 
+#if SC_ENABLE_TEE || SC_ENABLE_OUTPUT_FILTER
+    /* Pre-truncation: tee raw output and/or apply output filter */
+    if (out_str) {
+        size_t raw_len = strlen(out_str);
+        char *tee_path = NULL;
+#if SC_ENABLE_TEE
+        /* Tee full output before truncation if it will be truncated */
+        if (d->tee_cfg && raw_len > (size_t)d->max_output_chars) {
+            tee_path = sc_tee_save(d->tee_cfg, out_str, raw_len, "exec");
+        }
+#endif
+#if SC_ENABLE_OUTPUT_FILTER
+        /* Try to compress output for known CLI tools */
+        sc_filter_type_t ftype = sc_filter_detect(command);
+        if (ftype != SC_FILTER_NONE) {
+            char *filtered = sc_filter_apply(ftype, out_str, raw_len);
+            if (filtered) {
+                free(out_str);
+                out_str = filtered;
+            }
+        }
+#endif
+#if SC_ENABLE_TEE
+        /* Append tee hint if we saved the full output */
+        if (tee_path) {
+            sc_strbuf_t hint;
+            sc_strbuf_init(&hint);
+            sc_strbuf_append(&hint, out_str);
+            sc_strbuf_appendf(&hint, "\n[full output: %s]", tee_path);
+            free(out_str);
+            out_str = sc_strbuf_finish(&hint);
+            free(tee_path);
+        }
+#endif
+    }
+#endif
+
     return shell_format_result(out_str, exit_code, timed_out,
                                 d->max_output_chars);
 }
@@ -287,4 +335,15 @@ void sc_tool_exec_set_sandbox(sc_tool_t *t, int enabled)
     if (!t || !t->data) return;
     shell_data_t *d = t->data;
     d->sandbox_enabled = enabled;
+}
+
+void sc_tool_exec_set_tee(sc_tool_t *t, struct sc_tee_config *tee_cfg)
+{
+#if SC_ENABLE_TEE
+    if (!t || !t->data) return;
+    shell_data_t *d = t->data;
+    d->tee_cfg = tee_cfg;
+#else
+    (void)t; (void)tee_cfg;
+#endif
 }

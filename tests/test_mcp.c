@@ -77,7 +77,7 @@ static void create_mock_server(void)
 static void test_mcp_client_lifecycle(void)
 {
     char *cmd[] = { "/bin/sh", mock_script_path };
-    sc_mcp_client_t *client = sc_mcp_client_start("mock", cmd, 2, NULL, NULL, 0);
+    sc_mcp_client_t *client = sc_mcp_client_start("mock", cmd, 2, NULL, NULL, 0, NULL);
     ASSERT_NOT_NULL(client);
 
     /* Should be alive */
@@ -123,7 +123,7 @@ static void test_mcp_bridge_registers_tools(void)
     cfg.servers = &srv;
     cfg.server_count = 1;
 
-    sc_mcp_bridge_t *bridge = sc_mcp_bridge_start(&cfg, reg);
+    sc_mcp_bridge_t *bridge = sc_mcp_bridge_start(&cfg, reg, NULL);
     ASSERT_NOT_NULL(bridge);
 
     /* Should have registered "mock__echo" */
@@ -148,7 +148,7 @@ static void test_mcp_bridge_registers_tools(void)
 static void test_mcp_server_not_found(void)
 {
     char *cmd[] = { "/nonexistent/binary" };
-    sc_mcp_client_t *client = sc_mcp_client_start("bad", cmd, 1, NULL, NULL, 0);
+    sc_mcp_client_t *client = sc_mcp_client_start("bad", cmd, 1, NULL, NULL, 0, NULL);
     ASSERT_NULL(client);
 }
 
@@ -176,7 +176,7 @@ static void test_mcp_server_crash(void)
     chmod(crash_script, 0755);
 
     char *cmd[] = { "/bin/sh", crash_script };
-    sc_mcp_client_t *client = sc_mcp_client_start("crash", cmd, 2, NULL, NULL, 0);
+    sc_mcp_client_t *client = sc_mcp_client_start("crash", cmd, 2, NULL, NULL, 0, NULL);
     ASSERT_NOT_NULL(client);
 
     /* Give server time to exit */

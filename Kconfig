@@ -80,6 +80,36 @@ config SC_ENABLE_BACKGROUND
 
 endmenu
 
+menu "Output"
+
+config SC_ENABLE_TEE
+	bool "Tee-on-truncation (save full output to disk)"
+	default y
+	help
+	  Save full tool output to disk when truncated, so the LLM
+	  can read it later via read_file instead of re-running commands.
+
+config SC_ENABLE_OUTPUT_FILTER
+	bool "Output compression for common CLI tools"
+	default n
+	select SC_ENABLE_TEE
+	help
+	  Compress verbose output from cargo test, git status, pytest,
+	  etc. before it enters the LLM context. Requires tee.
+
+endmenu
+
+menu "Analytics"
+
+config SC_ENABLE_ANALYTICS
+	bool "SQLite-backed token/cost analytics"
+	default n
+	help
+	  Time-series tracking of LLM usage: tokens, tool calls, latency.
+	  Stored in {workspace}/state/analytics.db. Complements cost.c.
+
+endmenu
+
 menu "Services"
 
 config SC_ENABLE_CRON

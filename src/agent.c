@@ -44,6 +44,12 @@
 #include "tools/git.h"
 #endif
 #include "cost.h"
+#if SC_ENABLE_TEE
+#include "tee.h"
+#endif
+#if SC_ENABLE_ANALYTICS
+#include "analytics.h"
+#endif
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #include "tools/memory_search.h"
@@ -116,6 +122,18 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                     cfg->exec_allowed_command_count);
     }
     sc_tool_exec_set_sandbox(exec_tool, cfg->sandbox_enabled);
+#if SC_ENABLE_TEE
+    if (cfg->tee_enabled) {
+        sc_tee_config_t *tee = calloc(1, sizeof(*tee));
+        if (tee) {
+            tee->max_files = cfg->tee_max_files;
+            tee->max_file_size = (size_t)cfg->tee_max_file_size;
+            sc_tee_init(tee, workspace);
+            agent->tee_cfg = tee;
+            sc_tool_exec_set_tee(exec_tool, tee);
+        }
+    }
+#endif
     sc_tool_registry_register(agent->tools, exec_tool);
 
     /* Web tools */
@@ -203,6 +221,10 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                        cfg->exec_allowed_command_count);
     }
     sc_tool_exec_bg_set_sandbox(bg_tool, cfg->sandbox_enabled);
+#if SC_ENABLE_TEE
+    if (agent->tee_cfg)
+        sc_tool_bg_poll_set_tee(agent->tee_cfg);
+#endif
     sc_tool_registry_register(agent->tools, bg_tool);
     sc_tool_registry_register(agent->tools, sc_tool_bg_poll_new());
     sc_tool_registry_register(agent->tools, sc_tool_bg_kill_new());
@@ -211,7 +233,8 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     /* MCP external tool servers */
 #if SC_ENABLE_MCP
     if (cfg->mcp.enabled && cfg->mcp.server_count > 0)
-        agent->mcp_bridge = sc_mcp_bridge_start(&cfg->mcp, agent->tools);
+        agent->mcp_bridge = sc_mcp_bridge_start(&cfg->mcp, agent->tools,
+                                                 agent->workspace);
 #endif
 }
 
@@ -359,6 +382,10 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     /* Cost tracker */
     agent->cost_tracker = sc_cost_tracker_new(workspace);
 
+#if SC_ENABLE_ANALYTICS
+    agent->analytics = sc_analytics_new(workspace);
+#endif
+
     /* Fallback providers + model aliases */
     init_fallback_providers(agent, cfg);
     init_model_aliases(agent, cfg);
@@ -370,6 +397,16 @@ void sc_agent_free(sc_agent_t *agent)
 {
     if (!agent) return;
     sc_cost_tracker_free(agent->cost_tracker);
+#if SC_ENABLE_ANALYTICS
+    if (agent->analytics)
+        sc_analytics_free(agent->analytics);
+#endif
+#if SC_ENABLE_TEE
+    if (agent->tee_cfg) {
+        sc_tee_config_free(agent->tee_cfg);
+        free(agent->tee_cfg);
+    }
+#endif
 #if SC_ENABLE_MEMORY_SEARCH
     if (agent->memory_index)
         sc_memory_index_free(agent->memory_index);
@@ -1050,6 +1087,14 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
     if (agent->cost_tracker)
         sc_cost_tracker_record(agent->cost_tracker, model, tc->session_key,
                                 tc->prompt_tokens, tc->completion_tokens);
+
+#if SC_ENABLE_ANALYTICS
+    if (agent->analytics)
+        sc_analytics_record(agent->analytics, model, tc->session_key,
+                             tc->channel, tc->prompt_tokens,
+                             tc->completion_tokens, tc->total_tool_calls,
+                             elapsed_ms);
+#endif
 }
 
 /* ---------- LLM iteration loop ---------- */
@@ -1375,12 +1420,21 @@ static void maybe_consolidate(sc_agent_t *agent, const char *session_key)
                               resp->content);
             char *entry = sc_strbuf_finish(&sb);
             char *redacted = sc_redact_secrets(entry);
-            sc_memory_append_today(mem, redacted ? redacted : entry);
+            const char *to_write = redacted ? redacted : entry;
+
+            /* Block injection patterns from consolidation output */
+            if (sc_prompt_guard_scan_high(to_write)) {
+                SC_LOG_WARN("agent",
+                    "Blocked consolidation: injection pattern in LLM output");
+            } else {
+                sc_memory_append_today(mem, to_write);
+                SC_LOG_INFO("agent",
+                    "Consolidated memory from session %s in %.1fs",
+                    session_key, con_elapsed);
+            }
             free(redacted);
             free(entry);
             sc_memory_free(mem);
-            SC_LOG_INFO("agent", "Consolidated memory from session %s in %.1fs",
-                        session_key, con_elapsed);
         }
     }
 

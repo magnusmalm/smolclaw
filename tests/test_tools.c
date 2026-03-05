@@ -1311,6 +1311,126 @@ static void test_spawn_tool(void)
 }
 #endif /* SC_ENABLE_SPAWN */
 
+#if SC_ENABLE_GIT
+#include "tools/git.h"
+
+/* C-1: Test that dangerous git flags are blocked */
+static void test_git_blocks_config_flag(void)
+{
+    char tmpdir[] = "/tmp/sc_test_git_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Init a git repo so git commands work */
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "git init %s >/dev/null 2>&1", tmpdir);
+    system(cmd);
+
+    sc_tool_t *tool = sc_tool_git_new(tmpdir, 0);
+    ASSERT_NOT_NULL(tool);
+
+    /* -c flag should be blocked */
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "log");
+    cJSON_AddStringToObject(args, "args", "-c core.pager=evil_command");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    ASSERT(strstr(r->for_llm, "blocked") != NULL || strstr(r->for_llm, "Dangerous") != NULL,
+           "-c flag should be blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* --config flag should be blocked */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "log");
+    cJSON_AddStringToObject(args, "args", "--config core.sshCommand=evil");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* --git-dir flag should be blocked */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "status");
+    cJSON_AddStringToObject(args, "args", "--git-dir /etc/shadow");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* --work-tree flag should be blocked */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "status");
+    cJSON_AddStringToObject(args, "args", "--work-tree /");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* Normal args should still work */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "status");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    tool->destroy(tool);
+
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+#endif /* SC_ENABLE_GIT */
+
+/* C-2: Test that control characters in commands are blocked */
+static void test_exec_blocks_control_chars(void)
+{
+    char tmpdir[] = "/tmp/sc_test_ctrl_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_t *tool = sc_tool_exec_new(tmpdir, 0, 0, 0);
+    ASSERT_NOT_NULL(tool);
+
+    /* Carriage return in command should be blocked */
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "echo safe\rmalicious");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    ASSERT(strstr(r->for_llm, "control character") != NULL,
+           "control char command should be blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* Vertical tab should be blocked */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "echo safe\vmalicious");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* Normal command with newline should still work (newline is allowed) */
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "echo hello");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    tool->destroy(tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
 int main(void)
 {
     printf("test_tools\n");
@@ -1346,6 +1466,10 @@ int main(void)
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_spawn_tool);
 #endif
+#if SC_ENABLE_GIT
+    RUN_TEST(test_git_blocks_config_flag);
+#endif
+    RUN_TEST(test_exec_blocks_control_chars);
 
     TEST_REPORT();
 }

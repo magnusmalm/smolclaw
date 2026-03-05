@@ -16,6 +16,7 @@
 #include "memory.h"
 #include "util/str.h"
 #include "util/json_helpers.h"
+#include "util/prompt_guard.h"
 #include "logger.h"
 #include "cJSON.h"
 
@@ -138,6 +139,13 @@ static sc_tool_result_t *memory_write_execute(sc_tool_t *self, cJSON *args, void
     if (!content)
         return sc_tool_result_error("content is required");
 
+    /* Block prompt injection in memory content */
+    if (sc_prompt_guard_scan_high(content)) {
+        SC_LOG_WARN("memory", "Blocked memory_write: prompt injection detected");
+        return sc_tool_result_error(
+            "Content rejected: suspected prompt injection pattern detected.");
+    }
+
     int rc = sc_memory_write_long_term(d->mem, content);
     if (rc != 0)
         return sc_tool_result_error("Failed to write long-term memory");
@@ -184,6 +192,13 @@ static sc_tool_result_t *memory_log_execute(sc_tool_t *self, cJSON *args, void *
     const char *content = sc_json_get_string(args, "content", NULL);
     if (!content)
         return sc_tool_result_error("content is required");
+
+    /* Block prompt injection in memory content */
+    if (sc_prompt_guard_scan_high(content)) {
+        SC_LOG_WARN("memory", "Blocked memory_log: prompt injection detected");
+        return sc_tool_result_error(
+            "Content rejected: suspected prompt injection pattern detected.");
+    }
 
     /* Format as bullet point */
     sc_strbuf_t sb;

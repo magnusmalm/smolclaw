@@ -402,6 +402,9 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->restrict_message_tool, "SMOLCLAW_AGENTS_DEFAULTS_RESTRICT_MESSAGE_TOOL");
     env_override_bool(&cfg->sandbox_enabled, "SMOLCLAW_AGENTS_DEFAULTS_SANDBOX");
     env_override_bool(&cfg->memory_consolidation, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_CONSOLIDATION");
+    env_override_bool(&cfg->tee_enabled, "SMOLCLAW_AGENTS_DEFAULTS_TEE_ENABLED");
+    env_override_int(&cfg->tee_max_files, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILES");
+    env_override_int(&cfg->tee_max_file_size, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILE_SIZE");
     env_override_str(&cfg->log_path, "SMOLCLAW_LOG_PATH");
 
     const char *exec_mode_env = getenv("SMOLCLAW_AGENTS_DEFAULTS_EXEC_MODE");
@@ -583,6 +586,9 @@ sc_config_t *sc_config_default(void)
     cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
     cfg->sandbox_enabled      = 1;
     cfg->memory_consolidation = 1;
+    cfg->tee_enabled          = 1;
+    cfg->tee_max_files        = 50;
+    cfg->tee_max_file_size    = 10 * 1024 * 1024;
 
     /* Providers: anthropic default base */
     cfg->anthropic.api_base = sc_strdup("https://api.anthropic.com/v1");
@@ -718,6 +724,16 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
                                              cfg->sandbox_enabled);
     cfg->memory_consolidation = sc_json_get_bool(defaults, "memory_consolidation",
                                                   cfg->memory_consolidation);
+
+    /* Tee config from agents.defaults.tee.{enabled,max_files,max_file_size} */
+    const cJSON *tee = sc_json_get_object(defaults, "tee");
+    if (tee) {
+        cfg->tee_enabled = sc_json_get_bool(tee, "enabled", cfg->tee_enabled);
+        cfg->tee_max_files = sc_json_get_int(tee, "max_files", cfg->tee_max_files);
+        cfg->tee_max_file_size = sc_json_get_int(tee, "max_file_size",
+                                                   cfg->tee_max_file_size);
+    }
+
     override_str_field(&cfg->log_path, defaults, "log_path");
 }
 
@@ -1033,6 +1049,16 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
         cJSON_AddBoolToObject(defaults, "restrict_message_tool", cfg->restrict_message_tool);
     cJSON_AddBoolToObject(defaults, "sandbox", cfg->sandbox_enabled);
     cJSON_AddBoolToObject(defaults, "memory_consolidation", cfg->memory_consolidation);
+
+    /* Tee config */
+    {
+        cJSON *tee = cJSON_CreateObject();
+        cJSON_AddBoolToObject(tee, "enabled", cfg->tee_enabled);
+        cJSON_AddNumberToObject(tee, "max_files", cfg->tee_max_files);
+        cJSON_AddNumberToObject(tee, "max_file_size", cfg->tee_max_file_size);
+        cJSON_AddItemToObject(defaults, "tee", tee);
+    }
+
     if (cfg->log_path)
         cJSON_AddStringToObject(defaults, "log_path", cfg->log_path);
 }

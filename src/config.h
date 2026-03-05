@@ -153,6 +153,11 @@ typedef struct {
     /* OS-level sandbox for exec children (Landlock + seccomp-bpf) */
     int sandbox_enabled;
 
+    /* Tee-on-truncation: save full output to disk when truncated */
+    int tee_enabled;           /* default 1 */
+    int tee_max_files;         /* default 50 */
+    int tee_max_file_size;     /* default 10*1024*1024 */
+
     /* Persistent log file (NULL = stderr only) */
     char *log_path;
 

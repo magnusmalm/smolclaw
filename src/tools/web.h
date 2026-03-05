@@ -19,4 +19,8 @@ typedef struct {
 sc_tool_t *sc_tool_web_search_new(sc_web_search_opts_t opts);
 sc_tool_t *sc_tool_web_fetch_new(int max_chars);
 
+/* Test-only: bypass SSRF checks for mock servers on localhost.
+ * NOT settable via environment — must be called explicitly from test code. */
+void sc_web_set_ssrf_bypass(int enabled);
+
 #endif /* SC_TOOL_WEB_H */

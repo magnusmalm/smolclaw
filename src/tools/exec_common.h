@@ -18,6 +18,10 @@ int  sc_deny_list_init(sc_deny_list_t *dl);
 void sc_deny_list_free(sc_deny_list_t *dl);
 int  sc_deny_list_matches(const sc_deny_list_t *dl, const char *cmd);
 
+/* Normalize command: lowercase, newlines→';', strip non-ASCII.
+ * Returns malloc'd string. Caller owns. */
+char *sc_exec_normalize_command(const char *command);
+
 /*
  * Full command guard: normalize, allowlist check, denylist check, path traversal.
  * Returns NULL if command is allowed, or a static error string if blocked.

@@ -21,11 +21,13 @@ typedef struct {
 } sc_mcp_tool_def_t;
 
 /* Start an MCP server subprocess and perform init handshake.
+ * workspace is used for sandbox filesystem restrictions (may be NULL to skip).
  * Returns NULL on failure. */
 sc_mcp_client_t *sc_mcp_client_start(const char *name,
                                       char **command, int command_count,
                                       char **env_keys, char **env_values,
-                                      int env_count);
+                                      int env_count,
+                                      const char *workspace);
 
 /* List available tools. Caller owns the returned array and contents. */
 sc_mcp_tool_def_t *sc_mcp_client_list_tools(sc_mcp_client_t *client, int *out_count);

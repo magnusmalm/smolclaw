@@ -338,10 +338,9 @@ static sc_tool_result_t *write_file_execute(sc_tool_t *self, cJSON *args, void *
         return sc_tool_result_error("failed to open file for writing");
     }
 
-    /* Verify target is a regular file (reject FIFOs, devices, etc.)
-     * st_size > 0 distinguishes existing non-regular files from newly created files */
+    /* Verify target is a regular file (reject FIFOs, devices, etc.) */
     struct stat wst;
-    if (fstat(fileno(f), &wst) == 0 && !S_ISREG(wst.st_mode) && wst.st_size > 0) {
+    if (fstat(fileno(f), &wst) == 0 && !S_ISREG(wst.st_mode)) {
         fclose(f);
         free(resolved);
         return sc_tool_result_error("access denied: not a regular file");
