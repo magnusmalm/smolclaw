@@ -38,6 +38,10 @@
 #if SC_ENABLE_VAULT
 #include "util/vault.h"
 #endif
+#if SC_ENABLE_UPDATER
+#include "updater/updater.h"
+#include "updater/transport_http.h"
+#endif
 #include "cost.h"
 #include <curl/curl.h>
 
@@ -75,7 +79,8 @@ static void sighup_handler(int sig)
 
 static void print_version(void)
 {
-    printf("%s %s %s\n", SC_LOGO, SC_NAME, SC_VERSION);
+    printf("%s %s %s (%s, %s)\n", SC_LOGO, SC_NAME, SC_VERSION,
+           SC_GIT_HASH, SC_BUILD_DATE);
 }
 
 #if SC_ENABLE_STREAMING
@@ -103,6 +108,9 @@ static void print_help(void)
     printf("  doctor      Validate configuration and dependencies\n");
 #if SC_ENABLE_VAULT
     printf("  vault       Manage encrypted secret vault\n");
+#endif
+#if SC_ENABLE_UPDATER
+    printf("  update      Check for and apply updates\n");
 #endif
     printf("  version     Show version information\n");
 }
@@ -735,6 +743,88 @@ static void cmd_cost(int argc, char **argv)
     sc_cost_tracker_free(ct);
 }
 
+#if SC_ENABLE_UPDATER
+static void cmd_update(int argc, char **argv)
+{
+    const char *subcmd = (argc >= 3) ? argv[2] : "check";
+
+    if (strcmp(subcmd, "rollback") == 0) {
+        if (sc_updater_rollback() == 0)
+            printf("Rolled back to previous binary\n");
+        else
+            fprintf(stderr, "Rollback failed\n");
+        return;
+    }
+
+    /* Load config for manifest URL */
+    char *config_path = sc_config_get_path();
+    sc_config_t *cfg = sc_config_load(config_path);
+    free(config_path);
+
+    if (!cfg) {
+        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
+        return;
+    }
+
+    if (!cfg->updater.manifest_url || !cfg->updater.manifest_url[0]) {
+        fprintf(stderr, "Error: updater.manifest_url not configured\n");
+        sc_config_free(cfg);
+        return;
+    }
+
+    sc_update_transport_t *transport =
+        sc_update_transport_http_new(cfg->updater.manifest_url);
+    sc_updater_t *updater = sc_updater_new(transport);
+    if (!updater) {
+        fprintf(stderr, "Error: could not create updater\n");
+        sc_config_free(cfg);
+        return;
+    }
+
+    if (strcmp(subcmd, "check") == 0) {
+        printf("Checking for updates...\n");
+        sc_update_manifest_t *m = sc_updater_check(updater);
+        if (m) {
+            printf("Update available: %s -> %s\n", SC_VERSION, m->latest);
+            if (m->changelog)
+                printf("Changelog: %s\n", m->changelog);
+            printf("\nRun '%s update apply' to install\n", SC_NAME);
+            sc_update_manifest_free(m);
+        } else {
+            printf("Already up to date (%s)\n", SC_VERSION_FULL);
+        }
+    } else if (strcmp(subcmd, "apply") == 0) {
+        printf("Checking for updates...\n");
+        sc_update_manifest_t *m = sc_updater_check(updater);
+        if (!m) {
+            printf("Already up to date (%s)\n", SC_VERSION_FULL);
+        } else {
+            printf("Downloading %s...\n", m->latest);
+            sc_fetch_result_t *r = sc_updater_download(updater, m);
+            if (r && r->success) {
+                printf("Applying update...\n");
+                if (sc_updater_apply(r->path) == 0) {
+                    printf("Updated to %s. Restart to use the new version.\n",
+                           m->latest);
+                } else {
+                    fprintf(stderr, "Apply failed\n");
+                }
+            } else {
+                fprintf(stderr, "Download failed: %s\n",
+                        (r && r->error) ? r->error : "unknown error");
+            }
+            sc_fetch_result_free(r);
+            sc_update_manifest_free(m);
+        }
+    } else {
+        fprintf(stderr, "Usage: %s update [check|apply|rollback]\n", SC_NAME);
+    }
+
+    sc_updater_free(updater);
+    sc_config_free(cfg);
+}
+#endif /* SC_ENABLE_UPDATER */
+
 /* Doctor helper macros — used by check functions */
 #define DOC_PASS(pass, ...) do { \
     printf("  \033[32m[PASS]\033[0m "); printf(__VA_ARGS__); printf("\n"); (*(pass))++; \
@@ -889,9 +979,32 @@ static void cmd_doctor(void)
     }
 #endif
 
-    /* 7. System info */
+    /* 7. Updater */
+#if SC_ENABLE_UPDATER
+    if (cfg->updater.enabled) {
+        if (cfg->updater.manifest_url && cfg->updater.manifest_url[0])
+            DOC_PASS(&pass, "Updater: manifest_url configured");
+        else
+            DOC_FAIL(&fail, "Updater: enabled but manifest_url not set");
+
+        /* Check binary path writable */
+        if (access("/proc/self/exe", F_OK) == 0) {
+            char bin[4096];
+            ssize_t len = readlink("/proc/self/exe", bin, sizeof(bin) - 1);
+            if (len > 0) {
+                bin[len] = '\0';
+                if (access(bin, W_OK) == 0)
+                    DOC_PASS(&pass, "Updater: binary writable (%s)", bin);
+                else
+                    DOC_FAIL(&fail, "Updater: binary not writable (%s)", bin);
+            }
+        }
+    }
+#endif
+
+    /* 8. System info */
     DOC_PASS(&pass, "libcurl %s", curl_version());
-#if SC_ENABLE_VAULT || SC_ENABLE_DISCORD || SC_ENABLE_IRC
+#if SC_ENABLE_VAULT || SC_ENABLE_DISCORD || SC_ENABLE_IRC || SC_ENABLE_UPDATER
     DOC_PASS(&pass, "OpenSSL linked");
 #endif
 
@@ -959,8 +1072,31 @@ typedef struct {
 #if SC_ENABLE_HEARTBEAT
     sc_heartbeat_service_t *hb;
 #endif
+#if SC_ENABLE_UPDATER
+    sc_updater_t *updater;
+    struct event *update_timer;
+#endif
     int _unused; /* avoid empty struct */
 } gateway_services_t;
+
+#if SC_ENABLE_UPDATER
+/* Periodic update check timer callback */
+static void update_timer_cb(evutil_socket_t fd, short what, void *arg)
+{
+    (void)fd; (void)what;
+    gateway_services_t *svc = arg;
+    if (!svc->updater) return;
+
+    SC_LOG_INFO("updater", "Periodic update check");
+    sc_update_manifest_t *m = sc_updater_check(svc->updater);
+    if (!m) return;
+
+    SC_LOG_INFO("updater", "Update available: %s -> %s", SC_VERSION, m->latest);
+    sc_audit_log_ext("updater", m->latest, 0, 0, NULL, NULL, "update_available");
+
+    sc_update_manifest_free(m);
+}
+#endif
 
 /* Create and start optional services (cron, heartbeat). */
 static void gateway_start_services(gateway_services_t *svc,
@@ -994,12 +1130,35 @@ static void gateway_start_services(gateway_services_t *svc,
     sc_heartbeat_service_start(svc->hb);
     printf("  Heartbeat service started\n");
 #endif
+
+#if SC_ENABLE_UPDATER
+    if (cfg->updater.enabled && cfg->updater.manifest_url &&
+        cfg->updater.manifest_url[0] && cfg->updater.check_interval_hours > 0) {
+        sc_update_transport_t *transport =
+            sc_update_transport_http_new(cfg->updater.manifest_url);
+        svc->updater = sc_updater_new(transport);
+        if (svc->updater) {
+            long secs = (long)cfg->updater.check_interval_hours * 3600;
+            struct timeval tv = { secs, 0 };
+            svc->update_timer = event_new(base, -1, EV_PERSIST, update_timer_cb, svc);
+            event_add(svc->update_timer, &tv);
+            printf("  Update check every %dh\n", cfg->updater.check_interval_hours);
+        }
+    }
+#endif
 }
 
 /* Stop and free optional services. */
 static void gateway_stop_services(gateway_services_t *svc)
 {
     (void)svc;
+#if SC_ENABLE_UPDATER
+    if (svc->update_timer) {
+        event_del(svc->update_timer);
+        event_free(svc->update_timer);
+    }
+    sc_updater_free(svc->updater);
+#endif
 #if SC_ENABLE_HEARTBEAT
     sc_heartbeat_service_stop(svc->hb);
     sc_heartbeat_service_free(svc->hb);
@@ -1198,6 +1357,10 @@ int main(int argc, char **argv)
 #if SC_ENABLE_VAULT
     } else if (strcmp(command, "vault") == 0) {
         cmd_vault(argc, argv);
+#endif
+#if SC_ENABLE_UPDATER
+    } else if (strcmp(command, "update") == 0) {
+        cmd_update(argc, argv);
 #endif
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);

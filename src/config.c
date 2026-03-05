@@ -549,6 +549,12 @@ static void apply_env_overrides(sc_config_t *cfg)
 
     /* MCP */
     env_override_bool(&cfg->mcp.enabled,         "SMOLCLAW_MCP_ENABLED");
+
+    /* Updater */
+    env_override_bool(&cfg->updater.enabled,             "SMOLCLAW_UPDATER_ENABLED");
+    env_override_str(&cfg->updater.manifest_url,         "SMOLCLAW_UPDATER_MANIFEST_URL");
+    env_override_int(&cfg->updater.check_interval_hours, "SMOLCLAW_UPDATER_CHECK_INTERVAL");
+    env_override_bool(&cfg->updater.auto_apply,          "SMOLCLAW_UPDATER_AUTO_APPLY");
 }
 
 sc_config_t *sc_config_default(void)
@@ -622,6 +628,11 @@ sc_config_t *sc_config_default(void)
 
     /* MCP */
     cfg->mcp.enabled = 1;
+
+    /* Updater */
+    cfg->updater.enabled = 0;  /* off by default — no manifest URL */
+    cfg->updater.check_interval_hours = SC_DEFAULT_UPDATE_CHECK_HOURS;
+    cfg->updater.auto_apply = 0;
 
     return cfg;
 }
@@ -917,6 +928,16 @@ sc_config_t *sc_config_load(const char *path)
         cfg->heartbeat.interval = sc_json_get_int(hb, "interval", SC_DEFAULT_HEARTBEAT_INTERVAL);
     }
 
+    /* updater */
+    const cJSON *upd = sc_json_get_object(root, "updater");
+    if (upd) {
+        cfg->updater.enabled = sc_json_get_bool(upd, "enabled", 0);
+        override_str_field(&cfg->updater.manifest_url, upd, "manifest_url");
+        cfg->updater.check_interval_hours = sc_json_get_int(upd, "check_interval_hours",
+                                                             SC_DEFAULT_UPDATE_CHECK_HOURS);
+        cfg->updater.auto_apply = sc_json_get_bool(upd, "auto_apply", 0);
+    }
+
     load_mcp_config(cfg, root);
 
     /* Apply environment variable overrides last */
@@ -1185,6 +1206,14 @@ int sc_config_save(const char *path, const sc_config_t *cfg)
     cJSON_AddBoolToObject(hb, "enabled", cfg->heartbeat.enabled);
     cJSON_AddNumberToObject(hb, "interval", cfg->heartbeat.interval);
 
+    /* updater */
+    cJSON *upd_obj = cJSON_AddObjectToObject(root, "updater");
+    cJSON_AddBoolToObject(upd_obj, "enabled", cfg->updater.enabled);
+    if (cfg->updater.manifest_url)
+        cJSON_AddStringToObject(upd_obj, "manifest_url", cfg->updater.manifest_url);
+    cJSON_AddNumberToObject(upd_obj, "check_interval_hours", cfg->updater.check_interval_hours);
+    cJSON_AddBoolToObject(upd_obj, "auto_apply", cfg->updater.auto_apply);
+
     save_mcp_config(root, cfg);
 
     int ret = sc_json_save_file(path, root);
@@ -1298,6 +1327,9 @@ void sc_config_free(sc_config_t *cfg)
         free(s->env_values);
     }
     free(cfg->mcp.servers);
+
+    /* Updater */
+    free(cfg->updater.manifest_url);
 
     if (cfg->raw) cJSON_Delete(cfg->raw);
 

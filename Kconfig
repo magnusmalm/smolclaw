@@ -146,6 +146,18 @@ config SC_ENABLE_VAULT
 
 endmenu
 
+menu "Updates"
+
+config SC_ENABLE_UPDATER
+	bool "Self-update service"
+	default y
+	select NEED_OPENSSL
+	help
+	  Transport-agnostic self-update: check, download, verify (SHA-256),
+	  atomic binary replacement. HTTP transport built-in.
+
+endmenu
+
 # Hidden dependency symbols — auto-selected by features that need them
 config NEED_OPENSSL
 	bool

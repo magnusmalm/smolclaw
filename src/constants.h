@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-#define SC_VERSION "0.1.0"
+#include "sc_version.h"
 #define SC_NAME    "smolclaw"
 #define SC_LOGO    "\xF0\x9F\xA6\x9E" /* lobster emoji */
 
@@ -99,5 +99,11 @@ int sc_shutdown_requested(void);
 
 /* Spawn depth limit */
 #define SC_MAX_SPAWN_DEPTH 3
+
+/* Self-updater */
+#define SC_DEFAULT_UPDATE_CHECK_HOURS  24
+#define SC_UPDATE_MANIFEST_TIMEOUT     30    /* seconds */
+#define SC_UPDATE_DOWNLOAD_TIMEOUT     600   /* seconds */
+#define SC_UPDATE_MAX_BINARY_SIZE      (50 * 1024 * 1024)
 
 #endif /* SC_CONSTANTS_H */

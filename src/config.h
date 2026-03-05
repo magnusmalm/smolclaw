@@ -104,6 +104,14 @@ typedef struct {
     int server_count;
 } sc_mcp_config_t;
 
+/* Updater config */
+typedef struct {
+    int enabled;
+    char *manifest_url;
+    int check_interval_hours;  /* 0 = manual only, default 24 */
+    int auto_apply;            /* default 0 */
+} sc_updater_config_t;
+
 /* Main config struct */
 typedef struct {
     /* Agent defaults */
@@ -183,6 +191,9 @@ typedef struct {
 
     /* MCP */
     sc_mcp_config_t mcp;
+
+    /* Updater */
+    sc_updater_config_t updater;
 
     /* Raw JSON for round-trip preservation */
     cJSON *raw;

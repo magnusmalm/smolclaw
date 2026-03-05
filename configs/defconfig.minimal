@@ -16,3 +16,4 @@
 # CONFIG_SC_ENABLE_GIT is not set
 # CONFIG_SC_ENABLE_SLACK is not set
 # CONFIG_SC_ENABLE_WEB is not set
+# CONFIG_SC_ENABLE_UPDATER is not set

@@ -23,7 +23,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 | **Memory** | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5) |
 | **Security** | ~83 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense |
 | **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators |
-| **Services** | Cron scheduling, heartbeat, subagent spawning |
+| **Services** | Cron scheduling, heartbeat, subagent spawning, self-update |
 
 ## Quickstart
 
@@ -105,7 +105,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`.
 
 ## Architecture
 
@@ -116,7 +116,7 @@ User ─── Channel ──┘         │
                              ├── Tool Registry ─── Tools
                              ├── Session Manager
                              ├── Memory (Markdown + FTS5)
-                             └── Services (Cron, Heartbeat)
+                             └── Services (Cron, Heartbeat, Updater)
 ```
 
 | Component | Location | Purpose |
@@ -131,6 +131,7 @@ User ─── Channel ──┘         │
 | Sessions | `src/session.c` | Per-conversation JSON, auto-truncation + summarization |
 | Context | `src/context.c` | System prompt builder |
 | Config | `src/config.c` | JSON config + env var overrides |
+| Updater | `src/updater/` | Transport-agnostic self-update (HTTP built-in) |
 | Security | `src/util/` | Sandbox, secrets, prompt guard, path validation |
 
 ## Configuration
@@ -167,6 +168,47 @@ smolclaw vault set anthropic_api_key
 # Then reference in config: "api_key": "vault://anthropic_api_key"
 ```
 
+### Self-update
+
+smolclaw includes a transport-agnostic self-update system with SHA-256 verification and atomic binary replacement. HTTP transport is built-in; other transports (TFTP, UART) can be added via a vtable interface.
+
+```bash
+# Check for available updates
+smolclaw update check
+
+# Download, verify, and apply
+smolclaw update apply
+
+# Restore previous binary from .bak backup
+smolclaw update rollback
+```
+
+Configure in `config.json`:
+
+```json
+{
+  "updater": {
+    "enabled": true,
+    "manifest_url": "https://example.com/smolclaw/manifest.json",
+    "check_interval_hours": 24,
+    "auto_apply": false
+  }
+}
+```
+
+When running as a gateway, update checks happen automatically at the configured interval. Env var overrides: `SMOLCLAW_UPDATER_ENABLED`, `SMOLCLAW_UPDATER_MANIFEST_URL`, `SMOLCLAW_UPDATER_CHECK_INTERVAL`, `SMOLCLAW_UPDATER_AUTO_APPLY`.
+
+### Versioning
+
+Build-time version includes git metadata:
+
+```
+$ smolclaw version
+smolclaw 0.1.0 (185761b3, 2026-03-04T15:30:00Z)
+```
+
+The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.1.0+185761b3`).
+
 ### Commands
 
 ```
@@ -175,9 +217,10 @@ smolclaw agent       Interactive agent (or -m "message" for single turn)
 smolclaw gateway     Start all channels + services
 smolclaw pairing     Manage channel trust (list/approve/revoke)
 smolclaw vault       Manage encrypted secrets
+smolclaw update      Check for and apply updates
 smolclaw cost        View token usage and costs
 smolclaw doctor      Validate configuration and dependencies
-smolclaw version     Show version
+smolclaw version     Show version (includes git hash and build date)
 ```
 
 ## Security

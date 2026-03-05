@@ -123,8 +123,8 @@ else()
         set(EVENT_LIB "event")
     endif()
 
-    # OpenSSL needed for Discord (WebSocket TLS), IRC (optional TLS), Slack (WSS), Vault
-    if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT)
+    # OpenSSL needed for Discord (WebSocket TLS), IRC (optional TLS), Slack (WSS), Vault, Updater
+    if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT OR SC_ENABLE_UPDATER)
         find_package(OpenSSL QUIET)
         if(NOT OpenSSL_FOUND)
             find_library(SSL_LIB ssl PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
@@ -140,6 +140,15 @@ else()
 
     find_library(READLINE_LIB readline PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
 endif()
+
+# Generate version header from git metadata
+add_custom_target(gen_version ALL
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/gen_version.sh
+            ${PROJECT_VERSION}
+            ${CMAKE_BINARY_DIR}/sc_version.h
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Generating sc_version.h"
+)
 
 # Generate embedded workspace files
 set(WORKSPACE_HEADER "${CMAKE_BINARY_DIR}/workspace_data.h")
@@ -276,10 +285,15 @@ if(SC_ENABLE_VAULT)
     list(APPEND SC_SOURCES src/util/vault.c)
 endif()
 
+if(SC_ENABLE_UPDATER)
+    list(APPEND SC_SOURCES src/updater/updater.c src/updater/transport_http.c)
+endif()
+
 # ========================================================================
 # Library target
 # ========================================================================
 add_library(smolclaw_lib STATIC ${SC_SOURCES} ${WORKSPACE_HEADER})
+add_dependencies(smolclaw_lib gen_version)
 target_include_directories(smolclaw_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/deps/cJSON
@@ -323,7 +337,7 @@ else()
         target_include_directories(smolclaw_lib PUBLIC ${CURL_INCLUDE_DIRS})
     endif()
 
-    if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT)
+    if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT OR SC_ENABLE_UPDATER)
         if(OpenSSL_FOUND)
             target_link_libraries(smolclaw_lib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
         else()
@@ -424,6 +438,10 @@ if(SC_ENABLE_VAULT)
     list(APPEND TEST_SOURCES tests/test_vault.c)
 endif()
 
+if(SC_ENABLE_UPDATER)
+    list(APPEND TEST_SOURCES tests/test_updater.c)
+endif()
+
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})
@@ -486,6 +504,7 @@ message(STATUS "  Vault encryption ... ${SC_ENABLE_VAULT}")
 message(STATUS "  Git tool ........... ${SC_ENABLE_GIT}")
 message(STATUS "  Slack channel ...... ${SC_ENABLE_SLACK}")
 message(STATUS "  Web channel ........ ${SC_ENABLE_WEB}")
+message(STATUS "  Self-updater ....... ${SC_ENABLE_UPDATER}")
 message(STATUS "  Static linking ...... ${SC_STATIC}")
 message(STATUS "  Musl static ......... ${SC_MUSL_STATIC}")
 message(STATUS "  Strip binary ........ ${SC_STRIP}")
