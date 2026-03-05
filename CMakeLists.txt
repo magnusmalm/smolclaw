@@ -198,6 +198,8 @@ set(SC_SOURCES
     src/memory.c
     src/context.c
     src/agent.c
+    src/agent_turn.c
+    src/agent_session.c
     src/audit.c
     src/tools/registry.c
     src/tools/exec_common.c

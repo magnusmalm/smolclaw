@@ -1,0 +1,182 @@
+/*
+ * agent_session.c - Session summarization and memory consolidation
+ *
+ * Extracted from agent.c (M-15) to reduce God Object complexity.
+ */
+
+#include "agent_internal.h"
+
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "cJSON.h"
+#include "constants.h"
+#include "logger.h"
+#include "session.h"
+#include "memory.h"
+#include "util/str.h"
+#include "util/secrets.h"
+#include "util/prompt_guard.h"
+
+static void maybe_consolidate(sc_agent_t *agent, const char *session_key)
+{
+    if (!agent->memory_consolidation) return;
+
+    const char *summary = sc_session_get_summary(agent->sessions, session_key);
+    if (!summary || !summary[0]) return;
+
+    sc_llm_message_t msgs[2];
+    msgs[0] = sc_msg_system(
+        "Extract durable facts worth remembering from this conversation summary. "
+        "Output only bullet points (- fact). Include: user preferences, project decisions, "
+        "key file paths, recurring patterns, important names/dates. "
+        "If nothing is worth remembering long-term, output exactly: NONE");
+    msgs[1] = sc_msg_user(summary);
+
+    cJSON *options = cJSON_CreateObject();
+    cJSON_AddNumberToObject(options, "max_tokens", SC_CONSOLIDATION_MAX_TOKENS);
+    cJSON_AddNumberToObject(options, "temperature", 0.3);
+
+    SC_LOG_INFO("agent", "Calling LLM for memory consolidation...");
+    struct timespec con_t0, con_t1;
+    clock_gettime(CLOCK_MONOTONIC, &con_t0);
+
+    sc_llm_response_t *resp = agent->provider->chat(
+        agent->provider, msgs, 2, NULL, 0, agent->model, options);
+    cJSON_Delete(options);
+
+    clock_gettime(CLOCK_MONOTONIC, &con_t1);
+    double con_elapsed = (con_t1.tv_sec - con_t0.tv_sec)
+                       + (con_t1.tv_nsec - con_t0.tv_nsec) / 1e9;
+
+    if (resp && resp->content && resp->content[0] &&
+        strncmp(resp->content, "NONE", 4) != 0) {
+        sc_memory_t *mem = sc_memory_new(agent->workspace);
+        if (mem) {
+            sc_strbuf_t sb;
+            sc_strbuf_init(&sb);
+            sc_strbuf_appendf(&sb, "\n### Auto-consolidated (%s)\n%s", session_key,
+                              resp->content);
+            char *entry = sc_strbuf_finish(&sb);
+            char *redacted = sc_redact_secrets(entry);
+            const char *to_write = redacted ? redacted : entry;
+
+            if (sc_prompt_guard_scan_high(to_write)) {
+                SC_LOG_WARN("agent",
+                    "Blocked consolidation: injection pattern in LLM output");
+            } else {
+                sc_memory_append_today(mem, to_write);
+                SC_LOG_INFO("agent",
+                    "Consolidated memory from session %s in %.1fs",
+                    session_key, con_elapsed);
+            }
+            free(redacted);
+            free(entry);
+            sc_memory_free(mem);
+        }
+    }
+
+    if (resp) sc_llm_response_free(resp);
+    sc_llm_message_free_fields(&msgs[0]);
+    sc_llm_message_free_fields(&msgs[1]);
+}
+
+void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
+{
+    int count = 0;
+    sc_llm_message_t *history = sc_session_get_history(agent->sessions,
+                                                        session_key, &count);
+
+    if (count <= agent->session_summary_threshold)
+        return;
+
+    SC_LOG_INFO("agent", "Session %s has %d messages, summarizing before truncation",
+                session_key, count);
+
+    int discard_count = count - agent->session_keep_last;
+    sc_strbuf_t transcript;
+    sc_strbuf_init(&transcript);
+
+    const char *existing_summary = sc_session_get_summary(agent->sessions,
+                                                           session_key);
+    if (existing_summary && existing_summary[0]) {
+        sc_strbuf_appendf(&transcript, "Previous summary: %s\n\n", existing_summary);
+    }
+
+    for (int i = 0; i < discard_count; i++) {
+        const char *role = history[i].role;
+        if (!role || strcmp(role, "system") == 0)
+            continue;
+
+        const char *label = role;
+        if (history[i].tool_call_id) {
+            label = "tool_result";
+        } else if (history[i].tool_call_count > 0) {
+            label = "assistant (tool_use)";
+        }
+
+        const char *content = history[i].content;
+        if (!content) content = "";
+
+        sc_strbuf_appendf(&transcript, "[%s] %s\n", label, content);
+
+        if ((int)transcript.len >= agent->summary_max_transcript) {
+            sc_strbuf_append(&transcript, "\n[...truncated...]");
+            break;
+        }
+    }
+
+    char *transcript_str = sc_strbuf_finish(&transcript);
+
+    char *redacted_transcript = sc_redact_secrets(transcript_str);
+    if (redacted_transcript) {
+        free(transcript_str);
+        transcript_str = redacted_transcript;
+    }
+
+    sc_llm_message_t msgs[2];
+    msgs[0] = sc_msg_system(
+        "Summarize the following conversation concisely. Capture key topics, "
+        "decisions made, files modified, and important context for continuity. "
+        "Keep under 200 words.");
+    msgs[1] = sc_msg_user(transcript_str);
+
+    cJSON *options = cJSON_CreateObject();
+    cJSON_AddNumberToObject(options, "max_tokens", SC_SUMMARY_MAX_TOKENS);
+    cJSON_AddNumberToObject(options, "temperature", 0.3);
+
+    SC_LOG_INFO("agent", "Calling LLM for session summarization...");
+    struct timespec sum_t0, sum_t1;
+    clock_gettime(CLOCK_MONOTONIC, &sum_t0);
+
+    sc_llm_response_t *resp = agent->provider->chat(
+        agent->provider, msgs, 2, NULL, 0, agent->model, options);
+
+    cJSON_Delete(options);
+
+    clock_gettime(CLOCK_MONOTONIC, &sum_t1);
+    double sum_elapsed = (sum_t1.tv_sec - sum_t0.tv_sec)
+                       + (sum_t1.tv_nsec - sum_t0.tv_nsec) / 1e9;
+
+    if (resp && resp->content && resp->content[0]) {
+        SC_LOG_INFO("agent", "Session summarized successfully in %.1fs", sum_elapsed);
+        char *redacted_summary = sc_redact_secrets(resp->content);
+        sc_session_set_summary(agent->sessions, session_key,
+                               redacted_summary ? redacted_summary : resp->content);
+        free(redacted_summary);
+    } else {
+        SC_LOG_WARN("agent", "Summarization LLM call failed after %.1fs, truncating without summary",
+                    sum_elapsed);
+    }
+
+    if (resp) sc_llm_response_free(resp);
+    sc_llm_message_free_fields(&msgs[0]);
+    sc_llm_message_free_fields(&msgs[1]);
+    free(transcript_str);
+
+    sc_session_truncate(agent->sessions, session_key, agent->session_keep_last);
+    sc_session_save(agent->sessions, session_key);
+
+    maybe_consolidate(agent, session_key);
+}

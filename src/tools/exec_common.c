@@ -211,13 +211,18 @@ void sc_exec_child(const char *command, const char *working_dir,
     for (int fd = 3; fd < max_fd; fd++)
         close(fd);
 
-    /* OS-level sandbox (Landlock + seccomp) */
+    /* OS-level sandbox (Landlock + seccomp).
+     * Create per-process tmpdir to avoid sharing /tmp with other users. */
+    char proc_tmp[] = "/tmp/sc_exec_XXXXXX";
     if (sandbox_enabled) {
+        const char *tmpdir = mkdtemp(proc_tmp) ? proc_tmp : "/tmp";
         sc_sandbox_opts_t sandbox_opts = {
             .workspace = workspace,
-            .tmpdir = NULL,
+            .tmpdir = tmpdir,
         };
         sc_sandbox_apply(&sandbox_opts);
+        /* Point TMPDIR at per-process dir so child programs use it */
+        setenv("TMPDIR", tmpdir, 1);
     }
 
     if (working_dir && *working_dir)

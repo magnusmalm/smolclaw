@@ -579,6 +579,121 @@ static void test_agent_spawn_tool(void)
 }
 #endif /* SC_ENABLE_SPAWN */
 
+static void test_agent_tool_call_limit(void)
+{
+    /* Verify that max_tool_calls_per_turn stops runaway tool loops.
+     * Set limit to 2, LLM keeps requesting tools → agent should stop. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+    ctx.agent->max_tool_calls_per_turn = 2;
+
+    sc_tool_t *tool = calloc(1, sizeof(*tool));
+    tool->name = "echo_test";
+    tool->description = "A test tool";
+    tool->parameters = mock_tool_params;
+    tool->execute = mock_tool_exec;
+    tool->destroy = mock_tool_destroy;
+    sc_tool_registry_register(ctx.agent->tools, tool);
+
+    mock_tool_executed = 0;
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+
+    /* Every response is a tool call — should be stopped by limit */
+    cJSON *tc_args1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(tc_args1, "query", "call1");
+    sc_tool_call_t tc1 = { .id = "call_1", .name = "echo_test", .arguments = tc_args1 };
+
+    cJSON *tc_args2 = cJSON_CreateObject();
+    cJSON_AddStringToObject(tc_args2, "query", "call2");
+    sc_tool_call_t tc2 = { .id = "call_2", .name = "echo_test", .arguments = tc_args2 };
+
+    cJSON *tc_args3 = cJSON_CreateObject();
+    cJSON_AddStringToObject(tc_args3, "query", "call3");
+    sc_tool_call_t tc3 = { .id = "call_3", .name = "echo_test", .arguments = tc_args3 };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = &tc1, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .tool_calls = &tc2, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[2] = (sc_llm_response_t){
+        .tool_calls = &tc3, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->response_count = 3;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Do many things", "test-limit");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "too many tool calls") != NULL,
+           "Should stop with tool call limit message");
+
+    /* Should have executed at most 2 tool calls (limit) + 1 that triggers the check */
+    ASSERT(mock_tool_executed <= 3, "Should not execute many more than limit");
+
+    free(response);
+    cJSON_Delete(tc_args1);
+    cJSON_Delete(tc_args2);
+    cJSON_Delete(tc_args3);
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+    destroy_test_agent(&ctx);
+}
+
+static void test_agent_multi_tool_calls(void)
+{
+    /* LLM returns multiple tool calls in a single response */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    sc_tool_t *tool = calloc(1, sizeof(*tool));
+    tool->name = "echo_test";
+    tool->description = "A test tool";
+    tool->parameters = mock_tool_params;
+    tool->execute = mock_tool_exec;
+    tool->destroy = mock_tool_destroy;
+    sc_tool_registry_register(ctx.agent->tools, tool);
+
+    mock_tool_executed = 0;
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+
+    /* Response 1: two tool calls at once */
+    cJSON *args_a = cJSON_CreateObject();
+    cJSON_AddStringToObject(args_a, "query", "first");
+    cJSON *args_b = cJSON_CreateObject();
+    cJSON_AddStringToObject(args_b, "query", "second");
+    sc_tool_call_t calls[2] = {
+        { .id = "call_a", .name = "echo_test", .arguments = args_a },
+        { .id = "call_b", .name = "echo_test", .arguments = args_b },
+    };
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 2, .finish_reason = "tool_use",
+    };
+
+    /* Response 2: final text */
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Both tools done.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Run both", "test-multi");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Both tools done.");
+    ASSERT_INT_EQ(mock_tool_executed, 2);
+    ASSERT_INT_EQ(ctx.mpd->chat_call_count, 2);
+
+    /* Session: user + assistant(2 tool_calls) + 2 tool_results + final assistant = 5 */
+    int count = 0;
+    sc_session_get_history(ctx.agent->sessions, "test-multi", &count);
+    ASSERT_INT_EQ(count, 5);
+
+    free(response);
+    cJSON_Delete(args_a);
+    cJSON_Delete(args_b);
+    free(mock_tool_last_arg);
+    mock_tool_last_arg = NULL;
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -594,6 +709,8 @@ int main(void)
     RUN_TEST(test_agent_loop_tool_call);
     RUN_TEST(test_agent_loop_provider_failure);
     RUN_TEST(test_session_summarization);
+    RUN_TEST(test_agent_tool_call_limit);
+    RUN_TEST(test_agent_multi_tool_calls);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

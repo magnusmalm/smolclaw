@@ -80,7 +80,7 @@ static double monotonic_secs(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-/* Read child output via select() with monotonic deadline.
+/* Read child output via poll() with monotonic deadline.
  * Returns 1 if timed out, 0 if child exited normally. */
 static int shell_read_output(int fd, sc_strbuf_t *output, double deadline)
 {

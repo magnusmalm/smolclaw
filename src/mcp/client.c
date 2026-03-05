@@ -134,7 +134,7 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
             }
         }
 
-        /* Rough timeout tracking — decrement by a guess since select consumed some */
+        /* Rough timeout tracking — decrement by a guess since poll consumed some */
         remaining_ms -= 100;
         if (remaining_ms < 100) remaining_ms = 100;
     }
@@ -261,13 +261,16 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             close(fd);
 
         /* Apply OS-level sandbox (Landlock + seccomp) — restrict MCP
-         * server to workspace + /tmp + standard read-only paths (C-3) */
+         * server to workspace + per-process tmpdir (C-3, L-5) */
         if (workspace) {
+            char mcp_tmp[] = "/tmp/sc_mcp_XXXXXX";
+            const char *tmpdir = mkdtemp(mcp_tmp) ? mcp_tmp : "/tmp";
             sc_sandbox_opts_t sandbox_opts = {
                 .workspace = workspace,
-                .tmpdir = NULL,
+                .tmpdir = tmpdir,
             };
             sc_sandbox_apply(&sandbox_opts);
+            setenv("TMPDIR", tmpdir, 1);
         }
 
         /* Block dangerous environment variables */
