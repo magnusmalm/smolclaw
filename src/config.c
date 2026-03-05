@@ -73,7 +73,12 @@ static void env_override_int(int *field, const char *var)
 {
     const char *val = getenv(var);
     if (val) {
-        *field = atoi(val);
+        char *end;
+        long v = strtol(val, &end, 10);
+        if (end != val && *end == '\0')
+            *field = (int)v;
+        else
+            SC_LOG_WARN(LOG_TAG, "invalid integer for %s: '%s'", var, val);
     }
 }
 
@@ -82,7 +87,12 @@ static void env_override_double(double *field, const char *var)
 {
     const char *val = getenv(var);
     if (val) {
-        *field = atof(val);
+        char *end;
+        double v = strtod(val, &end);
+        if (end != val && *end == '\0')
+            *field = v;
+        else
+            SC_LOG_WARN(LOG_TAG, "invalid number for %s: '%s'", var, val);
     }
 }
 
@@ -294,24 +304,18 @@ static void resolve_vault_refs(sc_config_t *cfg)
     if (!password || password[0] == '\0') {
         SC_LOG_WARN(LOG_TAG, "no vault password provided");
         sc_vault_free(vault);
-        free(prompted_pw);
+        sc_vault_free_password(prompted_pw);
         return;
     }
 
     if (sc_vault_unlock(vault, password) != 0) {
         SC_LOG_ERROR(LOG_TAG, "vault unlock failed (wrong password?)");
         sc_vault_free(vault);
-        if (prompted_pw) {
-            OPENSSL_cleanse(prompted_pw, strlen(prompted_pw));
-            free(prompted_pw);
-        }
+        sc_vault_free_password(prompted_pw);
         return;
     }
 
-    if (prompted_pw) {
-        OPENSSL_cleanse(prompted_pw, strlen(prompted_pw));
-        free(prompted_pw);
-    }
+    sc_vault_free_password(prompted_pw);
 
     SC_LOG_INFO(LOG_TAG, "vault unlocked successfully");
     sc_audit_log_ext("vault", "unlocked", 0, 0, NULL, NULL, "vault_unlock");
@@ -966,6 +970,19 @@ sc_config_t *sc_config_load(const char *path)
 #if SC_ENABLE_VAULT
     resolve_vault_refs(cfg);
 #endif
+
+    /* Validate and clamp config values */
+    if (cfg->max_tokens < 1) cfg->max_tokens = SC_DEFAULT_MAX_TOKENS;
+    if (cfg->max_tool_iterations < 1) cfg->max_tool_iterations = SC_DEFAULT_MAX_ITERATIONS;
+    if (cfg->max_output_chars < 1) cfg->max_output_chars = SC_MAX_OUTPUT_CHARS;
+    if (cfg->max_fetch_chars < 1) cfg->max_fetch_chars = SC_MAX_FETCH_CHARS;
+    if (cfg->exec_timeout_secs < 0) cfg->exec_timeout_secs = SC_DEFAULT_EXEC_TIMEOUT;
+    if (cfg->max_tool_calls_per_turn < 1) cfg->max_tool_calls_per_turn = SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN;
+    if (cfg->max_turn_secs < 1) cfg->max_turn_secs = SC_DEFAULT_MAX_TURN_SECS;
+    if (cfg->max_output_total < 1) cfg->max_output_total = SC_DEFAULT_MAX_OUTPUT_TOTAL;
+    if (cfg->rate_limit_per_minute < 0) cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
+    if (cfg->temperature < 0.0) cfg->temperature = 0.0;
+    if (cfg->temperature > 2.0) cfg->temperature = 2.0;
 
     SC_LOG_INFO(LOG_TAG, "loaded config from %s", path);
     sc_audit_log_ext("config", path, 0, 0, NULL, NULL, "config_load");

@@ -184,6 +184,22 @@ sc_vault_t *sc_vault_new(const char *path)
     return v;
 }
 
+/* Recursively cleanse all string values in a cJSON tree before deletion */
+static void cjson_cleanse_strings(cJSON *item)
+{
+    for (cJSON *child = item; child; child = child->next) {
+        if (child->valuestring) {
+            OPENSSL_cleanse(child->valuestring, strlen(child->valuestring));
+        }
+        if (child->string) {
+            OPENSSL_cleanse(child->string, strlen(child->string));
+        }
+        if (child->child) {
+            cjson_cleanse_strings(child->child);
+        }
+    }
+}
+
 void sc_vault_free(sc_vault_t *v)
 {
     if (!v) return;
@@ -195,6 +211,7 @@ void sc_vault_free(sc_vault_t *v)
             OPENSSL_cleanse(json_str, strlen(json_str));
             free(json_str);
         }
+        cjson_cleanse_strings(v->data);
         cJSON_Delete(v->data);
     }
     free(v->path);
@@ -536,4 +553,11 @@ char *sc_vault_prompt_password(const char *prompt)
 
     OPENSSL_cleanse(buf, sizeof(buf));
     return result;
+}
+
+void sc_vault_free_password(char *pw)
+{
+    if (!pw) return;
+    OPENSSL_cleanse(pw, strlen(pw));
+    free(pw);
 }

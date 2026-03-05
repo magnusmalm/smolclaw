@@ -44,4 +44,7 @@ char *sc_vault_get_path(void);
  * Returns NULL on failure. prompt is the message to show. */
 char *sc_vault_prompt_password(const char *prompt);
 
+/* Securely free a password string (cleanse then free). */
+void sc_vault_free_password(char *pw);
+
 #endif /* SC_VAULT_H */

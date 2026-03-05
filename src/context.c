@@ -5,11 +5,14 @@
 
 #include "context.h"
 
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 
@@ -114,20 +117,24 @@ char *sc_context_load_bootstrap(const sc_context_builder_t *cb)
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/%s", cb->workspace, bootstrap_files[i]);
 
-        struct stat lsb;
-        if (lstat(path, &lsb) == 0 && S_ISLNK(lsb.st_mode)) {
-            SC_LOG_WARN("context", "Skipping symlink bootstrap file: %s",
-                        bootstrap_files[i]);
+        int fd = open(path, O_RDONLY | O_NOFOLLOW);
+        if (fd < 0) {
+            if (errno == ELOOP)
+                SC_LOG_WARN("context", "Skipping symlink bootstrap file: %s",
+                            bootstrap_files[i]);
             continue;
         }
 
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
+        struct stat st;
+        if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+            close(fd);
+            continue;
+        }
 
-        fseek(f, 0, SEEK_END);
-        long len = ftell(f);
-        fseek(f, 0, SEEK_SET);
+        FILE *f = fdopen(fd, "r");
+        if (!f) { close(fd); continue; }
 
+        off_t len = st.st_size;
         if (len <= 0) { fclose(f); continue; }
 
         char *data = malloc(len + 1);

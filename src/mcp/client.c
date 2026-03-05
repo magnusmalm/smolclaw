@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <sys/wait.h>
 
 #include "cJSON.h"
@@ -78,18 +78,11 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
     int remaining_ms = timeout_ms;
 
     while (remaining_ms > 0) {
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(client->stdout_fd, &fds);
-
-        struct timeval tv;
-        tv.tv_sec = remaining_ms / 1000;
-        tv.tv_usec = (remaining_ms % 1000) * 1000;
-
-        int ret = select(client->stdout_fd + 1, &fds, NULL, NULL, &tv);
+        struct pollfd pfd = { .fd = client->stdout_fd, .events = POLLIN };
+        int ret = poll(&pfd, 1, remaining_ms);
         if (ret < 0) {
             if (errno == EINTR) continue;
-            SC_LOG_ERROR(LOG_TAG, "[%s] select failed: %s", client->name, strerror(errno));
+            SC_LOG_ERROR(LOG_TAG, "[%s] poll failed: %s", client->name, strerror(errno));
             sc_strbuf_free(&sb);
             return NULL;
         }

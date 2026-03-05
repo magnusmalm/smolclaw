@@ -47,6 +47,7 @@
 #if SC_ENABLE_TEE
 #include "tee.h"
 #endif
+#include "util/sandbox.h"
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
@@ -122,6 +123,13 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                     cfg->exec_allowed_command_count);
     }
     sc_tool_exec_set_sandbox(exec_tool, cfg->sandbox_enabled);
+    if (cfg->sandbox_enabled) {
+        int avail = sc_sandbox_available();
+        if (!(avail & SC_SANDBOX_LANDLOCK))
+            SC_LOG_WARN("agent", "Landlock not available — exec children will run without filesystem sandbox");
+        if (!(avail & SC_SANDBOX_SECCOMP))
+            SC_LOG_WARN("agent", "seccomp-bpf not available — exec children will run without syscall filter");
+    }
 #if SC_ENABLE_TEE
     if (cfg->tee_enabled) {
         sc_tee_config_t *tee = calloc(1, sizeof(*tee));

@@ -513,15 +513,15 @@ static void vault_cmd_init(const char *vault_path)
     char *pw1 = sc_vault_prompt_password("New vault password: ");
     if (!pw1 || pw1[0] == '\0') {
         fprintf(stderr, "Password cannot be empty\n");
-        free(pw1);
+        sc_vault_free_password(pw1);
         return;
     }
 
     char *pw2 = sc_vault_prompt_password("Confirm password: ");
     if (!pw2 || strcmp(pw1, pw2) != 0) {
         fprintf(stderr, "Passwords do not match\n");
-        free(pw1);
-        free(pw2);
+        sc_vault_free_password(pw1);
+        sc_vault_free_password(pw2);
         return;
     }
 
@@ -535,8 +535,8 @@ static void vault_cmd_init(const char *vault_path)
     }
 
     sc_vault_free(v);
-    free(pw1);
-    free(pw2);
+    sc_vault_free_password(pw1);
+    sc_vault_free_password(pw2);
 }
 
 /* Load vault, prompt for password, unlock.
@@ -562,14 +562,11 @@ static sc_vault_t *vault_load_and_unlock(const char *vault_path)
     if (!password || sc_vault_unlock(v, password) != 0) {
         fprintf(stderr, "Failed to unlock vault (wrong password?)\n");
         sc_vault_free(v);
-        free(prompted_pw);
+        sc_vault_free_password(prompted_pw);
         return NULL;
     }
 
-    if (prompted_pw) {
-        memset(prompted_pw, 0, strlen(prompted_pw));
-        free(prompted_pw);
-    }
+    sc_vault_free_password(prompted_pw);
 
     return v;
 }
@@ -587,11 +584,10 @@ static void vault_cmd_set(sc_vault_t *v, int argc, char **argv)
             printf("Stored '%s'\n", argv[3]);
         else
             fprintf(stderr, "Failed to save vault\n");
-        memset(value, 0, strlen(value));
     } else {
         fprintf(stderr, "Value cannot be empty\n");
     }
-    free(value);
+    sc_vault_free_password(value);
 }
 
 static void vault_cmd_get(sc_vault_t *v, int argc, char **argv)
@@ -655,7 +651,7 @@ static void vault_cmd_change_password(sc_vault_t *v)
     char *new_pw1 = sc_vault_prompt_password("New password: ");
     if (!new_pw1 || new_pw1[0] == '\0') {
         fprintf(stderr, "Password cannot be empty\n");
-        free(new_pw1);
+        sc_vault_free_password(new_pw1);
         return;
     }
     char *new_pw2 = sc_vault_prompt_password("Confirm new password: ");
@@ -667,8 +663,8 @@ static void vault_cmd_change_password(sc_vault_t *v)
     } else {
         fprintf(stderr, "Passwords do not match\n");
     }
-    free(new_pw1);
-    free(new_pw2);
+    sc_vault_free_password(new_pw1);
+    sc_vault_free_password(new_pw2);
 }
 
 static void cmd_vault(int argc, char **argv)

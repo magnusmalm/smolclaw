@@ -12,7 +12,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <time.h>
-#include <sys/select.h>
+#include <poll.h>
 #include <sys/wait.h>
 
 #include "tools/shell.h"
@@ -87,24 +87,18 @@ static int shell_read_output(int fd, sc_strbuf_t *output, double deadline)
     char buf[4096];
     int done = 0;
     while (!done) {
-        struct timeval tv;
+        int timeout_ms;
         if (deadline > 0) {
             double remaining = deadline - monotonic_secs();
             if (remaining <= 0)
                 return 1;
-            tv.tv_sec = (remaining > 1.0) ? 1 : (long)remaining;
-            tv.tv_usec = (remaining > 1.0) ? 0
-                : (long)((remaining - (double)tv.tv_sec) * 1e6);
+            timeout_ms = (remaining > 1.0) ? 1000 : (int)(remaining * 1000);
         } else {
-            tv.tv_sec = 1;
-            tv.tv_usec = 0;
+            timeout_ms = 1000;
         }
 
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(fd, &rfds);
-
-        int sel = select(fd + 1, &rfds, NULL, NULL, &tv);
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int sel = poll(&pfd, 1, timeout_ms);
         if (sel > 0) {
             ssize_t n = read(fd, buf, sizeof(buf) - 1);
             if (n > 0) {
