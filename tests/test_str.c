@@ -5,6 +5,9 @@
 #include "test_main.h"
 #include "util/str.h"
 
+#include <sys/stat.h>
+#include <unistd.h>
+
 static void test_sc_strdup(void)
 {
     /* NULL input returns NULL */
@@ -238,6 +241,97 @@ static void test_safe_realloc(void)
     free(m);
 }
 
+/* ===== sc_validate_path tests ===== */
+
+static void test_validate_path_basic(void)
+{
+    /* Create a temp workspace */
+    char ws[] = "/tmp/test_validate_ws_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(ws));
+
+    /* Existing file resolves */
+    char fpath[512];
+    snprintf(fpath, sizeof(fpath), "%s/existing.txt", ws);
+    FILE *f = fopen(fpath, "w");
+    fputs("test", f);
+    fclose(f);
+
+    char *r = sc_validate_path("existing.txt", ws, 1);
+    ASSERT_NOT_NULL(r);
+    ASSERT_STR_EQ(r, fpath);
+    free(r);
+
+    /* Non-existent file in existing dir resolves */
+    r = sc_validate_path("newfile.txt", ws, 1);
+    ASSERT_NOT_NULL(r);
+    free(r);
+
+    unlink(fpath);
+    rmdir(ws);
+}
+
+static void test_validate_path_deep_nonexistent(void)
+{
+    /* Create a temp workspace */
+    char ws[] = "/tmp/test_validate_deep_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(ws));
+
+    /* Path with multiple non-existent directories should resolve */
+    char *r = sc_validate_path("a/b/c/file.txt", ws, 1);
+    ASSERT_NOT_NULL(r);
+
+    /* Should be under workspace */
+    ASSERT(strncmp(r, ws, strlen(ws)) == 0, "should be under workspace");
+
+    /* Should end with the relative path */
+    ASSERT(strstr(r, "a/b/c/file.txt") != NULL, "should contain relative path");
+    free(r);
+
+    /* Two levels deep also works */
+    r = sc_validate_path("config/motion.conf", ws, 1);
+    ASSERT_NOT_NULL(r);
+    ASSERT(strstr(r, "config/motion.conf") != NULL, "should contain path");
+    free(r);
+
+    rmdir(ws);
+}
+
+static void test_validate_path_dotdot_blocked(void)
+{
+    char ws[] = "/tmp/test_validate_dd_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(ws));
+
+    /* Path traversal via .. in non-existent portion should be blocked */
+    char *r = sc_validate_path("a/../../etc/passwd", ws, 1);
+    ASSERT_NULL(r);
+
+    r = sc_validate_path("a/../../../tmp/evil", ws, 1);
+    ASSERT_NULL(r);
+
+    /* .. at the start of a non-existent tail */
+    r = sc_validate_path("a/b/../../../etc/shadow", ws, 1);
+    ASSERT_NULL(r);
+
+    rmdir(ws);
+}
+
+static void test_validate_path_outside_workspace(void)
+{
+    char ws[] = "/tmp/test_validate_ow_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(ws));
+
+    /* Absolute path outside workspace should fail with restrict */
+    char *r = sc_validate_path("/etc/passwd", ws, 1);
+    ASSERT_NULL(r);
+
+    /* Without restrict, absolute paths are allowed */
+    r = sc_validate_path("/tmp", ws, 0);
+    ASSERT_NOT_NULL(r);
+    free(r);
+
+    rmdir(ws);
+}
+
 static void test_timing_safe_cmp(void)
 {
     /* Equal strings */
@@ -268,6 +362,10 @@ int main(void)
     RUN_TEST(test_sc_sanitize_filename);
     RUN_TEST(test_strbuf_oom_flag);
     RUN_TEST(test_safe_realloc);
+    RUN_TEST(test_validate_path_basic);
+    RUN_TEST(test_validate_path_deep_nonexistent);
+    RUN_TEST(test_validate_path_dotdot_blocked);
+    RUN_TEST(test_validate_path_outside_workspace);
     RUN_TEST(test_timing_safe_cmp);
 
     TEST_REPORT();

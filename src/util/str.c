@@ -139,37 +139,67 @@ char *sc_validate_path(const char *path, const char *workspace, int restrict_to_
     }
 
     if (!realpath(expanded, resolved)) {
-        /* If realpath fails (file might not exist), try resolving the parent */
+        /* File doesn't exist — walk up until we find an existing ancestor,
+         * then append the non-existent tail. This handles paths like
+         * "a/b/c/file.txt" where "a/b/" doesn't exist yet. */
         char *tmp = sc_strdup(expanded);
         if (!tmp) {
             free(expanded);
             return NULL;
         }
-        /* Find last slash */
-        char *slash = strrchr(tmp, '/');
-        if (slash && slash != tmp) {
-            *slash = '\0';
-            char *basename_start = slash + 1;
-            if (!realpath(tmp, resolved)) {
-                free(tmp);
-                free(expanded);
-                return NULL;
-            }
-            /* Append the basename */
-            size_t rlen = strlen(resolved);
-            size_t blen = strlen(basename_start);
-            if (rlen + 1 + blen >= PATH_MAX) {
-                free(tmp);
-                free(expanded);
-                return NULL;
-            }
-            resolved[rlen] = '/';
-            memcpy(resolved + rlen + 1, basename_start, blen + 1);
-        } else {
+
+        /* Find the deepest existing ancestor */
+        const char *tail = NULL;
+        char *slash = tmp + strlen(tmp);
+        while (slash > tmp) {
+            /* Walk back to previous slash */
+            while (slash > tmp && *(slash - 1) != '/') slash--;
+            if (slash <= tmp) break;
+
+            /* Remember the tail (portion after the slash) */
+            tail = expanded + (size_t)(slash - tmp);
+            *(slash - 1) = '\0';  /* truncate at the slash */
+
+            if (realpath(tmp, resolved))
+                break;  /* found an existing ancestor */
+
+            /* Keep walking up */
+            slash--;
+            tail = NULL;
+        }
+
+        if (!tail) {
+            /* No existing ancestor found */
             free(tmp);
             free(expanded);
             return NULL;
         }
+
+        /* Reject ".." components in the non-existent tail to prevent
+         * escaping the resolved ancestor via path traversal */
+        const char *p = tail;
+        while (*p) {
+            if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0')) {
+                free(tmp);
+                free(expanded);
+                return NULL;
+            }
+            /* Advance to next component */
+            while (*p && *p != '/') p++;
+            while (*p == '/') p++;
+        }
+
+        /* Append the non-existent tail to the resolved ancestor */
+        size_t rlen = strlen(resolved);
+        size_t tlen = strlen(tail);
+        if (rlen + 1 + tlen >= PATH_MAX) {
+            free(tmp);
+            free(expanded);
+            return NULL;
+        }
+        resolved[rlen] = '/';
+        memcpy(resolved + rlen + 1, tail, tlen + 1);
+
         free(tmp);
     }
 
