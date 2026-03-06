@@ -15,9 +15,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <pthread.h>
 
 #define LOG_TAG "audit"
 
+static pthread_mutex_t audit_lock = PTHREAD_MUTEX_INITIALIZER;
 static FILE *audit_file;
 static const char *audit_model;  /* current LLM model, set per-turn */
 
@@ -92,7 +94,11 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
                       const char *channel, const char *user_id,
                       const char *event)
 {
-    if (!audit_file) return;
+    pthread_mutex_lock(&audit_lock);
+    if (!audit_file) {
+        pthread_mutex_unlock(&audit_lock);
+        return;
+    }
 
     /* ISO 8601 timestamp */
     time_t now = time(NULL);
@@ -135,6 +141,7 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
     }
     fputs("}\n", audit_file);
     fflush(audit_file);
+    pthread_mutex_unlock(&audit_lock);
 }
 
 void sc_audit_log(const char *tool, const char *args_summary,
@@ -145,5 +152,7 @@ void sc_audit_log(const char *tool, const char *args_summary,
 
 void sc_audit_set_model(const char *model)
 {
+    pthread_mutex_lock(&audit_lock);
     audit_model = model;
+    pthread_mutex_unlock(&audit_lock);
 }

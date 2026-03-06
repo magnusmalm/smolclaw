@@ -403,11 +403,8 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 void sc_agent_free(sc_agent_t *agent)
 {
     if (!agent) return;
-    /* Join outstanding summarization thread before freeing resources */
-    if (agent->summarize_thread_active) {
-        pthread_join(agent->summarize_thread, NULL);
-        agent->summarize_thread_active = 0;
-    }
+    /* Drain outstanding summarization thread before freeing resources */
+    sc_drain_summarize(agent);
     sc_cost_tracker_free(agent->cost_tracker);
 #if SC_ENABLE_ANALYTICS
     if (agent->analytics)
@@ -509,10 +506,7 @@ void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx)
 void sc_agent_wait_summarize(sc_agent_t *agent)
 {
     if (!agent) return;
-    if (agent->summarize_thread_active) {
-        pthread_join(agent->summarize_thread, NULL);
-        agent->summarize_thread_active = 0;
-    }
+    sc_drain_summarize(agent);
 }
 
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)

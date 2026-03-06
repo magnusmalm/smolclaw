@@ -70,6 +70,9 @@ struct sc_provider {
 
     void (*destroy)(sc_provider_t *self);
 
+    /* Clone provider for use in a separate thread (own curl handle, etc.) */
+    sc_provider_t *(*clone)(sc_provider_t *self);
+
     void *data; /* Provider-specific state */
 };
 

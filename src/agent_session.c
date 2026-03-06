@@ -4,6 +4,10 @@
  * Extracted from agent.c (M-15) to reduce God Object complexity.
  * Summarization runs on a detached worker thread (L-15) to avoid
  * blocking the agent loop during synchronous LLM calls.
+ *
+ * Thread safety (C-1, C-2, H-1, H-2): The worker thread receives a
+ * cloned provider and copied data — it never touches agent state.
+ * Results are deferred to main thread via apply_summarize_result().
  */
 
 #include "agent_internal.h"
@@ -24,20 +28,37 @@
 
 /* Arguments passed to the summarization worker thread */
 typedef struct {
-    sc_agent_t *agent;
-    char *session_key;
-    char *transcript;
-    char *existing_summary;
+    sc_provider_t *provider;     /* cloned provider for thread use (owned) */
+    char *model;                 /* copied */
+    char *workspace;             /* copied */
+    char *session_key;           /* copied */
+    char *transcript;            /* owned, built before launch */
+    char *existing_summary;      /* copied from session before launch */
     int session_keep_last;
     int memory_consolidation;
     int summary_max_transcript;
+    int context_window;
+    /* Result — written by thread, read by main thread after join */
+    char *result_summary;        /* NULL if summarization failed */
 } sc_summarize_args_t;
 
-static void do_consolidate(sc_agent_t *agent, const char *session_key)
+static void free_summarize_args(sc_summarize_args_t *args)
 {
-    if (!agent->memory_consolidation) return;
+    if (!args) return;
+    if (args->provider && args->provider->destroy)
+        args->provider->destroy(args->provider);
+    free(args->model);
+    free(args->workspace);
+    free(args->session_key);
+    free(args->transcript);
+    free(args->existing_summary);
+    free(args->result_summary);
+    free(args);
+}
 
-    const char *summary = sc_session_get_summary(agent->sessions, session_key);
+static void do_consolidate(sc_summarize_args_t *args, const char *summary)
+{
+    if (!args->memory_consolidation) return;
     if (!summary || !summary[0]) return;
 
     sc_llm_message_t msgs[2];
@@ -56,8 +77,8 @@ static void do_consolidate(sc_agent_t *agent, const char *session_key)
     struct timespec con_t0, con_t1;
     clock_gettime(CLOCK_MONOTONIC, &con_t0);
 
-    sc_llm_response_t *resp = agent->provider->chat(
-        agent->provider, msgs, 2, NULL, 0, agent->model, options);
+    sc_llm_response_t *resp = args->provider->chat(
+        args->provider, msgs, 2, NULL, 0, args->model, options);
     cJSON_Delete(options);
 
     clock_gettime(CLOCK_MONOTONIC, &con_t1);
@@ -66,12 +87,12 @@ static void do_consolidate(sc_agent_t *agent, const char *session_key)
 
     if (resp && resp->content && resp->content[0] &&
         strncmp(resp->content, "NONE", 4) != 0) {
-        sc_memory_t *mem = sc_memory_new(agent->workspace);
+        sc_memory_t *mem = sc_memory_new(args->workspace);
         if (mem) {
             sc_strbuf_t sb;
             sc_strbuf_init(&sb);
-            sc_strbuf_appendf(&sb, "\n### Auto-consolidated (%s)\n%s", session_key,
-                              resp->content);
+            sc_strbuf_appendf(&sb, "\n### Auto-consolidated (%s)\n%s",
+                              args->session_key, resp->content);
             char *entry = sc_strbuf_finish(&sb);
             char *redacted = sc_redact_secrets(entry);
             const char *to_write = redacted ? redacted : entry;
@@ -83,7 +104,7 @@ static void do_consolidate(sc_agent_t *agent, const char *session_key)
                 sc_memory_append_today(mem, to_write);
                 SC_LOG_INFO("agent",
                     "Consolidated memory from session %s in %.1fs",
-                    session_key, con_elapsed);
+                    args->session_key, con_elapsed);
             }
             free(redacted);
             free(entry);
@@ -96,9 +117,11 @@ static void do_consolidate(sc_agent_t *agent, const char *session_key)
     sc_llm_message_free_fields(&msgs[1]);
 }
 
-static void do_summarize(sc_agent_t *agent, const char *session_key,
-                           char *transcript_str)
+static void do_summarize(sc_summarize_args_t *args)
 {
+    char *transcript_str = args->transcript;
+    args->transcript = NULL;  /* take ownership */
+
     char *redacted_transcript = sc_redact_secrets(transcript_str);
     if (redacted_transcript) {
         free(transcript_str);
@@ -120,8 +143,8 @@ static void do_summarize(sc_agent_t *agent, const char *session_key,
     struct timespec sum_t0, sum_t1;
     clock_gettime(CLOCK_MONOTONIC, &sum_t0);
 
-    sc_llm_response_t *resp = agent->provider->chat(
-        agent->provider, msgs, 2, NULL, 0, agent->model, options);
+    sc_llm_response_t *resp = args->provider->chat(
+        args->provider, msgs, 2, NULL, 0, args->model, options);
 
     cJSON_Delete(options);
 
@@ -132,11 +155,10 @@ static void do_summarize(sc_agent_t *agent, const char *session_key,
     if (resp && resp->content && resp->content[0]) {
         SC_LOG_INFO("agent", "Session summarized successfully in %.1fs", sum_elapsed);
         char *redacted_summary = sc_redact_secrets(resp->content);
-        sc_session_set_summary(agent->sessions, session_key,
-                               redacted_summary ? redacted_summary : resp->content);
-        free(redacted_summary);
+        args->result_summary = redacted_summary
+            ? redacted_summary : sc_strdup(resp->content);
     } else {
-        SC_LOG_WARN("agent", "Summarization LLM call failed after %.1fs, truncating without summary",
+        SC_LOG_WARN("agent", "Summarization LLM call failed after %.1fs",
                     sum_elapsed);
     }
 
@@ -145,24 +167,72 @@ static void do_summarize(sc_agent_t *agent, const char *session_key,
     sc_llm_message_free_fields(&msgs[1]);
     free(transcript_str);
 
-    sc_session_truncate(agent->sessions, session_key, agent->session_keep_last);
-    sc_session_save(agent->sessions, session_key);
-
-    do_consolidate(agent, session_key);
+    /* Consolidate using the summary we just produced */
+    if (args->result_summary)
+        do_consolidate(args, args->result_summary);
 }
 
 /* Worker thread function for async summarization */
 static void *summarize_thread_fn(void *arg)
 {
     sc_summarize_args_t *args = arg;
-    do_summarize(args->agent, args->session_key, args->transcript);
-    free(args->session_key);
-    free(args);
+    do_summarize(args);
+    /* args stays alive — main thread reads result_summary and frees */
     return NULL;
+}
+
+/* Apply deferred summarization result from the worker thread.
+ * Called from main thread only. */
+static void apply_summarize_result(sc_agent_t *agent)
+{
+    if (!atomic_load(&agent->summarize_thread_active)) return;
+    pthread_join(agent->summarize_thread, NULL);
+    atomic_store(&agent->summarize_thread_active, 0);
+
+    sc_summarize_args_t *args = agent->summarize_pending_args;
+    agent->summarize_pending_args = NULL;
+
+    if (args && args->result_summary) {
+        sc_session_set_summary(agent->sessions, args->session_key,
+                               args->result_summary);
+        sc_session_truncate(agent->sessions, args->session_key,
+                            args->session_keep_last);
+        sc_session_save(agent->sessions, args->session_key);
+    }
+
+    free_summarize_args(args);
+}
+
+/* Synchronous fallback when provider clone isn't available */
+static void summarize_sync(sc_agent_t *agent, sc_summarize_args_t *args)
+{
+    /* Use agent's provider directly (safe — we're on the main thread) */
+    args->provider = agent->provider;
+    do_summarize(args);
+
+    if (args->result_summary) {
+        sc_session_set_summary(agent->sessions, args->session_key,
+                               args->result_summary);
+        sc_session_truncate(agent->sessions, args->session_key,
+                            args->session_keep_last);
+        sc_session_save(agent->sessions, args->session_key);
+    }
+
+    /* Don't destroy agent's provider */
+    args->provider = NULL;
+    free_summarize_args(args);
+}
+
+void sc_drain_summarize(sc_agent_t *agent)
+{
+    apply_summarize_result(agent);
 }
 
 void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
 {
+    /* Drain previous summarization thread if still active */
+    apply_summarize_result(agent);
+
     int count = 0;
     sc_llm_message_t *history = sc_session_get_history(agent->sessions,
                                                         session_key, &count);
@@ -209,33 +279,44 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
 
     char *transcript_str = sc_strbuf_finish(&transcript);
 
-    /* Join previous summarization thread if still active */
-    if (agent->summarize_thread_active) {
-        pthread_join(agent->summarize_thread, NULL);
-        agent->summarize_thread_active = 0;
-    }
-
-    /* Pack args and launch worker thread */
+    /* Pack args with snapshots of everything the thread needs */
     sc_summarize_args_t *args = calloc(1, sizeof(*args));
     if (!args) {
-        /* Fallback: run synchronously */
-        do_summarize(agent, session_key, transcript_str);
+        free(transcript_str);
         return;
     }
 
-    args->agent = agent;
     args->session_key = sc_strdup(session_key);
     args->transcript = transcript_str;
+    args->model = sc_strdup(agent->model);
+    args->workspace = sc_strdup(agent->workspace);
+    args->session_keep_last = agent->session_keep_last;
+    args->memory_consolidation = agent->memory_consolidation;
+    args->summary_max_transcript = agent->summary_max_transcript;
+    args->context_window = agent->context_window;
+
+    /* Clone provider for thread isolation */
+    if (agent->provider->clone) {
+        args->provider = agent->provider->clone(agent->provider);
+    }
+
+    if (!args->provider) {
+        SC_LOG_WARN("agent", "Provider clone unavailable, summarizing synchronously");
+        summarize_sync(agent, args);
+        return;
+    }
+
+    /* Launch worker thread */
+    agent->summarize_pending_args = args;
 
     if (pthread_create(&agent->summarize_thread, NULL,
                         summarize_thread_fn, args) != 0) {
         SC_LOG_WARN("agent", "Failed to create summarization thread, running synchronously");
-        do_summarize(agent, session_key, args->transcript);
-        free(args->session_key);
-        free(args);
+        agent->summarize_pending_args = NULL;
+        summarize_sync(agent, args);
         return;
     }
 
-    agent->summarize_thread_active = 1;
+    atomic_store(&agent->summarize_thread_active, 1);
     SC_LOG_DEBUG("agent", "Summarization thread launched for session %s", session_key);
 }

@@ -621,6 +621,12 @@ static const char *claude_get_default_model(sc_provider_t *self)
     return "claude-sonnet-4-5-20250929";
 }
 
+static sc_provider_t *claude_clone(sc_provider_t *self)
+{
+    claude_provider_data_t *d = self->data;
+    return sc_provider_claude_new(d->api_key, d->api_base);
+}
+
 static void claude_destroy(sc_provider_t *self)
 {
     if (!self) return;
@@ -659,6 +665,7 @@ sc_provider_t *sc_provider_claude_new(const char *api_key, const char *api_base)
 #endif
     p->get_default_model = claude_get_default_model;
     p->destroy = claude_destroy;
+    p->clone = claude_clone;
     p->data = d;
 
     SC_LOG_INFO(LOG_TAG, "Created Claude provider (base=%s)",

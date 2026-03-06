@@ -697,6 +697,12 @@ static const char *http_get_default_model(sc_provider_t *self)
     return "";
 }
 
+static sc_provider_t *http_clone(sc_provider_t *self)
+{
+    http_provider_data_t *d = self->data;
+    return sc_provider_http_new(d->api_key, d->api_base, d->proxy);
+}
+
 static void http_destroy(sc_provider_t *self)
 {
     if (!self) return;
@@ -738,6 +744,7 @@ sc_provider_t *sc_provider_http_new(const char *api_key, const char *api_base,
 #endif
     p->get_default_model = http_get_default_model;
     p->destroy = http_destroy;
+    p->clone = http_clone;
     p->data = d;
 
     SC_LOG_INFO(LOG_TAG, "Created HTTP provider (base=%s)",

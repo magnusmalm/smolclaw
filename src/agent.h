@@ -2,6 +2,7 @@
 #define SC_AGENT_H
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include "bus.h"
 #include "config.h"
 #include "context.h"
@@ -61,7 +62,8 @@ typedef struct sc_agent {
     void *hourly_slots;
     /* Async summarization thread */
     pthread_t summarize_thread;
-    int summarize_thread_active;
+    atomic_int summarize_thread_active;
+    void *summarize_pending_args;  /* sc_summarize_args_t *, written by thread */
 } sc_agent_t;
 
 /* Create agent loop */
