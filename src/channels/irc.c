@@ -254,9 +254,16 @@ char **sc_irc_split_message(const char *text, int max_len, int *count)
 
             /* Grow array if needed */
             if (*count >= cap) {
-                cap *= 2;
-                chunks = realloc(chunks, (size_t)cap * sizeof(char *));
-                if (!chunks) { *count = 0; return NULL; }
+                int new_cap = cap * 2;
+                char **tmp = realloc(chunks, (size_t)new_cap * sizeof(char *));
+                if (!tmp) {
+                    for (int k = 0; k < *count; k++) free(chunks[k]);
+                    free(chunks);
+                    *count = 0;
+                    return NULL;
+                }
+                chunks = tmp;
+                cap = new_cap;
             }
 
             chunks[*count] = malloc(chunk_len + 1);

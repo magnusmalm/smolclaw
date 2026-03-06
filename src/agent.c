@@ -249,7 +249,13 @@ static void init_fallback_providers(sc_agent_t *agent, sc_config_t *cfg)
                                        sizeof(sc_provider_t *));
     agent->fallback_models = calloc((size_t)cfg->fallback_model_count,
                                     sizeof(char *));
-    if (!agent->fallback_providers || !agent->fallback_models) return;
+    if (!agent->fallback_providers || !agent->fallback_models) {
+        free(agent->fallback_providers);
+        free(agent->fallback_models);
+        agent->fallback_providers = NULL;
+        agent->fallback_models = NULL;
+        return;
+    }
 
     for (int i = 0; i < cfg->fallback_model_count; i++) {
         sc_provider_t *fp = sc_provider_create_for_model(cfg,
@@ -273,8 +279,15 @@ static void init_model_aliases(sc_agent_t *agent, sc_config_t *cfg)
     agent->alias_names     = calloc((size_t)max_aliases, sizeof(char *));
     agent->alias_models    = calloc((size_t)max_aliases, sizeof(char *));
     agent->alias_providers = calloc((size_t)max_aliases, sizeof(sc_provider_t *));
-    if (!agent->alias_names || !agent->alias_models || !agent->alias_providers)
+    if (!agent->alias_names || !agent->alias_models || !agent->alias_providers) {
+        free(agent->alias_names);
+        free(agent->alias_models);
+        free(agent->alias_providers);
+        agent->alias_names = NULL;
+        agent->alias_models = NULL;
+        agent->alias_providers = NULL;
         return;
+    }
 
     /* Start with built-in aliases */
     for (int i = 0; i < BUILTIN_ALIAS_COUNT; i++) {

@@ -15,7 +15,7 @@ void sc_sse_init(sc_sse_parser_t *p, sc_sse_event_cb cb, void *ctx)
 {
     p->buf = malloc(SSE_INIT_CAP);
     p->len = 0;
-    p->cap = SSE_INIT_CAP;
+    p->cap = p->buf ? SSE_INIT_CAP : 0;
     p->cb = cb;
     p->ctx = ctx;
 }
@@ -24,9 +24,6 @@ static void process_line(sc_sse_parser_t *p, const char *line, size_t len)
 {
     /* Skip empty lines and non-data fields (event:, id:, retry:) */
     if (len == 0) return;
-
-    const char *prefix = "data: ";
-    size_t prefix_len = 6;
 
     /* Also handle "data:" without space */
     if (len >= 5 && strncmp(line, "data:", 5) == 0) {
@@ -40,18 +37,19 @@ static void process_line(sc_sse_parser_t *p, const char *line, size_t len)
 
         /* Null-terminate and deliver */
         char *copy = malloc(payload_len + 1);
+        if (!copy) return;
         memcpy(copy, payload, payload_len);
         copy[payload_len] = '\0';
 
         p->cb(copy, p->ctx);
         free(copy);
     }
-    (void)prefix;
-    (void)prefix_len;
 }
 
 void sc_sse_feed(sc_sse_parser_t *p, const char *data, size_t len)
 {
+    if (!p->buf) return;
+
     for (size_t i = 0; i < len; i++) {
         char c = data[i];
 
@@ -73,9 +71,16 @@ void sc_sse_feed(sc_sse_parser_t *p, const char *data, size_t len)
                 p->len = 0;
                 continue;
             }
-            p->cap *= 2;
-            if (p->cap > (size_t)SC_SSE_MAX_LINE) p->cap = (size_t)SC_SSE_MAX_LINE;
-            p->buf = realloc(p->buf, p->cap);
+            size_t new_cap = p->cap * 2;
+            if (new_cap > (size_t)SC_SSE_MAX_LINE) new_cap = (size_t)SC_SSE_MAX_LINE;
+            char *tmp = realloc(p->buf, new_cap);
+            if (!tmp) {
+                /* Discard current line on OOM */
+                p->len = 0;
+                continue;
+            }
+            p->buf = tmp;
+            p->cap = new_cap;
         }
         p->buf[p->len++] = c;
     }

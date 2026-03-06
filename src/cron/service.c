@@ -180,8 +180,15 @@ sc_cron_job_t *sc_cron_service_add_job(sc_cron_service_t *cs, const char *name,
 
     /* Add to array */
     if (cs->job_count >= cs->job_cap) {
-        cs->job_cap = cs->job_cap ? cs->job_cap * 2 : 8;
-        cs->jobs = realloc(cs->jobs, cs->job_cap * sizeof(sc_cron_job_t *));
+        int new_cap = cs->job_cap ? cs->job_cap * 2 : 8;
+        sc_cron_job_t **tmp = realloc(cs->jobs, (size_t)new_cap * sizeof(sc_cron_job_t *));
+        if (!tmp) {
+            free_job(job);
+            free(job);
+            return NULL;
+        }
+        cs->jobs = tmp;
+        cs->job_cap = new_cap;
     }
     cs->jobs[cs->job_count++] = job;
 
