@@ -73,6 +73,10 @@ static int save_json(const char *path, cJSON *data)
 
     size_t len = strlen(json_str);
     size_t written = fwrite(json_str, 1, len, f);
+    if (written == len) {
+        fflush(f);
+        fsync(fileno(f));
+    }
     fclose(f);
     free(json_str);
 

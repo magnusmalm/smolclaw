@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/wait.h>
@@ -33,6 +34,7 @@ struct sc_mcp_client {
     int stdout_fd;   /* read from server */
     int next_id;
     int alive;
+    char *tmpdir;    /* per-process temp dir (to clean up on stop) */
 };
 
 /* ---------- Internal helpers ---------- */
@@ -75,9 +77,22 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
 
-    int remaining_ms = timeout_ms;
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += timeout_ms / 1000;
+    deadline.tv_nsec += (timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000L;
+    }
 
-    while (remaining_ms > 0) {
+    for (;;) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        int remaining_ms = (int)((deadline.tv_sec - now.tv_sec) * 1000
+                           + (deadline.tv_nsec - now.tv_nsec) / 1000000);
+        if (remaining_ms <= 0) break;
+
         struct pollfd pfd = { .fd = client->stdout_fd, .events = POLLIN };
         int ret = poll(&pfd, 1, remaining_ms);
         if (ret < 0) {
@@ -134,9 +149,6 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
             }
         }
 
-        /* Rough timeout tracking — decrement by a guess since poll consumed some */
-        remaining_ms -= 100;
-        if (remaining_ms < 100) remaining_ms = 100;
     }
 
     SC_LOG_ERROR(LOG_TAG, "[%s] read timeout (%dms)", client->name, timeout_ms);
@@ -212,7 +224,13 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
     if (!name || !command || command_count < 1) return NULL;
 
     /* Ignore SIGPIPE so pipe writes return EPIPE instead of killing us */
-    signal(SIGPIPE, SIG_IGN);
+    {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = SIG_IGN;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGPIPE, &sa, NULL);
+    }
 
     /* Create pipes: parent writes to child stdin, reads from child stdout */
     int pipe_stdin[2];   /* [0]=child reads, [1]=parent writes */
@@ -229,11 +247,20 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         return NULL;
     }
 
+    /* Create per-process temp dir before fork so parent can track it */
+    char *mcp_tmpdir = NULL;
+    if (workspace) {
+        char mcp_tmp[] = "/tmp/sc_mcp_XXXXXX";
+        if (mkdtemp(mcp_tmp))
+            mcp_tmpdir = sc_strdup(mcp_tmp);
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         SC_LOG_ERROR(LOG_TAG, "[%s] fork failed: %s", name, strerror(errno));
         close(pipe_stdin[0]); close(pipe_stdin[1]);
         close(pipe_stdout[0]); close(pipe_stdout[1]);
+        if (mcp_tmpdir) { rmdir(mcp_tmpdir); free(mcp_tmpdir); }
         return NULL;
     }
 
@@ -263,8 +290,7 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         /* Apply OS-level sandbox (Landlock + seccomp) — restrict MCP
          * server to workspace + per-process tmpdir (C-3, L-5) */
         if (workspace) {
-            char mcp_tmp[] = "/tmp/sc_mcp_XXXXXX";
-            const char *tmpdir = mkdtemp(mcp_tmp) ? mcp_tmp : "/tmp";
+            const char *tmpdir = mcp_tmpdir ? mcp_tmpdir : "/tmp";
             sc_sandbox_opts_t sandbox_opts = {
                 .workspace = workspace,
                 .tmpdir = tmpdir,
@@ -293,6 +319,9 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             if (!skip)
                 setenv(env_keys[i], env_values[i], 1);
         }
+
+        /* Reset SIGPIPE to default for the child process */
+        signal(SIGPIPE, SIG_DFL);
 
         /* Build argv — null-terminated */
         char **argv = calloc((size_t)(command_count + 1), sizeof(char *));
@@ -324,6 +353,7 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
     client->stdout_fd = pipe_stdout[0];
     client->next_id = 1;
     client->alive = 1;
+    client->tmpdir = mcp_tmpdir;  /* parent owns cleanup */
 
     SC_LOG_INFO(LOG_TAG, "[%s] started server (pid=%d, cmd=%s)", name, pid, command[0]);
 
@@ -577,6 +607,11 @@ void sc_mcp_client_free(sc_mcp_client_t *client)
 {
     if (!client) return;
     sc_mcp_client_stop(client);
+    /* Clean up per-process temp dir (best-effort, may fail if non-empty) */
+    if (client->tmpdir) {
+        rmdir(client->tmpdir);
+        free(client->tmpdir);
+    }
     free(client->name);
     free(client);
 }

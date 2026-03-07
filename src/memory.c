@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define LOG_TAG "memory"
 #define RECENT_DAYS 3
@@ -34,13 +35,34 @@ static char *read_file(const char *path)
 
 static int write_file(const char *path, const char *content)
 {
-    FILE *f = fopen(path, "w");
-    if (!f) return -1;
+    /* Atomic write: temp file + fsync + rename */
+    sc_strbuf_t tmp_sb;
+    sc_strbuf_init(&tmp_sb);
+    sc_strbuf_appendf(&tmp_sb, "%s.tmp", path);
+    char *tmp_path = sc_strbuf_finish(&tmp_sb);
+    if (!tmp_path) return -1;
+
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) { free(tmp_path); return -1; }
 
     size_t len = strlen(content);
     size_t written = fwrite(content, 1, len, f);
+    int ok = (written == len);
+
+    if (ok) {
+        fflush(f);
+        fsync(fileno(f));
+    }
     fclose(f);
-    return (written == len) ? 0 : -1;
+
+    if (ok) {
+        ok = (rename(tmp_path, path) == 0);
+    } else {
+        unlink(tmp_path);
+    }
+
+    free(tmp_path);
+    return ok ? 0 : -1;
 }
 
 static char *today_path(const sc_memory_t *mem)
