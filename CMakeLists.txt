@@ -501,6 +501,14 @@ if(EVENT_PTHREADS_LIB)
     endif()
 endif()
 
+# E2E test — invokes the binary, no library linking needed
+add_executable(test_e2e tests/test_e2e.c)
+target_include_directories(test_e2e PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_compile_definitions(test_e2e PRIVATE _XOPEN_SOURCE=500)
+add_test(NAME test_e2e COMMAND test_e2e)
+set_tests_properties(test_e2e PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_dependencies(test_e2e smolclaw)
+
 # Production security test (not in ctest — requires production config)
 add_executable(test_security_prod tests/test_security_prod.c)
 target_link_libraries(test_security_prod PRIVATE smolclaw_lib)
