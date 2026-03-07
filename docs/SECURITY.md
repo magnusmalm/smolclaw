@@ -8,7 +8,7 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Tool Confirmation
 
-`src/tools/registry.c`: Tools with `needs_confirm = 1` (exec, exec_background, write_file, edit_file, append_file, memory_write) require user approval before execution. In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
+`src/tools/registry.c`: Tools with `needs_confirm = 1` (exec, exec_background, git, write_file, edit_file, append_file, memory_write) require user approval before execution. In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
 
 ## Tool Allowlist
 
@@ -16,7 +16,7 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Exec Deny Patterns
 
-`src/tools/deny_patterns.h`: ~83 POSIX ERE patterns shared between shell.c and background.c. Covers:
+`src/tools/deny_patterns.h`: ~90 POSIX ERE patterns shared between shell.c and background.c. Covers:
 
 - rm -rf, format/mkfs, dd, shutdown, fork bombs, absolute path bypass (/bin/rm)
 - Scripting language one-liners (python -c, perl -e, ruby -e, node -e)
@@ -78,7 +78,7 @@ Config, session, and audit files are created with mode 0600. Pairing directory c
 
 ## Prompt Injection Defense
 
-`src/agent.c`, `src/util/prompt_guard.c`: Tool output is CDATA-wrapped in `<tool_output tool="..." id="..."><![CDATA[...]]></tool_output>` XML tags before being fed back to the LLM. The `sc_xml_cdata_wrap()` helper splits `]]>` sequences in content to prevent CDATA escape. Tool name and ID in XML attributes are escaped via `sc_xml_escape_attr()` (`& < > " '` → XML entities).
+`src/agent_turn.c`, `src/util/prompt_guard.c`: Tool output is CDATA-wrapped in `<tool_output tool="..." id="..."><![CDATA[...]]></tool_output>` XML tags before being fed back to the LLM. The `sc_xml_cdata_wrap()` helper splits `]]>` sequences in content to prevent CDATA escape. Tool name and ID in XML attributes are escaped via `sc_xml_escape_attr()` (`& < > " '` → XML entities).
 
 High-confidence prompt injection patterns (via `sc_prompt_guard_scan_high()`) trigger an active `[WARNING: suspected prompt injection]` prefix inside the CDATA content. Prompt guard normalizes whitespace before pattern matching. High-confidence patterns include LLM control tokens (`<|endoftext|>`, `<|im_end|>`, `[/inst]`, `<s>`, `</s>`, `<|im_start|>`).
 
@@ -128,7 +128,7 @@ Applied to: tool output before LLM, assistant messages before session storage, s
 
 ## Resource Limits
 
-`src/agent.c`: Per-turn limits — `max_tool_calls_per_turn` (50), `max_turn_secs` (300), `max_output_total` (500KB). Configurable via `agents.defaults.*` or `SMOLCLAW_AGENTS_DEFAULTS_*` env vars.
+`src/agent_turn.c`: Per-turn limits — `max_tool_calls_per_turn` (50), `max_turn_secs` (300), `max_output_total` (500KB). Configurable via `agents.defaults.*` or `SMOLCLAW_AGENTS_DEFAULTS_*` env vars.
 
 ## Rate Limiting
 
@@ -148,7 +148,7 @@ Applied to: tool output before LLM, assistant messages before session storage, s
 
 ## Thread Safety
 
-Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Channel `running` flag is `volatile int`.
+Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Audit log is mutex-protected. Channel `running` flag is `volatile int`. Discord WebSocket state (`sequence`, `heartbeat_acked`) uses `atomic_int`. Async summarization uses `atomic_int` for thread status and cloned providers for thread isolation.
 
 ## Access Control
 
@@ -172,11 +172,11 @@ Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Chann
 
 ## Production Security Tests
 
-`test_security_prod` — `EXCLUDE_FROM_ALL`, loads `~/.smolclaw/config.json`, 300 assertions across 62+ categories. Combined with `test_sandbox` (22 assertions) and IRC smoke tests (3): 325 total security tests.
+`test_security_prod` — `EXCLUDE_FROM_ALL`, loads `~/.smolclaw/config.json`, 300 assertions across 177 test functions. Combined with `test_sandbox` (22 assertions) and IRC smoke tests (3): 325 total security tests.
 
 ```bash
 scripts/test_security.sh --local --verbose   # Full run (C + IRC)
 scripts/test_security.sh --skip-irc          # C tests only
 ```
 
-Test categories: deny patterns (43), SSRF (15), allowlist (3), secret redaction (15), XML CDATA (3), MCP names (2), symlink TOCTOU (2), bootstrap files (4), prompt injection (5), outbound scanning (2), rate limiting (3), resource limits (3), session redaction (1), message restriction (2), TLS (2), exec allowlist (4), sensitive paths (3), OpenClaw post-mortem (8), and more. See `tests/test_security_prod.c` for the full inventory.
+Test categories: deny patterns (110), SSRF (30), allowlist (12), secret redaction (30), XML CDATA (14), MCP names (8), symlink TOCTOU (8), bootstrap files (8), prompt injection (20), outbound scanning (4), rate limiting (6), session redaction (4), message restriction (4), TLS (4), exec allowlist (8), sensitive paths (12), OpenClaw post-mortem (2), and more. See `tests/test_security_prod.c` for the full inventory.

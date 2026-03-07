@@ -1,6 +1,6 @@
 # smolclaw
 
-**C11 lightweight AI agent framework**
+**C11 lightweight AI agent framework for constrained hardware**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -10,20 +10,20 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 - **280 KB** dynamic-minimal binary, **4.6 MB** fully static (musl, zero runtime deps)
 - **672 KB** peak RSS (musl-static)
-- **16** compile-time feature flags via Kconfig — build exactly what you need
+- **20** compile-time feature flags via Kconfig — build exactly what you need
 - C11 strict, zero warnings, no garbage collector, no runtime
 
 ## Features
 
-| Category | Features |
-|----------|----------|
-| **Channels** | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI) |
-| **Providers** | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama |
-| **Tools** | File read/write/edit/list, shell exec, git, web search/fetch, memory read/write/log/search, message, cron, spawn, background processes (19 built-in) |
-| **Memory** | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5) |
-| **Security** | ~83 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense |
-| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators |
-| **Services** | Cron scheduling, heartbeat, subagent spawning, self-update |
+| Category        | Features                                                                                                                                                  |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI)                                                                                       |
+| **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
+| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, memory read/write/log/search, message, cron, spawn, background processes (19 built-in)               |
+| **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
+| **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense      |
+| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators                                                               |
+| **Services**    | Cron scheduling, heartbeat, subagent spawning, self-update, analytics                                                                                                      |
 
 ## Quickstart
 
@@ -105,7 +105,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
 
 ## Architecture
 
@@ -119,20 +119,25 @@ User ─── Channel ──┘         │
                              └── Services (Cron, Heartbeat, Updater)
 ```
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Agent | `src/agent.c` | Core loop, model override, CDATA wrapping |
-| Bus | `src/bus.c` | Thread-safe message queue (libevent pipes) |
-| Providers | `src/providers/` | Claude, HTTP (OpenAI-compat), factory routing |
-| Tools | `src/tools/` | Registry + individual tools |
-| MCP | `src/mcp/` | External tool servers via JSON-RPC 2.0 |
-| Channels | `src/channels/` | CLI, Telegram, Discord, IRC, Slack, Web |
-| Memory | `src/memory.c` | Long-term memory + daily notes |
-| Sessions | `src/session.c` | Per-conversation JSON, auto-truncation + summarization |
-| Context | `src/context.c` | System prompt builder |
-| Config | `src/config.c` | JSON config + env var overrides |
-| Updater | `src/updater/` | Transport-agnostic self-update (HTTP built-in) |
-| Security | `src/util/` | Sandbox, secrets, prompt guard, path validation |
+| Component       | Location                     | Purpose                                         |
+|-----------------|------------------------------|--------------------------------------------------|
+| Agent           | `src/agent.c`                | Initialization, model routing, tool registration |
+| Agent Turn      | `src/agent_turn.c`           | Core loop, retry logic, rate limiting            |
+| Agent Session   | `src/agent_session.c`        | Async summarization, memory consolidation        |
+| Bus             | `src/bus.c`                  | Thread-safe message queue (libevent pipes)       |
+| Providers       | `src/providers/`             | Claude, HTTP (OpenAI-compat), factory routing    |
+| Tools           | `src/tools/`                 | Registry + individual tools                      |
+| MCP             | `src/mcp/`                   | External tool servers via JSON-RPC 2.0           |
+| Channels        | `src/channels/`              | CLI, Telegram, Discord, IRC, Slack, Web          |
+| Memory          | `src/memory.c`               | Long-term memory + daily notes                   |
+| Sessions        | `src/session.c`              | Per-conversation JSON, auto-truncation + summarization |
+| Context         | `src/context.c`              | System prompt builder                            |
+| Config          | `src/config.c`               | JSON config + env var overrides                  |
+| Analytics       | `src/analytics.c`            | Token usage and performance tracking             |
+| Tee             | `src/tee.c`                  | Tool output mirroring                            |
+| Output Filter   | `src/tools/output_filter.c`  | Tool output sanitization and truncation          |
+| Updater         | `src/updater/`               | Transport-agnostic self-update (HTTP built-in)   |
+| Security        | `src/util/`                  | Sandbox, secrets, prompt guard, path validation  |
 
 ## Configuration
 
@@ -204,10 +209,10 @@ Build-time version includes git metadata:
 
 ```
 $ smolclaw version
-smolclaw 0.1.0 (185761b3, 2026-03-04T15:30:00Z)
+🦞 smolclaw 0.9.0 (34938ea4, 2026-03-07T00:00:00Z)
 ```
 
-The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.1.0+185761b3`).
+The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.9.0+34938ea4`).
 
 ### Commands
 
@@ -219,6 +224,7 @@ smolclaw pairing     Manage channel trust (list/approve/revoke)
 smolclaw vault       Manage encrypted secrets
 smolclaw update      Check for and apply updates
 smolclaw cost        View token usage and costs
+smolclaw analytics   Usage analytics (summary, today, week, month, model, channel)
 smolclaw doctor      Validate configuration and dependencies
 smolclaw version     Show version (includes git hash and build date)
 ```
@@ -227,7 +233,7 @@ smolclaw version     Show version (includes git hash and build date)
 
 smolclaw implements defense in depth:
 
-- **Deny patterns**: ~83 POSIX ERE patterns block dangerous shell commands
+- **Deny patterns**: ~90 POSIX ERE patterns block dangerous shell commands
 - **SSRF protection**: DNS resolution + private IP blocking + redirect validation
 - **OS sandbox**: Landlock filesystem restrictions + seccomp-bpf syscall filter
 - **Tool confirmation**: Side-effect tools require approval (CLI) or pass deny/allow checks (gateway)
