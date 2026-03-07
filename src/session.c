@@ -269,9 +269,16 @@ void sc_session_manager_free(sc_session_manager_t *sm)
     free(sm);
 }
 
+#define SC_MAX_SESSION_KEY_LEN 128
+
 sc_session_t *sc_session_get_or_create(sc_session_manager_t *sm, const char *key)
 {
     if (!sm || !key) return NULL;
+    if (strlen(key) > SC_MAX_SESSION_KEY_LEN) {
+        SC_LOG_WARN(LOG_TAG, "session key too long (%zu chars), rejecting",
+                    strlen(key));
+        return NULL;
+    }
 
     sc_session_t *s = find_session(sm, key);
     if (s) return s;

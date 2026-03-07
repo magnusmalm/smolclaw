@@ -12,6 +12,7 @@
 #endif
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,7 +76,7 @@ static void env_override_int(int *field, const char *var)
     if (val) {
         char *end;
         long v = strtol(val, &end, 10);
-        if (end != val && *end == '\0')
+        if (end != val && *end == '\0' && v >= INT_MIN && v <= INT_MAX)
             *field = (int)v;
         else
             SC_LOG_WARN(LOG_TAG, "invalid integer for %s: '%s'", var, val);

@@ -86,10 +86,15 @@ static int parse_url(const char *url, char **host, int *port, char **path)
 /* Generate 4-byte random mask */
 static void generate_mask(unsigned char mask[4])
 {
+    memset(mask, 0, 4);
     if (RAND_bytes(mask, 4) != 1) {
         /* Fallback: /dev/urandom */
         FILE *f = fopen("/dev/urandom", "rb");
-        if (f) { fread(mask, 1, 4, f); fclose(f); }
+        if (f) {
+            if (fread(mask, 1, 4, f) != 4)
+                memset(mask, 0x55, 4);  /* deterministic fallback */
+            fclose(f);
+        }
     }
 }
 

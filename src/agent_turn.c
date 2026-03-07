@@ -150,8 +150,10 @@ static sc_llm_response_t *call_provider_with_retry(
         SC_LOG_WARN("agent", "Transient LLM error (HTTP %d), will retry", status);
         sc_llm_response_free(resp);
 
-        if (retry_after > 0)
+        if (retry_after > 0) {
+            if (retry_after > 300) retry_after = 300;
             delay_ms = retry_after * 1000;
+        }
         else
             delay_ms *= 2;
         if (delay_ms > SC_LLM_RETRY_MAX_MS)

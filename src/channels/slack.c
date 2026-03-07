@@ -70,9 +70,6 @@ static cJSON *slack_api_post(const slack_data_t *sd, const char *method,
     CURL *curl = sc_curl_init();
     if (!curl) { free(url); free(body); return NULL; }
 
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-
     sc_strbuf_t resp;
     sc_strbuf_init(&resp);
 
@@ -119,9 +116,6 @@ static char *slack_get_wss_url(const slack_data_t *sd)
 {
     CURL *curl = sc_curl_init();
     if (!curl) return NULL;
-
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 
     sc_strbuf_t resp;
     sc_strbuf_init(&resp);

@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <unistd.h>
 #include <curl/curl.h>
 #include "util/curl_common.h"
@@ -50,8 +51,8 @@ typedef struct {
     int thread_started;
     int heartbeat_started;
     int heartbeat_interval_ms;
-    volatile int sequence;           /* Last sequence number (-1 = none) */
-    volatile int heartbeat_acked;    /* Whether last heartbeat was ACKed */
+    atomic_int sequence;             /* Last sequence number (-1 = none) */
+    atomic_int heartbeat_acked;      /* Whether last heartbeat was ACKed */
 } discord_data_t;
 
 /* Validate that a string contains only digits (Discord snowflake ID) */
@@ -92,9 +93,6 @@ static cJSON *discord_post(const discord_data_t *dd, const char *endpoint,
 
     CURL *curl = sc_curl_init();
     if (!curl) { free(url); free(body_str); return NULL; }
-
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 
     sc_strbuf_t resp;
     sc_strbuf_init(&resp);
@@ -394,9 +392,6 @@ static char *get_gateway_url(const discord_data_t *dd)
 
     CURL *curl = sc_curl_init();
     if (!curl) { free(url); return NULL; }
-
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 
     sc_strbuf_t resp;
     sc_strbuf_init(&resp);

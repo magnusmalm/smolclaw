@@ -303,11 +303,12 @@ void sc_channel_manager_reload_config(sc_channel_manager_t *mgr,
             ch->dm_policy = sc_dm_policy_from_str(cfg->web.dm_policy);
         }
 
-        /* Update rate limiter */
+        /* Update rate limiter — always free old before recreating */
+        if (ch->rate_limiter) {
+            sc_rate_limiter_free(ch->rate_limiter);
+            ch->rate_limiter = NULL;
+        }
         if (cfg->rate_limit_per_minute > 0) {
-            if (ch->rate_limiter) {
-                sc_rate_limiter_free(ch->rate_limiter);
-            }
             ch->rate_limiter = sc_rate_limiter_new(cfg->rate_limit_per_minute);
         }
     }

@@ -74,9 +74,6 @@ static cJSON *telegram_get(const telegram_data_t *td, const char *method,
     CURL *curl = sc_curl_init();
     if (!curl) { free(url); return NULL; }
 
-    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-
     sc_strbuf_t body;
     sc_strbuf_init(&body);
 

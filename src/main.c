@@ -80,6 +80,16 @@ static void sighup_handler(int sig)
     }
 }
 
+static void install_signal(int signo, void (*handler)(int))
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handler;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    sigaction(signo, &sa, NULL);
+}
+
 static void print_version(void)
 {
     printf("%s %s %s (%s, %s)\n", SC_LOGO, SC_NAME, SC_VERSION,
@@ -440,7 +450,7 @@ static void cmd_agent(int argc, char **argv)
     }
 
     /* Wire SIGINT so Ctrl+C sets g_shutdown for mid-turn abort */
-    signal(SIGINT, signal_handler);
+    install_signal(SIGINT, signal_handler);
 
     /* Set CLI confirmation callback for dangerous tools */
     sc_tool_registry_set_confirm(agent->tools, sc_cli_confirm_tool, NULL);
@@ -1327,9 +1337,9 @@ static void cmd_gateway(int argc, char **argv)
     /* Event loop */
     struct event_base *base = event_base_new();
     /* Signal handling */
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-    signal(SIGHUP, sighup_handler);
+    install_signal(SIGINT, signal_handler);
+    install_signal(SIGTERM, signal_handler);
+    install_signal(SIGHUP, sighup_handler);
 
     /* Bus */
     sc_bus_t *bus = sc_bus_create(base);
