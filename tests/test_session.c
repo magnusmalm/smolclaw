@@ -243,6 +243,86 @@ static void test_session_summary_survives_truncate(void)
     free(cmd);
 }
 
+static void test_session_persistence_roundtrip(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Save with exact content */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        sc_session_add_message(sm, "roundtrip", "user", "What is 2+2?");
+        sc_session_add_message(sm, "roundtrip", "assistant", "The answer is 4.");
+        sc_session_add_message(sm, "roundtrip", "user", "Thanks!");
+
+        int ret = sc_session_save(sm, "roundtrip");
+        ASSERT_INT_EQ(ret, 0);
+        sc_session_manager_free(sm);
+    }
+
+    /* Load and verify exact content */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        sc_session_get_or_create(sm, "roundtrip");
+        int count = 0;
+        sc_llm_message_t *history = sc_session_get_history(sm, "roundtrip", &count);
+        ASSERT_INT_EQ(count, 3);
+        ASSERT_NOT_NULL(history);
+
+        ASSERT_STR_EQ(history[0].role, "user");
+        ASSERT_STR_EQ(history[0].content, "What is 2+2?");
+        ASSERT_STR_EQ(history[1].role, "assistant");
+        ASSERT_STR_EQ(history[1].content, "The answer is 4.");
+        ASSERT_STR_EQ(history[2].role, "user");
+        ASSERT_STR_EQ(history[2].content, "Thanks!");
+
+        sc_session_manager_free(sm);
+    }
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
+static void test_session_key_length_limit(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+    ASSERT_NOT_NULL(sm);
+
+    /* Key exactly at limit (128 chars) should work */
+    char key_ok[129];
+    memset(key_ok, 'a', 128);
+    key_ok[128] = '\0';
+    sc_session_t *s = sc_session_get_or_create(sm, key_ok);
+    ASSERT_NOT_NULL(s);
+
+    /* Key over limit (129 chars) should be rejected */
+    char key_too_long[130];
+    memset(key_too_long, 'b', 129);
+    key_too_long[129] = '\0';
+    sc_session_t *s2 = sc_session_get_or_create(sm, key_too_long);
+    ASSERT(s2 == NULL, "session key over 128 chars should be rejected");
+
+    sc_session_manager_free(sm);
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 int main(void)
 {
     printf("test_session\n");
@@ -253,6 +333,8 @@ int main(void)
     RUN_TEST(test_session_save_load);
     RUN_TEST(test_session_truncate);
     RUN_TEST(test_session_summary_survives_truncate);
+    RUN_TEST(test_session_persistence_roundtrip);
+    RUN_TEST(test_session_key_length_limit);
 
     TEST_REPORT();
 }

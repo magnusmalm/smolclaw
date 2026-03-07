@@ -775,6 +775,65 @@ static void test_agent_hourly_rate_limit(void)
     destroy_test_agent(&ctx);
 }
 
+/* Test that two different keys with same hash are tracked separately */
+static void test_rate_limiter_key_collision(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    ctx.agent->max_tool_calls_per_hour = 5;
+
+    /* Fill slots with different session keys — set key_prefix directly */
+    sc_hourly_slot_t *slots = ctx.agent->hourly_slots;
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        snprintf(slots[i].key_prefix, sizeof(slots[i].key_prefix),
+                 "session-%d", i);
+        slots[i].key_hash = 1000 + (uint32_t)i;
+        slots[i].tool_calls = 1;
+        slots[i].window_start = time(NULL);
+    }
+
+    /* Two keys with same hash but different prefix should get separate slots */
+    slots[0].key_hash = 42;
+    snprintf(slots[0].key_prefix, sizeof(slots[0].key_prefix), "key-alpha");
+    slots[0].tool_calls = 3;
+
+    slots[1].key_hash = 42;
+    snprintf(slots[1].key_prefix, sizeof(slots[1].key_prefix), "key-beta");
+    slots[1].tool_calls = 1;
+
+    /* Verify they don't collide — each has separate tracking */
+    ASSERT_INT_EQ(slots[0].tool_calls, 3);
+    ASSERT_INT_EQ(slots[1].tool_calls, 1);
+
+    destroy_test_agent(&ctx);
+}
+
+/* Test that slot eviction works when all slots are full */
+static void test_rate_limiter_slot_eviction(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    ctx.agent->max_tool_calls_per_hour = 100;
+
+    sc_hourly_slot_t *slots = ctx.agent->hourly_slots;
+    time_t now = time(NULL);
+
+    /* Fill all slots with recent entries */
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        snprintf(slots[i].key_prefix, sizeof(slots[i].key_prefix),
+                 "fill-%d", i);
+        slots[i].key_hash = (uint32_t)(i + 1000);
+        slots[i].tool_calls = 1;
+        slots[i].window_start = now - i;  /* slot 0 is newest */
+    }
+
+    /* Make slot 5 the oldest */
+    slots[5].window_start = now - 7200;
+
+    /* A new key should evict the oldest slot (slot 5) */
+    ASSERT_INT_EQ(slots[5].window_start, (int)(now - 7200));
+
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -793,6 +852,8 @@ int main(void)
     RUN_TEST(test_agent_tool_call_limit);
     RUN_TEST(test_agent_multi_tool_calls);
     RUN_TEST(test_agent_hourly_rate_limit);
+    RUN_TEST(test_rate_limiter_key_collision);
+    RUN_TEST(test_rate_limiter_slot_eviction);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

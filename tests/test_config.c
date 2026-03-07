@@ -522,6 +522,57 @@ static void test_config_file_ref_workspace_warn(void)
     rmdir(ws_dir);
 }
 
+static void test_config_env_int_bounds(void)
+{
+    /* Use sc_config_load() with a temp file so env overrides are applied */
+    char tmppath[] = "/tmp/sc_test_config_bounds_XXXXXX";
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "mkstemp should succeed");
+    const char *json_content = "{}\n";
+    write(fd, json_content, strlen(json_content));
+    close(fd);
+
+    /* Get default value for comparison */
+    sc_config_t *cfg = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg);
+    int orig_max_tokens = cfg->max_tokens;
+    sc_config_free(cfg);
+
+    /* INT_MAX+1 as string should be rejected (overflow) */
+    setenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS", "2147483648", 1);
+    sc_config_t *cfg2 = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg2);
+    ASSERT_INT_EQ(cfg2->max_tokens, orig_max_tokens);
+    unsetenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS");
+    sc_config_free(cfg2);
+
+    /* Empty string should not be parsed */
+    setenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS", "", 1);
+    sc_config_t *cfg3 = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg3);
+    ASSERT_INT_EQ(cfg3->max_tokens, orig_max_tokens);
+    unsetenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS");
+    sc_config_free(cfg3);
+
+    /* Negative max_tokens is clamped to default (must be >= 1) */
+    setenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS", "-1", 1);
+    sc_config_t *cfg4 = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg4);
+    ASSERT_INT_EQ(cfg4->max_tokens, orig_max_tokens);
+    unsetenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS");
+    sc_config_free(cfg4);
+
+    /* Valid positive override should work */
+    setenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS", "4096", 1);
+    sc_config_t *cfg5 = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg5);
+    ASSERT_INT_EQ(cfg5->max_tokens, 4096);
+    unsetenv("SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS");
+    sc_config_free(cfg5);
+
+    unlink(tmppath);
+}
+
 int main(void)
 {
     printf("test_config\n");
@@ -542,6 +593,7 @@ int main(void)
     RUN_TEST(test_config_file_ref_strip);
     RUN_TEST(test_config_file_ref_nonsecret);
     RUN_TEST(test_config_file_ref_workspace_warn);
+    RUN_TEST(test_config_env_int_bounds);
 
     TEST_REPORT();
 }
