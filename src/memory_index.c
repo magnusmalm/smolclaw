@@ -246,18 +246,30 @@ static int has_fts5_syntax(const char *query)
 
 static char *simple_quote_query(const char *query)
 {
-    /* Wrap entire query in double quotes for simple term matching */
+    /* Quote each whitespace-separated term individually so FTS5
+     * interprets them as implicit AND without special syntax */
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-    sc_strbuf_append(&sb, "\"");
-    /* Escape any embedded double quotes */
-    for (const char *p = query; *p; p++) {
-        if (*p == '"')
-            sc_strbuf_append(&sb, "\"\"");
-        else
-            sc_strbuf_appendf(&sb, "%c", *p);
+    const char *p = query;
+    int first = 1;
+    while (*p) {
+        /* Skip whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        /* Find end of token */
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        if (!first) sc_strbuf_append(&sb, " ");
+        first = 0;
+        sc_strbuf_append(&sb, "\"");
+        for (const char *t = start; t < p; t++) {
+            if (*t == '"')
+                sc_strbuf_append(&sb, "\"\"");
+            else
+                sc_strbuf_appendf(&sb, "%c", *t);
+        }
+        sc_strbuf_append(&sb, "\"");
     }
-    sc_strbuf_append(&sb, "\"");
     return sc_strbuf_finish(&sb);
 }
 
@@ -272,32 +284,34 @@ sc_memory_search_result_t *sc_memory_index_search(sc_memory_index_t *idx,
     if (max_results <= 0) max_results = 10;
     if (max_results > 50) max_results = 50;
 
-    /* Try query as-is if it has FTS5 syntax, else quote it */
+    /* Default to safe quoted query; only use raw if it has FTS5 syntax */
     int use_raw = has_fts5_syntax(query);
+    char *safe = use_raw ? NULL : simple_quote_query(query);
 
     sqlite3_reset(idx->stmt_search);
-    sqlite3_bind_text(idx->stmt_search, 1, query, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(idx->stmt_search, 1, safe ? safe : query, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(idx->stmt_search, 2, max_results);
 
     /* Allocate results array */
     sc_memory_search_result_t *results = calloc((size_t)max_results,
                                                  sizeof(sc_memory_search_result_t));
-    if (!results) return NULL;
+    if (!results) { free(safe); return NULL; }
 
     int count = 0;
     int rc = sqlite3_step(idx->stmt_search);
 
-    /* If raw query fails with syntax error, retry with quoted version */
+    /* If raw FTS5 query fails with syntax error, retry with quoted version */
     if (rc != SQLITE_ROW && rc != SQLITE_DONE && use_raw) {
-        char *safe = simple_quote_query(query);
-        if (safe) {
+        char *fallback = simple_quote_query(query);
+        if (fallback) {
             sqlite3_reset(idx->stmt_search);
-            sqlite3_bind_text(idx->stmt_search, 1, safe, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(idx->stmt_search, 1, fallback, -1, SQLITE_TRANSIENT);
             sqlite3_bind_int(idx->stmt_search, 2, max_results);
             rc = sqlite3_step(idx->stmt_search);
-            free(safe);
+            free(fallback);
         }
     }
+    free(safe);
 
     while (rc == SQLITE_ROW && count < max_results) {
         const char *source = (const char *)sqlite3_column_text(idx->stmt_search, 0);

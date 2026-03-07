@@ -19,6 +19,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <event2/event.h>
 #include <event2/http.h>
@@ -122,7 +123,7 @@ static int check_auth(struct evhttp_request *req, const web_data_t *wd)
 
     /* Expect "Bearer <token>" */
     if (strncmp(auth, "Bearer ", 7) != 0) return 0;
-    return strcmp(auth + 7, wd->bearer_token) == 0;
+    return sc_timing_safe_cmp(auth + 7, wd->bearer_token) == 0;
 }
 
 static void send_json_error(struct evhttp_request *req, int code,
@@ -374,8 +375,11 @@ static int web_send(sc_channel_t *self, sc_outbound_msg_t *msg)
     snprintf(resp.request_id, sizeof(resp.request_id), "%s", msg->chat_id);
     resp.text = sc_strdup(msg->content);
 
-    ssize_t written = write(wd->response_pipe[1], &resp, sizeof(resp));
-    if (written != sizeof(resp)) {
+    ssize_t written;
+    do {
+        written = write(wd->response_pipe[1], &resp, sizeof(resp));
+    } while (written < 0 && errno == EINTR);
+    if (written != (ssize_t)sizeof(resp)) {
         free(resp.text);
         SC_LOG_ERROR(WEB_TAG, "Failed to write response to pipe");
         return -1;
@@ -387,6 +391,9 @@ static int web_send(sc_channel_t *self, sc_outbound_msg_t *msg)
 static int web_start(sc_channel_t *self)
 {
     web_data_t *wd = self->data;
+
+    if (!wd->bearer_token || !wd->bearer_token[0])
+        SC_LOG_WARN(WEB_TAG, "No bearer token configured — web API is unauthenticated");
 
     /* Create event base */
     wd->base = event_base_new();
@@ -495,8 +502,8 @@ static void web_destroy(sc_channel_t *self)
             event_del(wd->pipe_event);
             event_free(wd->pipe_event);
         }
-        if (wd->response_pipe[0]) close(wd->response_pipe[0]);
-        if (wd->response_pipe[1]) close(wd->response_pipe[1]);
+        if (wd->response_pipe[0] >= 0) close(wd->response_pipe[0]);
+        if (wd->response_pipe[1] >= 0) close(wd->response_pipe[1]);
         if (wd->http) evhttp_free(wd->http);
         if (wd->base) event_base_free(wd->base);
 
@@ -527,8 +534,8 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
     wd->http = NULL;
     wd->thread_started = 0;
     wd->pending_head = NULL;
-    wd->response_pipe[0] = 0;
-    wd->response_pipe[1] = 0;
+    wd->response_pipe[0] = -1;
+    wd->response_pipe[1] = -1;
     wd->pipe_event = NULL;
     pthread_mutex_init(&wd->pending_lock, NULL);
 

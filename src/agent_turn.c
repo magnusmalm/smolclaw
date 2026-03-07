@@ -35,6 +35,14 @@ static uint32_t fnv1a_str(const char *s)
     return h;
 }
 
+static void copy_key_prefix(char *dst, const char *src)
+{
+    size_t len = src ? strlen(src) : 0;
+    if (len > 31) len = 31;
+    if (len > 0) memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
 /* Record tool calls for cross-turn tracking. Returns remaining budget (< 0 if over). */
 static int hourly_record(sc_agent_t *agent, const char *session_key,
                           int calls, int limit)
@@ -49,6 +57,8 @@ static int hourly_record(sc_agent_t *agent, const char *session_key,
 
     for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
         if (slots[i].key_hash == h &&
+            strncmp(slots[i].key_prefix, session_key ? session_key : "",
+                    sizeof(slots[i].key_prefix) - 1) == 0 &&
             (now - slots[i].window_start) < 3600) {
             slots[i].tool_calls += calls;
             return limit - slots[i].tool_calls;
@@ -61,6 +71,7 @@ static int hourly_record(sc_agent_t *agent, const char *session_key,
 
     /* Expired or new — use oldest slot */
     slots[oldest].key_hash = h;
+    copy_key_prefix(slots[oldest].key_prefix, session_key);
     slots[oldest].tool_calls = calls;
     slots[oldest].window_start = now;
     return limit - calls;
@@ -78,6 +89,8 @@ static int hourly_remaining(const sc_agent_t *agent, const char *session_key,
 
     for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
         if (slots[i].key_hash == h &&
+            strncmp(slots[i].key_prefix, session_key ? session_key : "",
+                    sizeof(slots[i].key_prefix) - 1) == 0 &&
             (now - slots[i].window_start) < 3600) {
             return limit - slots[i].tool_calls;
         }
@@ -172,7 +185,7 @@ static const char *check_turn_limits(const sc_agent_t *agent,
         return "Stopped: cumulative output size limit exceeded.";
     }
     if (agent->max_tool_calls_per_hour > 0 &&
-        hourly_remaining(agent, tc->session_key, agent->max_tool_calls_per_hour) <= 0) {
+        hourly_remaining(agent, tc->root_session_key, agent->max_tool_calls_per_hour) <= 0) {
         SC_LOG_WARN("agent", "Hourly tool call limit reached (%d/hour)",
                     agent->max_tool_calls_per_hour);
         sc_audit_log_ext("agent", "hourly_tool_limit", 1, 0,
@@ -387,7 +400,7 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
     for (int t = 0; t < resp->tool_call_count; t++) {
         sc_tool_call_t *call = &resp->tool_calls[t];
         tc->total_tool_calls++;
-        hourly_record(agent, tc->session_key, 1, agent->max_tool_calls_per_hour);
+        hourly_record(agent, tc->root_session_key, 1, agent->max_tool_calls_per_hour);
 
         if (sc_shutdown_requested()) {
             SC_LOG_INFO("agent", "Shutdown requested, aborting turn");
@@ -507,8 +520,18 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     int iteration = 0;
     char *final_content = NULL;
 
+    /* Use root session key for rate limiting so spawned subagents
+     * share the parent's hourly budget */
+    const char *root_key = session_key;
+    if (strncmp(session_key, "spawn:", 6) == 0) {
+        /* Keep original session_key for session ops, but rate-limit
+         * against the channel:chat_id combo instead */
+        root_key = chat_id ? chat_id : channel;
+    }
+
     sc_turn_ctx_t tc = {
         .session_key = session_key,
+        .root_session_key = root_key,
         .channel = channel,
         .chat_id = chat_id,
         .msgs_cap = msg_count + 64,

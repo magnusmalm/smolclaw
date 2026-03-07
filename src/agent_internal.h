@@ -17,10 +17,11 @@
 
 /* ---------- Cross-turn hourly rate tracking ---------- */
 
-#define SC_HOURLY_SLOTS 16
+#define SC_HOURLY_SLOTS 64
 
 typedef struct {
     uint32_t key_hash;
+    char key_prefix[32];  /* collision detection */
     int tool_calls;
     time_t window_start;
 } sc_hourly_slot_t;
@@ -33,6 +34,7 @@ typedef struct { uint32_t hash; int count; } sc_recent_call_t;
 /* Per-turn mutable state shared across LLM iteration helpers */
 typedef struct {
     const char *session_key;
+    const char *root_session_key;  /* parent session key for rate limiting */
     const char *channel;
     const char *chat_id;
 
@@ -66,5 +68,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
 /* Summarize session if over threshold, then consolidate to long-term memory */
 void sc_maybe_summarize(sc_agent_t *agent, const char *session_key);
+
+/* Drain any pending async summarization thread and apply its result.
+ * Safe to call when no thread is active (no-op). */
+void sc_drain_summarize(sc_agent_t *agent);
 
 #endif /* SC_AGENT_INTERNAL_H */
