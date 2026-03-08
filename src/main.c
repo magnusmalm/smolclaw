@@ -226,11 +226,6 @@ static void cmd_pairing_revoke(const char *channel, const char *user_id)
 {
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config\n");
-        free(config_path);
-        return;
-    }
 
     char ***allow_from = NULL;
     int *count = NULL;
@@ -417,11 +412,6 @@ static void cmd_agent(int argc, char **argv)
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
     free(config_path);
-
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
-        return;
-    }
 
     /* Open persistent log file if configured */
     if (cfg->log_path)
@@ -723,11 +713,6 @@ static void cmd_cost(int argc, char **argv)
     sc_config_t *cfg = sc_config_load(config_path);
     free(config_path);
 
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
-        return;
-    }
-
     char *workspace = sc_config_workspace_path(cfg);
     sc_cost_tracker_t *ct = sc_cost_tracker_new(workspace);
     free(workspace);
@@ -758,11 +743,6 @@ static void cmd_analytics(int argc, char **argv)
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
     free(config_path);
-
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
-        return;
-    }
 
     char *workspace = sc_config_workspace_path(cfg);
     sc_analytics_t *a = sc_analytics_new(workspace);
@@ -818,11 +798,6 @@ static void cmd_update(int argc, char **argv)
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
     free(config_path);
-
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
-        return;
-    }
 
     if (!cfg->updater.manifest_url || !cfg->updater.manifest_url[0]) {
         fprintf(stderr, "Error: updater.manifest_url not configured\n");
@@ -1307,12 +1282,6 @@ static void cmd_gateway(int argc, char **argv)
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
 
-    if (!cfg) {
-        fprintf(stderr, "Error: could not load config. Run '%s onboard' first.\n", SC_NAME);
-        free(config_path);
-        return;
-    }
-
     /* Open persistent log file if configured */
     if (cfg->log_path)
         sc_logger_set_file(cfg->log_path);
@@ -1396,9 +1365,13 @@ int main(int argc, char **argv)
 
     const char *command = argv[1];
 
-    if (strcmp(command, "version") == 0 ||
-        strcmp(command, "--version") == 0 ||
-        strcmp(command, "-v") == 0) {
+    if (strcmp(command, "help") == 0 ||
+        strcmp(command, "--help") == 0 ||
+        strcmp(command, "-h") == 0) {
+        print_help();
+    } else if (strcmp(command, "version") == 0 ||
+               strcmp(command, "--version") == 0 ||
+               strcmp(command, "-v") == 0) {
         print_version();
     } else if (strcmp(command, "onboard") == 0) {
         cmd_onboard();

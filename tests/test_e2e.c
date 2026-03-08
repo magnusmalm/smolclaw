@@ -162,6 +162,20 @@ static void test_onboard_workspace_files(void)
     teardown_home();
 }
 
+static void test_onboard_overwrite_decline(void)
+{
+    setup_home();
+    do_onboard();
+
+    /* Run onboard again, pipe "n" to decline overwrite */
+    char out[4096];
+    int rc = run_cmd("echo n | " BIN " onboard", out, sizeof(out));
+    ASSERT_INT_EQ(rc, 0);
+    ASSERT(strstr(out, "Aborted") != NULL, "onboard decline says Aborted");
+
+    teardown_home();
+}
+
 /* ======================================================================
  * 3. doctor
  * ====================================================================== */
@@ -254,6 +268,36 @@ static void test_analytics_empty(void)
     teardown_home();
 }
 
+/* ======================================================================
+ * 6. help
+ * ====================================================================== */
+
+static void test_help_exit_code(void)
+{
+    char out[4096];
+    int rc = run_cmd(BIN " --help", out, sizeof(out));
+    ASSERT_INT_EQ(rc, 0);
+}
+
+static void test_help_output(void)
+{
+    char out[4096];
+    run_cmd(BIN " help", out, sizeof(out));
+    ASSERT(strstr(out, "Usage") != NULL, "help shows Usage");
+    ASSERT(strstr(out, "onboard") != NULL, "help lists onboard command");
+    ASSERT(strstr(out, "gateway") != NULL, "help lists gateway command");
+}
+
+static void test_help_aliases(void)
+{
+    char out_h[4096], out_flag[4096], out_long[4096];
+    run_cmd(BIN " help", out_h, sizeof(out_h));
+    run_cmd(BIN " -h", out_flag, sizeof(out_flag));
+    run_cmd(BIN " --help", out_long, sizeof(out_long));
+    ASSERT_STR_EQ(out_h, out_flag);
+    ASSERT_STR_EQ(out_h, out_long);
+}
+
 /* ====================================================================== */
 
 int main(void)
@@ -265,11 +309,15 @@ int main(void)
     RUN_TEST(test_version_aliases);
     RUN_TEST(test_onboard_fresh);
     RUN_TEST(test_onboard_workspace_files);
+    RUN_TEST(test_onboard_overwrite_decline);
     RUN_TEST(test_doctor_no_config);
     RUN_TEST(test_doctor_after_onboard);
     RUN_TEST(test_cost_no_config);
     RUN_TEST(test_cost_empty);
     RUN_TEST(test_analytics_empty);
+    RUN_TEST(test_help_exit_code);
+    RUN_TEST(test_help_output);
+    RUN_TEST(test_help_aliases);
 
     TEST_REPORT();
 }

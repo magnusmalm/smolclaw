@@ -53,6 +53,7 @@ typedef struct {
     char *bearer_token;
     char *bind_addr;
     int port;
+    int auto_port;
     struct event_base *base;
     struct evhttp *http;
     pthread_t thread;
@@ -417,10 +418,24 @@ static int web_start(sc_channel_t *self)
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
 
-    /* Bind */
-    if (evhttp_bind_socket(wd->http, wd->bind_addr, (uint16_t)wd->port) != 0) {
-        SC_LOG_ERROR(WEB_TAG, "Failed to bind to %s:%d",
-                     wd->bind_addr, wd->port);
+    /* Bind — try configured port, then auto-increment up to +10 */
+    int bound = 0;
+    int try_port = wd->port;
+    int max_port = wd->auto_port ? try_port + 10 : try_port;
+    for (; try_port <= max_port; try_port++) {
+        if (evhttp_bind_socket(wd->http, wd->bind_addr, (uint16_t)try_port) == 0) {
+            bound = 1;
+            if (try_port != wd->port)
+                SC_LOG_INFO(WEB_TAG, "Port %d in use, bound to %d instead",
+                            wd->port, try_port);
+            wd->port = try_port;
+            break;
+        }
+    }
+    if (!bound) {
+        SC_LOG_ERROR(WEB_TAG, "Failed to bind to %s:%d%s",
+                     wd->bind_addr, wd->port,
+                     wd->auto_port ? " (tried +10)" : "");
         evhttp_free(wd->http);
         event_base_free(wd->base);
         wd->http = NULL;
@@ -530,6 +545,7 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
     wd->bind_addr = sc_strdup(cfg->bind_addr && cfg->bind_addr[0]
                                ? cfg->bind_addr : "127.0.0.1");
     wd->port = cfg->port > 0 ? cfg->port : SC_DEFAULT_WEB_PORT;
+    wd->auto_port = cfg->auto_port;
     wd->base = NULL;
     wd->http = NULL;
     wd->thread_started = 0;

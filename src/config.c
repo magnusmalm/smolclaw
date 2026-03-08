@@ -501,6 +501,7 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_bool(&cfg->web.enabled,         "SMOLCLAW_CHANNELS_WEB_ENABLED");
     env_override_str(&cfg->web.bind_addr,        "SMOLCLAW_CHANNELS_WEB_BIND_ADDR");
     env_override_int(&cfg->web.port,             "SMOLCLAW_CHANNELS_WEB_PORT");
+    env_override_bool(&cfg->web.auto_port,       "SMOLCLAW_CHANNELS_WEB_AUTO_PORT");
     env_override_str(&cfg->web.bearer_token,     "SMOLCLAW_CHANNELS_WEB_BEARER_TOKEN");
     env_override_str(&cfg->web.dm_policy,        "SMOLCLAW_CHANNELS_WEB_DM_POLICY");
 }
@@ -807,6 +808,7 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         cfg->web.enabled = sc_json_get_bool(webcfg, "enabled", 0);
         override_str_field(&cfg->web.bind_addr, webcfg, "bind_addr");
         cfg->web.port = sc_json_get_int(webcfg, "port", cfg->web.port);
+        cfg->web.auto_port = sc_json_get_bool(webcfg, "auto_port", 0);
         override_str_field(&cfg->web.bearer_token, webcfg, "bearer_token");
         override_str_field(&cfg->web.dm_policy, webcfg, "dm_policy");
         cfg->web.allow_from = sc_json_parse_string_list(
@@ -1171,6 +1173,7 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
     if (cfg->web.bind_addr)
         cJSON_AddStringToObject(web_obj, "bind_addr", cfg->web.bind_addr);
     cJSON_AddNumberToObject(web_obj, "port", cfg->web.port);
+    cJSON_AddBoolToObject(web_obj, "auto_port", cfg->web.auto_port);
     if (cfg->web.bearer_token)
         cJSON_AddStringToObject(web_obj, "bearer_token", cfg->web.bearer_token);
     if (cfg->web.dm_policy)

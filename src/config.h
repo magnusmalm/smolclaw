@@ -62,6 +62,7 @@ typedef struct {
     int enabled;
     char *bind_addr;       /* default "127.0.0.1" */
     int port;              /* default 8080 */
+    int auto_port;         /* try next ports on bind failure */
     char *bearer_token;    /* required for API auth */
     char *dm_policy;
     char **allow_from;
