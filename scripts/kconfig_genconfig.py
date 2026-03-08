@@ -30,6 +30,7 @@ FEATURE_SYMS = [
     "SC_ENABLE_TEE",
     "SC_ENABLE_OUTPUT_FILTER",
     "SC_ENABLE_ANALYTICS",
+    "SC_ENABLE_X",
     # Security and infrastructure (auto-selected, not user-facing)
     "SC_STRICT_SECURITY",
     "NEED_OPENSSL",

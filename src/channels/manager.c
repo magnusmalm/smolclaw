@@ -30,6 +30,9 @@
 #if SC_ENABLE_WEB
 #include "channels/web.h"
 #endif
+#if SC_ENABLE_X
+#include "channels/x.h"
+#endif
 #if SC_ENABLE_VOICE
 #include "voice/transcriber.h"
 #endif
@@ -192,6 +195,25 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
             }
 #endif
         }
+    }
+#endif
+
+#if SC_ENABLE_X
+    if (cfg->x.enabled && cfg->x.consumer_key && cfg->x.consumer_key[0]
+        && cfg->x.access_token && cfg->x.access_token[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("X", cfg->x.dm_policy,
+                              cfg->x.allow_from_count)) {
+#endif
+        SC_LOG_INFO("channels", "Initializing X channel");
+        sc_channel_t *xch = sc_channel_x_new(&cfg->x, bus);
+        if (xch)
+            manager_add_channel(mgr, xch, cfg->x.dm_policy, rl);
+        else
+            SC_LOG_ERROR("channels", "Failed to initialize X channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
     }
 #endif
 
@@ -371,6 +393,10 @@ void sc_channel_manager_reload_config(sc_channel_manager_t *mgr,
             reload_allow_list(ch, cfg->web.allow_from,
                               cfg->web.allow_from_count);
             ch->dm_policy = sc_dm_policy_from_str(cfg->web.dm_policy);
+        } else if (strcmp(ch->name, SC_CHANNEL_X) == 0) {
+            reload_allow_list(ch, cfg->x.allow_from,
+                              cfg->x.allow_from_count);
+            ch->dm_policy = sc_dm_policy_from_str(cfg->x.dm_policy);
         }
 
         /* Update rate limiter — always free old before recreating */

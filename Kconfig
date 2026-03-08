@@ -46,6 +46,17 @@ config SC_ENABLE_WEB
 	  chat UI. Runs on its own event loop thread.
 	  No TLS — use a reverse proxy (nginx/caddy) for HTTPS.
 
+config SC_ENABLE_X
+	bool "X (Twitter) channel (REST polling)"
+	default n
+	select NEED_OPENSSL
+	select NEED_PTHREADS
+	help
+	  Enable the X (Twitter) channel. Requires API credentials in config.
+	  Polls for mentions, responds as tweets. Optional DM support.
+	  Uses OAuth 1.0a with HMAC-SHA1 (OpenSSL).
+	  Requires Pay-Per-Use or Basic API tier (Free tier cannot poll mentions).
+
 endmenu
 
 menu "Tools"

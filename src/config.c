@@ -338,6 +338,10 @@ static void resolve_vault_refs(sc_config_t *cfg)
     resolve_vault_field(&cfg->slack.bot_token, vault);
     resolve_vault_field(&cfg->slack.app_token, vault);
     resolve_vault_field(&cfg->web.bearer_token, vault);
+    resolve_vault_field(&cfg->x.consumer_key, vault);
+    resolve_vault_field(&cfg->x.consumer_secret, vault);
+    resolve_vault_field(&cfg->x.access_token, vault);
+    resolve_vault_field(&cfg->x.access_token_secret, vault);
     resolve_vault_field(&cfg->web_tools.brave_api_key, vault);
 
     sc_vault_free(vault);
@@ -507,6 +511,16 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_str(&cfg->web.tls_cert,         "SMOLCLAW_WEB_TLS_CERT");
     env_override_str(&cfg->web.tls_key,          "SMOLCLAW_WEB_TLS_KEY");
     env_override_str(&cfg->web.dm_policy,        "SMOLCLAW_CHANNELS_WEB_DM_POLICY");
+
+    env_override_bool(&cfg->x.enabled,            "SMOLCLAW_CHANNELS_X_ENABLED");
+    env_override_str(&cfg->x.consumer_key,        "SMOLCLAW_CHANNELS_X_CONSUMER_KEY");
+    env_override_str(&cfg->x.consumer_secret,     "SMOLCLAW_CHANNELS_X_CONSUMER_SECRET");
+    env_override_str(&cfg->x.access_token,        "SMOLCLAW_CHANNELS_X_ACCESS_TOKEN");
+    env_override_str(&cfg->x.access_token_secret, "SMOLCLAW_CHANNELS_X_ACCESS_TOKEN_SECRET");
+    env_override_int(&cfg->x.poll_interval_sec,   "SMOLCLAW_CHANNELS_X_POLL_INTERVAL");
+    env_override_bool(&cfg->x.enable_dms,         "SMOLCLAW_CHANNELS_X_ENABLE_DMS");
+    env_override_bool(&cfg->x.read_only,         "SMOLCLAW_CHANNELS_X_READ_ONLY");
+    env_override_str(&cfg->x.dm_policy,           "SMOLCLAW_CHANNELS_X_DM_POLICY");
 }
 
 /* Apply env overrides for providers */
@@ -633,6 +647,12 @@ sc_config_t *sc_config_default(void)
     /* Slack: disabled by default */
     cfg->slack.enabled = 0;
     cfg->slack.dm_policy = sc_strdup(default_dm);
+
+    /* X: disabled by default, read-only by default */
+    cfg->x.enabled = 0;
+    cfg->x.poll_interval_sec = 60;
+    cfg->x.read_only = 1;
+    cfg->x.dm_policy = sc_strdup(default_dm);
 
     /* Web: disabled by default */
     cfg->web.enabled = 0;
@@ -828,6 +848,22 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->web.dm_policy, webcfg, "dm_policy");
         cfg->web.allow_from = sc_json_parse_string_list(
             sc_json_get_array(webcfg, "allow_from"), &cfg->web.allow_from_count);
+    }
+
+    const cJSON *xcfg = sc_json_get_object(channels, "x");
+    if (xcfg) {
+        cfg->x.enabled = sc_json_get_bool(xcfg, "enabled", 0);
+        override_str_field(&cfg->x.consumer_key, xcfg, "consumer_key");
+        override_str_field(&cfg->x.consumer_secret, xcfg, "consumer_secret");
+        override_str_field(&cfg->x.access_token, xcfg, "access_token");
+        override_str_field(&cfg->x.access_token_secret, xcfg, "access_token_secret");
+        cfg->x.poll_interval_sec = sc_json_get_int(xcfg, "poll_interval_sec",
+                                                     cfg->x.poll_interval_sec);
+        cfg->x.enable_dms = sc_json_get_bool(xcfg, "enable_dms", 0);
+        cfg->x.read_only = sc_json_get_bool(xcfg, "read_only", cfg->x.read_only);
+        override_str_field(&cfg->x.dm_policy, xcfg, "dm_policy");
+        cfg->x.allow_from = sc_json_parse_string_list(
+            sc_json_get_array(xcfg, "allow_from"), &cfg->x.allow_from_count);
     }
 }
 
@@ -1219,6 +1255,25 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
         cJSON_AddStringToObject(web_obj, "dm_policy", cfg->web.dm_policy);
     save_allow_from(web_obj, (const char *const *)cfg->web.allow_from,
                     cfg->web.allow_from_count);
+
+    /* x */
+    cJSON *x_obj = cJSON_AddObjectToObject(channels, "x");
+    cJSON_AddBoolToObject(x_obj, "enabled", cfg->x.enabled);
+    if (cfg->x.consumer_key)
+        cJSON_AddStringToObject(x_obj, "consumer_key", cfg->x.consumer_key);
+    if (cfg->x.consumer_secret)
+        cJSON_AddStringToObject(x_obj, "consumer_secret", cfg->x.consumer_secret);
+    if (cfg->x.access_token)
+        cJSON_AddStringToObject(x_obj, "access_token", cfg->x.access_token);
+    if (cfg->x.access_token_secret)
+        cJSON_AddStringToObject(x_obj, "access_token_secret", cfg->x.access_token_secret);
+    cJSON_AddNumberToObject(x_obj, "poll_interval_sec", cfg->x.poll_interval_sec);
+    cJSON_AddBoolToObject(x_obj, "enable_dms", cfg->x.enable_dms);
+    cJSON_AddBoolToObject(x_obj, "read_only", cfg->x.read_only);
+    if (cfg->x.dm_policy)
+        cJSON_AddStringToObject(x_obj, "dm_policy", cfg->x.dm_policy);
+    save_allow_from(x_obj, (const char *const *)cfg->x.allow_from,
+                    cfg->x.allow_from_count);
 }
 
 /* Serialize MCP section to JSON */
@@ -1404,6 +1459,16 @@ void sc_config_free(sc_config_t *cfg)
     for (int i = 0; i < cfg->web.allow_from_count; i++)
         free(cfg->web.allow_from[i]);
     free(cfg->web.allow_from);
+
+    free(cfg->x.consumer_key);
+    free(cfg->x.consumer_secret);
+    free(cfg->x.access_token);
+    free(cfg->x.access_token_secret);
+    free(cfg->x.api_base);
+    free(cfg->x.dm_policy);
+    for (int i = 0; i < cfg->x.allow_from_count; i++)
+        free(cfg->x.allow_from[i]);
+    free(cfg->x.allow_from);
 
     free(cfg->web_tools.brave_api_key);
     free(cfg->web_tools.brave_base_url);

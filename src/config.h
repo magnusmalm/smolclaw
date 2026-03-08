@@ -58,6 +58,22 @@ typedef struct {
     int allow_from_count;
 } sc_slack_config_t;
 
+/* X (Twitter) channel config */
+typedef struct {
+    int enabled;
+    char *consumer_key;        /* OAuth 1.0a API Key */
+    char *consumer_secret;     /* OAuth 1.0a API Key Secret */
+    char *access_token;        /* OAuth 1.0a Access Token */
+    char *access_token_secret; /* OAuth 1.0a Access Token Secret */
+    char *api_base;            /* default: "https://api.x.com" (override for testing) */
+    char *dm_policy;
+    char **allow_from;
+    int allow_from_count;
+    int poll_interval_sec;     /* default: 60 */
+    int enable_dms;            /* default: 0 (DMs require Pro tier) */
+    int read_only;             /* default: 1 — poll only, block all outbound */
+} sc_x_config_t;
+
 /* Web channel config */
 typedef struct {
     int enabled;
@@ -194,6 +210,7 @@ typedef struct {
     sc_irc_config_t irc;
     sc_slack_config_t slack;
     sc_web_config_t web;
+    sc_x_config_t x;
 
     /* Tools */
     sc_web_tools_config_t web_tools;

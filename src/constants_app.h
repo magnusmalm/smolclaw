@@ -18,6 +18,7 @@
 #define SC_CHANNEL_IRC      "irc"
 #define SC_CHANNEL_SLACK    "slack"
 #define SC_CHANNEL_WEB      "web"
+#define SC_CHANNEL_X        "x"
 #define SC_CHANNEL_SYSTEM   "system"
 
 /* Internal channels that don't route to external users */

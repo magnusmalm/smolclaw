@@ -30,4 +30,8 @@
 #define SC_TELEGRAM_RECONNECT_DELAY     5    /* initial backoff seconds */
 #define SC_TELEGRAM_RECONNECT_MAX_DELAY 300  /* cap at 5 minutes */
 
+/* X (Twitter) reconnect backoff */
+#define SC_X_RECONNECT_DELAY     5    /* initial backoff seconds */
+#define SC_X_RECONNECT_MAX_DELAY 300  /* cap at 5 minutes */
+
 #endif /* SC_CONSTANTS_NETWORK_H */
