@@ -164,6 +164,22 @@ endmenu
 
 menu "Security"
 
+config SC_STRICT_SECURITY
+	bool "Strict security defaults (fail-closed)"
+	default n
+	help
+	  When enabled, all security-sensitive defaults become fail-closed:
+	  - Channel DM policy defaults to "allowlist" (deny unknown senders)
+	  - Exec tool defaults to allowlist mode (only pre-approved commands)
+	  - External channels are quarantined unless security is configured
+	    (allow_from or non-open dm_policy required; Web needs bearer token)
+	  - Config version mismatch (newer config, older binary) blocks startup
+
+	  When disabled (default), behavior is backward-compatible:
+	  - DM policy defaults to "open"
+	  - Exec allows all non-denied commands
+	  - Channels start with warnings only
+
 config SC_ENABLE_VAULT
 	bool "Encrypted API key vault (AES-256-GCM)"
 	default y

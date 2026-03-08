@@ -504,6 +504,8 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_int(&cfg->web.port,             "SMOLCLAW_CHANNELS_WEB_PORT");
     env_override_bool(&cfg->web.auto_port,       "SMOLCLAW_CHANNELS_WEB_AUTO_PORT");
     env_override_str(&cfg->web.bearer_token,     "SMOLCLAW_CHANNELS_WEB_BEARER_TOKEN");
+    env_override_str(&cfg->web.tls_cert,         "SMOLCLAW_WEB_TLS_CERT");
+    env_override_str(&cfg->web.tls_key,          "SMOLCLAW_WEB_TLS_KEY");
     env_override_str(&cfg->web.dm_policy,        "SMOLCLAW_CHANNELS_WEB_DM_POLICY");
 }
 
@@ -606,28 +608,37 @@ sc_config_t *sc_config_default(void)
     cfg->ollama.api_base    = sc_strdup("http://localhost:11434/v1");
     cfg->xai.api_base       = sc_strdup("https://api.x.ai/v1");
 
+    /* Channel DM policy: strict mode defaults to allowlist (deny unknown),
+     * non-strict defaults to open (backward compatible). */
+#if SC_STRICT_SECURITY
+    const char *default_dm = "allowlist";
+    cfg->exec_use_allowlist = 1;
+#else
+    const char *default_dm = "open";
+#endif
+
     /* Telegram: disabled by default */
     cfg->telegram.enabled = 0;
-    cfg->telegram.dm_policy = sc_strdup("open");
+    cfg->telegram.dm_policy = sc_strdup(default_dm);
 
     /* Discord: disabled by default */
     cfg->discord.enabled = 0;
-    cfg->discord.dm_policy = sc_strdup("open");
+    cfg->discord.dm_policy = sc_strdup(default_dm);
 
     /* IRC: disabled by default */
     cfg->irc.enabled = 0;
     cfg->irc.port = 6667;
-    cfg->irc.dm_policy = sc_strdup("open");
+    cfg->irc.dm_policy = sc_strdup(default_dm);
 
     /* Slack: disabled by default */
     cfg->slack.enabled = 0;
-    cfg->slack.dm_policy = sc_strdup("open");
+    cfg->slack.dm_policy = sc_strdup(default_dm);
 
     /* Web: disabled by default */
     cfg->web.enabled = 0;
     cfg->web.bind_addr = sc_strdup("127.0.0.1");
     cfg->web.port = SC_DEFAULT_WEB_PORT;
-    cfg->web.dm_policy = sc_strdup("open");
+    cfg->web.dm_policy = sc_strdup(default_dm);
 
     /* Web tools */
     cfg->web_tools.brave_enabled      = 0;
@@ -812,6 +823,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         cfg->web.port = sc_json_get_int(webcfg, "port", cfg->web.port);
         cfg->web.auto_port = sc_json_get_bool(webcfg, "auto_port", 0);
         override_str_field(&cfg->web.bearer_token, webcfg, "bearer_token");
+        override_str_field(&cfg->web.tls_cert, webcfg, "tls_cert");
+        override_str_field(&cfg->web.tls_key, webcfg, "tls_key");
         override_str_field(&cfg->web.dm_policy, webcfg, "dm_policy");
         cfg->web.allow_from = sc_json_parse_string_list(
             sc_json_get_array(webcfg, "allow_from"), &cfg->web.allow_from_count);
@@ -901,6 +914,24 @@ sc_config_t *sc_config_load(const char *path)
     }
 
     cfg->raw = root;
+
+    /* Check config version — newer config may have security fields we don't know about */
+    int file_version = sc_json_get_int(root, "config_version", 0);
+    if (file_version > SC_CONFIG_VERSION) {
+#if SC_STRICT_SECURITY
+        SC_LOG_ERROR(LOG_TAG, "Config version %d is newer than binary (supports up to %d). "
+                     "Refusing to load in strict security mode — upgrade the binary.",
+                     file_version, SC_CONFIG_VERSION);
+        cJSON_Delete(root);
+        cfg->raw = NULL;
+        sc_config_free(cfg);
+        return NULL;
+#else
+        SC_LOG_WARN(LOG_TAG, "Config version %d is newer than binary (supports up to %d). "
+                    "Unknown security fields may be ignored.",
+                    file_version, SC_CONFIG_VERSION);
+#endif
+    }
 
     load_agent_defaults(cfg, root);
 
@@ -1180,6 +1211,10 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
     cJSON_AddBoolToObject(web_obj, "auto_port", cfg->web.auto_port);
     if (cfg->web.bearer_token)
         cJSON_AddStringToObject(web_obj, "bearer_token", cfg->web.bearer_token);
+    if (cfg->web.tls_cert)
+        cJSON_AddStringToObject(web_obj, "tls_cert", cfg->web.tls_cert);
+    if (cfg->web.tls_key)
+        cJSON_AddStringToObject(web_obj, "tls_key", cfg->web.tls_key);
     if (cfg->web.dm_policy)
         cJSON_AddStringToObject(web_obj, "dm_policy", cfg->web.dm_policy);
     save_allow_from(web_obj, (const char *const *)cfg->web.allow_from,
@@ -1221,6 +1256,8 @@ int sc_config_save(const char *path, const sc_config_t *cfg)
 
     cJSON *root = cJSON_CreateObject();
     if (!root) return -1;
+
+    cJSON_AddNumberToObject(root, "config_version", SC_CONFIG_VERSION);
 
     save_agent_defaults(root, cfg);
 
@@ -1361,6 +1398,8 @@ void sc_config_free(sc_config_t *cfg)
 
     free(cfg->web.bind_addr);
     free(cfg->web.bearer_token);
+    free(cfg->web.tls_cert);
+    free(cfg->web.tls_key);
     free(cfg->web.dm_policy);
     for (int i = 0; i < cfg->web.allow_from_count; i++)
         free(cfg->web.allow_from[i]);

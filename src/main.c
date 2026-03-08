@@ -90,6 +90,19 @@ static void install_signal(int signo, void (*handler)(int))
     sigaction(signo, &sa, NULL);
 }
 
+/* Load config, exit if NULL (strict security mode rejects version mismatch) */
+static sc_config_t *load_config_or_exit(void)
+{
+    char *path = sc_config_get_path();
+    sc_config_t *cfg = sc_config_load(path);
+    free(path);
+    if (!cfg) {
+        fprintf(stderr, "Fatal: could not load config\n");
+        exit(1);
+    }
+    return cfg;
+}
+
 static void print_version(void)
 {
     printf("%s %s %s (%s, %s)\n", SC_LOGO, SC_NAME, SC_VERSION,
@@ -409,9 +422,7 @@ static void cmd_agent(int argc, char **argv)
     }
 
     /* Load config */
-    char *config_path = sc_config_get_path();
-    sc_config_t *cfg = sc_config_load(config_path);
-    free(config_path);
+    sc_config_t *cfg = load_config_or_exit();
 
     /* Open persistent log file if configured */
     if (cfg->log_path)
@@ -709,9 +720,7 @@ static void cmd_vault(int argc, char **argv)
 
 static void cmd_cost(int argc, char **argv)
 {
-    char *config_path = sc_config_get_path();
-    sc_config_t *cfg = sc_config_load(config_path);
-    free(config_path);
+    sc_config_t *cfg = load_config_or_exit();
 
     char *workspace = sc_config_workspace_path(cfg);
     sc_cost_tracker_t *ct = sc_cost_tracker_new(workspace);
@@ -740,9 +749,7 @@ static void cmd_cost(int argc, char **argv)
 #if SC_ENABLE_ANALYTICS
 static void cmd_analytics(int argc, char **argv)
 {
-    char *config_path = sc_config_get_path();
-    sc_config_t *cfg = sc_config_load(config_path);
-    free(config_path);
+    sc_config_t *cfg = load_config_or_exit();
 
     char *workspace = sc_config_workspace_path(cfg);
     sc_analytics_t *a = sc_analytics_new(workspace);
@@ -795,9 +802,7 @@ static void cmd_update(int argc, char **argv)
     }
 
     /* Load config for manifest URL */
-    char *config_path = sc_config_get_path();
-    sc_config_t *cfg = sc_config_load(config_path);
-    free(config_path);
+    sc_config_t *cfg = load_config_or_exit();
 
     if (!cfg->updater.manifest_url || !cfg->updater.manifest_url[0]) {
         fprintf(stderr, "Error: updater.manifest_url not configured\n");
@@ -1281,6 +1286,11 @@ static void cmd_gateway(int argc, char **argv)
     /* Load config */
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
+    if (!cfg) {
+        fprintf(stderr, "Fatal: could not load config\n");
+        free(config_path);
+        return;
+    }
 
     /* Open persistent log file if configured */
     if (cfg->log_path)

@@ -68,6 +68,7 @@ if(SC_MUSL_STATIC)
     set(CRYPTO_LIB "${MUSL_PREFIX}/lib/libcrypto.a")
     set(Z_LIB "${MUSL_PREFIX}/lib/libz.a")
     set(EVENT_LIB "${MUSL_PREFIX}/lib/libevent.a")
+    set(EVENT_OPENSSL_LIB "${MUSL_PREFIX}/lib/libevent_openssl.a")
 
     # armv7l (32-bit ARM) needs libatomic for OpenSSL's 64-bit atomic operations
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "armv7l")
@@ -97,6 +98,7 @@ elseif(SC_STATIC)
     if(NOT EVENT_LIB)
         message(FATAL_ERROR "Static libevent not found")
     endif()
+    find_library(EVENT_OPENSSL_LIB libevent_openssl.a PATHS ${SYS_STATIC} ${LOCAL_DEV_LIB})
 
     # Readline + terminfo
     find_library(READLINE_LIB libreadline.a PATHS ${SYS_STATIC})
@@ -122,6 +124,7 @@ else()
     if(NOT EVENT_LIB)
         set(EVENT_LIB "event")
     endif()
+    find_library(EVENT_OPENSSL_LIB event_openssl PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
 
     # OpenSSL needed for Discord (WebSocket TLS), IRC (optional TLS), Slack (WSS), Vault, Updater
     if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT OR SC_ENABLE_UPDATER)
@@ -363,6 +366,14 @@ else()
         target_link_libraries(smolclaw_lib PUBLIC ${READLINE_LIB})
         target_compile_definitions(smolclaw_lib PUBLIC HAVE_READLINE=1)
     endif()
+endif()
+
+# Web channel TLS via libevent_openssl (all build modes)
+if(SC_ENABLE_WEB AND NEED_OPENSSL AND EVENT_OPENSSL_LIB)
+    target_link_libraries(smolclaw_lib PUBLIC ${EVENT_OPENSSL_LIB})
+    target_compile_definitions(smolclaw_lib PUBLIC SC_HAVE_EVENT_OPENSSL=1)
+else()
+    target_compile_definitions(smolclaw_lib PUBLIC SC_HAVE_EVENT_OPENSSL=0)
 endif()
 
 # SQLite for memory search and/or analytics (all build modes)

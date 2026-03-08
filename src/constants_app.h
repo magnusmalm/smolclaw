@@ -7,6 +7,10 @@
 #define SC_NAME    "smolclaw"
 #define SC_LOGO    "\xF0\x9F\xA6\x9E" /* lobster emoji */
 
+/* Config schema version — bump when adding security-relevant fields.
+ * Older binaries warn (or refuse in strict mode) if config is newer. */
+#define SC_CONFIG_VERSION 1
+
 /* Channel name constants */
 #define SC_CHANNEL_CLI      "cli"
 #define SC_CHANNEL_TELEGRAM "telegram"

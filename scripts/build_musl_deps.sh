@@ -89,6 +89,7 @@ REQUIRED_LIBS=(
     "${PREFIX}/lib/libssl.a"
     "${PREFIX}/lib/libcrypto.a"
     "${PREFIX}/lib/libevent.a"
+    "${PREFIX}/lib/libevent_openssl.a"
     "${PREFIX}/lib/libcurl.a"
 )
 
@@ -278,20 +279,21 @@ build_libevent() {
     CC="${TOOLCHAIN_DIR}/bin/${MUSL_CC}" \
     AR="${TOOLCHAIN_DIR}/bin/${MUSL_TRIPLE}-ar" \
     RANLIB="${TOOLCHAIN_DIR}/bin/${MUSL_TRIPLE}-ranlib" \
-    CFLAGS="-fPIC -O2" \
+    CFLAGS="-fPIC -O2 -I${PREFIX}/include" \
+    LDFLAGS="-L${PREFIX}/lib" \
     ./configure \
         ${CROSS_HOST} \
         --prefix="${PREFIX}" \
         --enable-static \
         --disable-shared \
-        --disable-openssl \
+        --enable-openssl \
         --disable-samples \
         --disable-libevent-regress \
         > /dev/null
 
     make -j"${NPROC}" > /dev/null
     make install > /dev/null
-    echo "  Built: ${PREFIX}/lib/libevent.a"
+    echo "  Built: ${PREFIX}/lib/libevent.a, libevent_openssl.a"
 }
 
 # =============================================================================

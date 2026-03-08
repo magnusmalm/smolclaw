@@ -65,6 +65,8 @@ typedef struct {
     int port;              /* default 8080 */
     int auto_port;         /* try next ports on bind failure */
     char *bearer_token;    /* required for API auth */
+    char *tls_cert;        /* PEM certificate path (enables HTTPS) */
+    char *tls_key;         /* PEM private key path */
     char *dm_policy;
     char **allow_from;
     int allow_from_count;

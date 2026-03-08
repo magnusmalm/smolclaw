@@ -25,6 +25,12 @@
 #include <event2/http.h>
 #include <event2/buffer.h>
 
+#if SC_HAVE_EVENT_OPENSSL
+#include <event2/bufferevent_ssl.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #include "cJSON.h"
 #include "constants.h"
 #include "logger.h"
@@ -54,6 +60,8 @@ typedef struct {
     char *bind_addr;
     int port;
     int auto_port;
+    char *tls_cert;
+    char *tls_key;
     struct event_base *base;
     struct evhttp *http;
     pthread_t thread;
@@ -66,7 +74,63 @@ typedef struct {
     /* Pipe for thread-safe response delivery */
     int response_pipe[2];
     struct event *pipe_event;
+
+#if SC_HAVE_EVENT_OPENSSL
+    SSL_CTX *ssl_ctx;
+#endif
 } web_data_t;
+
+/* Check if address is loopback (safe for plaintext HTTP) */
+static int is_loopback_addr(const char *addr)
+{
+    if (!addr) return 1;
+    return strcmp(addr, "127.0.0.1") == 0 ||
+           strcmp(addr, "::1") == 0 ||
+           strcmp(addr, "localhost") == 0;
+}
+
+#if SC_HAVE_EVENT_OPENSSL
+/* Bufferevent callback: creates an SSL-wrapped bufferevent for each connection */
+static struct bufferevent *ssl_bevcb(struct event_base *base, void *arg)
+{
+    SSL_CTX *ctx = arg;
+    SSL *ssl = SSL_new(ctx);
+    if (!ssl) return NULL;
+    return bufferevent_openssl_socket_new(base, -1, ssl,
+                                          BUFFEREVENT_SSL_ACCEPTING,
+                                          BEV_OPT_CLOSE_ON_FREE);
+}
+
+/* Initialize SSL_CTX from cert + key files. Returns NULL on failure. */
+static SSL_CTX *web_ssl_ctx_new(const char *cert_path, const char *key_path)
+{
+    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+    if (!ctx) {
+        SC_LOG_ERROR(WEB_TAG, "Failed to create SSL context");
+        return NULL;
+    }
+
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+
+    if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1) {
+        SC_LOG_ERROR(WEB_TAG, "Failed to load TLS certificate: %s", cert_path);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    if (SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) != 1) {
+        SC_LOG_ERROR(WEB_TAG, "Failed to load TLS private key: %s", key_path);
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+    if (SSL_CTX_check_private_key(ctx) != 1) {
+        SC_LOG_ERROR(WEB_TAG, "TLS private key does not match certificate");
+        SSL_CTX_free(ctx);
+        return NULL;
+    }
+
+    return ctx;
+}
+#endif
 
 /* Embedded chat UI (minimal HTML/JS) */
 static const char *CHAT_HTML =
@@ -396,6 +460,26 @@ static int web_start(sc_channel_t *self)
     if (!wd->bearer_token || !wd->bearer_token[0])
         SC_LOG_WARN(WEB_TAG, "No bearer token configured — web API is unauthenticated");
 
+    int has_tls = 0;
+#if SC_HAVE_EVENT_OPENSSL
+    if (wd->tls_cert && wd->tls_cert[0] && wd->tls_key && wd->tls_key[0]) {
+        has_tls = 1;
+    } else if (wd->tls_cert || wd->tls_key) {
+        SC_LOG_ERROR(WEB_TAG, "Both tls_cert and tls_key must be set for HTTPS");
+        return -1;
+    }
+#else
+    if (wd->tls_cert && wd->tls_cert[0]) {
+        SC_LOG_WARN(WEB_TAG, "TLS cert configured but built without OpenSSL support — "
+                    "running plain HTTP");
+    }
+#endif
+
+    if (!has_tls && !is_loopback_addr(wd->bind_addr))
+        SC_LOG_WARN(WEB_TAG, "Binding to %s without TLS — exposed to network. "
+                    "Configure tls_cert/tls_key or use a reverse proxy for HTTPS.",
+                    wd->bind_addr);
+
     /* Create event base */
     wd->base = event_base_new();
     if (!wd->base) {
@@ -411,6 +495,21 @@ static int web_start(sc_channel_t *self)
         wd->base = NULL;
         return -1;
     }
+
+#if SC_HAVE_EVENT_OPENSSL
+    /* Set up TLS if cert+key configured */
+    if (has_tls) {
+        wd->ssl_ctx = web_ssl_ctx_new(wd->tls_cert, wd->tls_key);
+        if (!wd->ssl_ctx) {
+            evhttp_free(wd->http);
+            event_base_free(wd->base);
+            wd->http = NULL;
+            wd->base = NULL;
+            return -1;
+        }
+        evhttp_set_bevcb(wd->http, ssl_bevcb, wd->ssl_ctx);
+    }
+#endif
 
     /* Set up routes */
     evhttp_set_cb(wd->http, "/api/message", handle_message, self);
@@ -475,8 +574,8 @@ static int web_start(sc_channel_t *self)
         return -1;
     }
 
-    SC_LOG_INFO(WEB_TAG, "Web channel started on %s:%d",
-                wd->bind_addr, wd->port);
+    SC_LOG_INFO(WEB_TAG, "Web channel started on %s://%s:%d",
+                has_tls ? "https" : "http", wd->bind_addr, wd->port);
     return 0;
 }
 
@@ -522,8 +621,13 @@ static void web_destroy(sc_channel_t *self)
         if (wd->http) evhttp_free(wd->http);
         if (wd->base) event_base_free(wd->base);
 
+#if SC_HAVE_EVENT_OPENSSL
+        if (wd->ssl_ctx) SSL_CTX_free(wd->ssl_ctx);
+#endif
         free(wd->bearer_token);
         free(wd->bind_addr);
+        free(wd->tls_cert);
+        free(wd->tls_key);
         pthread_mutex_destroy(&wd->pending_lock);
         free(wd);
     }
@@ -546,6 +650,8 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
                                ? cfg->bind_addr : "127.0.0.1");
     wd->port = cfg->port > 0 ? cfg->port : SC_DEFAULT_WEB_PORT;
     wd->auto_port = cfg->auto_port;
+    wd->tls_cert = sc_strdup(cfg->tls_cert);
+    wd->tls_key = sc_strdup(cfg->tls_key);
     wd->base = NULL;
     wd->http = NULL;
     wd->thread_started = 0;

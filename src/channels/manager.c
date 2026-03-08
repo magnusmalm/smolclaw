@@ -34,6 +34,27 @@
 #include "voice/transcriber.h"
 #endif
 
+#if SC_STRICT_SECURITY
+/* Strict mode: refuse to start channels with inadequate security config.
+ * Returns 1 if the channel should be quarantined (not started). */
+static int quarantine_check(const char *name, const char *dm_policy,
+                             int allow_from_count)
+{
+    /* Channels with explicit non-open policy are fine */
+    if (dm_policy && strcmp(dm_policy, "open") != 0)
+        return 0;
+
+    /* Open policy but has an allow_from list = effectively allowlist */
+    if (allow_from_count > 0)
+        return 0;
+
+    SC_LOG_ERROR("channels", "QUARANTINE: %s channel has open DM policy and no allow_from list. "
+                 "In strict security mode, configure dm_policy or allow_from to enable this channel.",
+                 name);
+    return 1;
+}
+#endif
+
 /* Add a channel to the manager array, set up rate limiter and DM policy warning.
  * Returns 0 on success, -1 on failure (channel is destroyed on failure). */
 static int manager_add_channel(sc_channel_manager_t *mgr, sc_channel_t *ch,
@@ -71,57 +92,106 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
 
 #if SC_ENABLE_TELEGRAM
     if (cfg->telegram.enabled && cfg->telegram.token && cfg->telegram.token[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("Telegram", cfg->telegram.dm_policy,
+                              cfg->telegram.allow_from_count)) {
+#endif
         SC_LOG_INFO("channels", "Initializing Telegram channel");
         sc_channel_t *tg = sc_channel_telegram_new(&cfg->telegram, bus);
         if (tg)
             manager_add_channel(mgr, tg, cfg->telegram.dm_policy, rl);
         else
             SC_LOG_ERROR("channels", "Failed to initialize Telegram channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
     }
 #endif
 
 #if SC_ENABLE_DISCORD
     if (cfg->discord.enabled && cfg->discord.token && cfg->discord.token[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("Discord", cfg->discord.dm_policy,
+                              cfg->discord.allow_from_count)) {
+#endif
         SC_LOG_INFO("channels", "Initializing Discord channel");
         sc_channel_t *dc = sc_channel_discord_new(&cfg->discord, bus);
         if (dc)
             manager_add_channel(mgr, dc, cfg->discord.dm_policy, rl);
         else
             SC_LOG_ERROR("channels", "Failed to initialize Discord channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
     }
 #endif
 
 #if SC_ENABLE_IRC
     if (cfg->irc.enabled && cfg->irc.hostname && cfg->irc.hostname[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("IRC", cfg->irc.dm_policy,
+                              cfg->irc.allow_from_count)) {
+#endif
         SC_LOG_INFO("channels", "Initializing IRC channel");
         sc_channel_t *irc = sc_channel_irc_new(&cfg->irc, bus);
         if (irc)
             manager_add_channel(mgr, irc, cfg->irc.dm_policy, rl);
         else
             SC_LOG_ERROR("channels", "Failed to initialize IRC channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
     }
 #endif
 
 #if SC_ENABLE_SLACK
     if (cfg->slack.enabled && cfg->slack.bot_token && cfg->slack.bot_token[0]
         && cfg->slack.app_token && cfg->slack.app_token[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("Slack", cfg->slack.dm_policy,
+                              cfg->slack.allow_from_count)) {
+#endif
         SC_LOG_INFO("channels", "Initializing Slack channel");
         sc_channel_t *sl = sc_channel_slack_new(&cfg->slack, bus);
         if (sl)
             manager_add_channel(mgr, sl, cfg->slack.dm_policy, rl);
         else
             SC_LOG_ERROR("channels", "Failed to initialize Slack channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
     }
 #endif
 
 #if SC_ENABLE_WEB
     if (cfg->web.enabled) {
-        SC_LOG_INFO("channels", "Initializing Web channel");
-        sc_channel_t *web = sc_channel_web_new(&cfg->web, bus);
-        if (web)
-            manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize Web channel");
+        if (!cfg->web.bearer_token || !cfg->web.bearer_token[0]) {
+            SC_LOG_ERROR("channels", "Web channel requires a bearer_token for API authentication. "
+                         "Set web.bearer_token in config or SMOLCLAW_WEB_BEARER_TOKEN env var.");
+        } else {
+#if SC_STRICT_SECURITY
+            const char *waddr = cfg->web.bind_addr;
+            int web_loopback = !waddr || !waddr[0] ||
+                               strcmp(waddr, "127.0.0.1") == 0 ||
+                               strcmp(waddr, "::1") == 0 ||
+                               strcmp(waddr, "localhost") == 0;
+            if (!web_loopback) {
+                SC_LOG_ERROR("channels", "QUARANTINE: Web channel bind_addr is '%s' (non-loopback). "
+                             "In strict security mode, bind to 127.0.0.1 and use a reverse proxy.",
+                             waddr);
+            } else if (!quarantine_check("Web", cfg->web.dm_policy,
+                                         cfg->web.allow_from_count)) {
+#endif
+            SC_LOG_INFO("channels", "Initializing Web channel");
+            sc_channel_t *web = sc_channel_web_new(&cfg->web, bus);
+            if (web)
+                manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize Web channel");
+#if SC_STRICT_SECURITY
+            }
+#endif
+        }
     }
 #endif
 
