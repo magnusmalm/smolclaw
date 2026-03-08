@@ -334,10 +334,15 @@ static void handle_message(struct evhttp_request *req, void *arg)
     /* Store pending request */
     add_pending(wd, request_id, req);
 
-    /* Build session key */
+    /* Build session key — namespace by bearer token so different clients
+     * cannot access each other's sessions by guessing the session name. */
     sc_strbuf_t sk;
     sc_strbuf_init(&sk);
-    sc_strbuf_appendf(&sk, "web:%s", session && session[0] ? session : request_id);
+    const char *sess_name = session && session[0] ? session : request_id;
+    if (wd->bearer_token)
+        sc_strbuf_appendf(&sk, "web:%s:%s", wd->bearer_token, sess_name);
+    else
+        sc_strbuf_appendf(&sk, "web:%s", sess_name);
     char *session_key = sc_strbuf_finish(&sk);
 
     /* Publish inbound message to bus.

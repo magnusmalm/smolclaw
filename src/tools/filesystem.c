@@ -142,8 +142,10 @@ static int is_sensitive_path(const char *resolved)
     const char *basename = strrchr(resolved, '/');
     if (basename) basename++;
     else basename = resolved;
-    if (strcasecmp(basename, ".env") == 0 ||
-        strcasecmp(basename, ".netrc") == 0 ||
+    if (strncasecmp(basename, ".env", 4) == 0 &&
+        (basename[4] == '\0' || basename[4] == '.'))
+        return 1;
+    if (strcasecmp(basename, ".netrc") == 0 ||
         strcasecmp(basename, ".npmrc") == 0 ||
         strcasecmp(basename, ".pypirc") == 0)
         return 1;
@@ -416,12 +418,10 @@ static sc_tool_result_t *list_dir_execute(sc_tool_t *self, cJSON *args, void *ct
     fs_tool_data_t *d = self->data;
     const char *path = sc_json_get_string(args, "path", ".");
 
-    if (is_symlink_path(path, d->workspace))
-        return sc_tool_result_error("access denied: path is a symlink");
-
-    char *resolved = sc_validate_path(path, d->workspace, d->restrict_to_workspace);
+    const char *err = NULL;
+    char *resolved = fs_validate_path(d, path, FS_CHECKS_READ, &err);
     if (!resolved)
-        return sc_tool_result_error("access denied: path outside workspace");
+        return sc_tool_result_error(err);
 
     DIR *dir = opendir(resolved);
     if (!dir) {

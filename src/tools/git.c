@@ -182,7 +182,8 @@ static int git_build_argv(const char *dir, const char *subcmd,
      * -c/--config can execute arbitrary commands via core.pager, core.editor,
      * core.sshCommand, credential.helper, etc.
      * --git-dir/--work-tree escape workspace restrictions.
-     * --exec/--upload-pack/--receive-pack execute arbitrary commands. */
+     * --exec/--upload-pack/--receive-pack execute arbitrary commands.
+     * --hard/--force/-f can cause data loss (reset --hard, clean -f, etc.). */
     for (int i = 4; i < argc; i++) {
         const char *a = argv_out[i];
         if (strncmp(a, "--exec", 6) == 0 ||
@@ -192,7 +193,10 @@ static int git_build_argv(const char *dir, const char *subcmd,
             strncmp(a, "--git-dir", 9) == 0 ||
             strncmp(a, "--work-tree", 11) == 0 ||
             strncmp(a, "--replace-object", 16) == 0 ||
+            strncmp(a, "--hard", 6) == 0 ||
+            strncmp(a, "--force", 7) == 0 ||
             (a[0] == '-' && a[1] == 'c' && (a[2] == '\0' || a[2] == ' ')) ||
+            (a[0] == '-' && a[1] == 'f' && (a[2] == '\0')) ||
             (a[0] == '-' && a[1] == 'p' && (a[2] == '\0' || a[2] == ' ')))
             return -1;
     }

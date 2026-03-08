@@ -302,8 +302,9 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         /* Block dangerous environment variables */
         static const char *blocked_env[] = {
             "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
-            "PYTHONPATH", "RUBYLIB", "NODE_PATH", "PERL5LIB",
-            "BASH_ENV", "ENV", "SHELLOPTS",
+            "PYTHONPATH", "PYTHONSTARTUP", "RUBYLIB", "RUBY_OPT",
+            "NODE_PATH", "NODE_OPTIONS", "PERL5LIB", "PERL5OPT",
+            "BASH_ENV", "ENV", "SHELLOPTS", "ZDOTDIR",
         };
         for (size_t b = 0; b < sizeof(blocked_env) / sizeof(blocked_env[0]); b++)
             unsetenv(blocked_env[b]);
