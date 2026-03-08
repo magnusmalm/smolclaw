@@ -621,14 +621,16 @@ static int discord_stop(sc_channel_t *self)
     discord_data_t *dd = self->data;
     self->running = 0;
 
-    /* Close WebSocket to unblock the gateway thread */
-    if (dd->ws) {
+    /* Close WebSocket to unblock the gateway thread, but keep the pointer
+     * alive until after join — other threads may still dereference dd->ws. */
+    if (dd->ws)
         sc_ws_close(dd->ws);
-        dd->ws = NULL;
-    }
 
     if (dd->thread_started)
         pthread_join(dd->gateway_thread, NULL);
+
+    /* Safe to NULL now — all threads have exited */
+    dd->ws = NULL;
 
     SC_LOG_INFO(DISCORD_TAG, "Discord channel stopped");
     return 0;

@@ -380,8 +380,14 @@ static int load_store(sc_cron_service_t *cs)
 
         /* Add to array */
         if (cs->job_count >= cs->job_cap) {
-            cs->job_cap = cs->job_cap ? cs->job_cap * 2 : 8;
-            cs->jobs = realloc(cs->jobs, cs->job_cap * sizeof(sc_cron_job_t *));
+            size_t new_cap = cs->job_cap ? cs->job_cap * 2 : 8;
+            sc_cron_job_t **tmp = realloc(cs->jobs, new_cap * sizeof(sc_cron_job_t *));
+            if (!tmp) {
+                SC_LOG_ERROR("cron", "realloc failed loading jobs, stopping at %d", cs->job_count);
+                break;
+            }
+            cs->jobs = tmp;
+            cs->job_cap = new_cap;
         }
         cs->jobs[cs->job_count++] = job;
     }

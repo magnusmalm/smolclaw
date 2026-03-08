@@ -306,17 +306,19 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
         return;
     }
 
-    /* Launch worker thread */
+    /* Launch worker thread — set active flag *before* create so that
+     * sc_agent_free cannot skip the join if it races with us. */
     agent->summarize_pending_args = args;
+    atomic_store(&agent->summarize_thread_active, 1);
 
     if (pthread_create(&agent->summarize_thread, NULL,
                         summarize_thread_fn, args) != 0) {
         SC_LOG_WARN("agent", "Failed to create summarization thread, running synchronously");
+        atomic_store(&agent->summarize_thread_active, 0);
         agent->summarize_pending_args = NULL;
         summarize_sync(agent, args);
         return;
     }
 
-    atomic_store(&agent->summarize_thread_active, 1);
     SC_LOG_DEBUG("agent", "Summarization thread launched for session %s", session_key);
 }

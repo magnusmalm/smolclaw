@@ -11,6 +11,7 @@
 #include <pthread.h>
 
 #define LOG_TAG "bus"
+#define SC_BUS_MAX_QUEUE_DEPTH 256
 
 /* ---- Queue helpers ---- */
 
@@ -22,14 +23,20 @@ static void queue_init(sc_msg_queue_t *q)
     pthread_mutex_init(&q->lock, NULL);
 }
 
-static void queue_push(sc_msg_queue_t *q, void *msg)
+/* Returns 0 on success, -1 if queue is full (message not enqueued). */
+static int queue_push(sc_msg_queue_t *q, void *msg)
 {
     sc_msg_node_t *node = malloc(sizeof(*node));
-    if (!node) return;
+    if (!node) return -1;
     node->msg  = msg;
     node->next = NULL;
 
     pthread_mutex_lock(&q->lock);
+    if (q->count >= SC_BUS_MAX_QUEUE_DEPTH) {
+        pthread_mutex_unlock(&q->lock);
+        free(node);
+        return -1;
+    }
     if (q->tail) {
         q->tail->next = node;
     } else {
@@ -38,6 +45,7 @@ static void queue_push(sc_msg_queue_t *q, void *msg)
     q->tail = node;
     q->count++;
     pthread_mutex_unlock(&q->lock);
+    return 0;
 }
 
 static void *queue_pop(sc_msg_queue_t *q)
@@ -186,7 +194,12 @@ void sc_bus_destroy(sc_bus_t *bus)
 void sc_bus_publish_inbound(sc_bus_t *bus, sc_inbound_msg_t *msg)
 {
     if (!bus || !msg) return;
-    queue_push(&bus->inbound, msg);
+    if (queue_push(&bus->inbound, msg) != 0) {
+        SC_LOG_WARN(LOG_TAG, "Inbound queue full (%d), dropping message from %s",
+                    SC_BUS_MAX_QUEUE_DEPTH, msg->channel ? msg->channel : "?");
+        sc_inbound_msg_free(msg);
+        return;
+    }
     notify_pipe(bus->inbound_pipe[1]);
 }
 
@@ -209,7 +222,12 @@ sc_inbound_msg_t *sc_bus_consume_inbound(sc_bus_t *bus)
 void sc_bus_publish_outbound(sc_bus_t *bus, sc_outbound_msg_t *msg)
 {
     if (!bus || !msg) return;
-    queue_push(&bus->outbound, msg);
+    if (queue_push(&bus->outbound, msg) != 0) {
+        SC_LOG_WARN(LOG_TAG, "Outbound queue full (%d), dropping message to %s",
+                    SC_BUS_MAX_QUEUE_DEPTH, msg->channel ? msg->channel : "?");
+        sc_outbound_msg_free(msg);
+        return;
+    }
     notify_pipe(bus->outbound_pipe[1]);
 }
 

@@ -220,7 +220,12 @@ void sc_exec_child(const char *command, const char *working_dir,
             .workspace = workspace,
             .tmpdir = tmpdir,
         };
-        sc_sandbox_apply(&sandbox_opts);
+        int sb_ret = sc_sandbox_apply(&sandbox_opts);
+        if (sb_ret != 0) {
+            const char sb_msg[] = "sandbox: failed to apply, refusing to execute\n";
+            (void)write(STDERR_FILENO, sb_msg, sizeof(sb_msg) - 1);
+            _exit(126);
+        }
         /* Point TMPDIR at per-process dir so child programs use it */
         setenv("TMPDIR", tmpdir, 1);
     }

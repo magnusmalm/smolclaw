@@ -397,8 +397,17 @@ static void pipe_read_cb(evutil_socket_t fd, short what, void *arg)
     web_data_t *wd = ch->data;
 
     web_response_t resp;
-    ssize_t n = read(fd, &resp, sizeof(resp));
-    if (n != sizeof(resp)) return;
+    ssize_t n;
+    do {
+        n = read(fd, &resp, sizeof(resp));
+    } while (n < 0 && errno == EINTR);
+    if (n != (ssize_t)sizeof(resp)) {
+        /* Partial/failed read — can't recover the text pointer safely */
+        if (n > 0)
+            SC_LOG_ERROR(WEB_TAG, "Partial pipe read (%zd/%zu bytes), response lost",
+                         n, sizeof(resp));
+        return;
+    }
 
     web_pending_t *wp = take_pending(wd, resp.request_id);
     if (wp && wp->req) {
