@@ -36,6 +36,7 @@ typedef struct {
     char *nick;
     char *username;
     char *password;
+    char *group_trigger;
     char **channels;
     int channel_count;
     int use_tls;
@@ -644,10 +645,17 @@ static void *recv_thread(void *arg)
             int is_channel = (target[0] == '#' || target[0] == '&');
 
             if (is_channel) {
-                /* Channel message — respond to highlights and mentions */
+                /* Channel message — respond to highlights, mentions, and group trigger */
                 const char *highlighted = sc_irc_check_highlight(content, id->nick);
                 if (highlighted) {
                     msg_content = highlighted;  /* prefix match — strip nick */
+                } else if (id->group_trigger && id->group_trigger[0]) {
+                    const char *group_hit = sc_irc_check_highlight(content, id->group_trigger);
+                    if (group_hit)
+                        msg_content = group_hit;  /* group trigger — strip trigger word */
+                    else if (sc_irc_check_mention(content, id->nick))
+                        msg_content = content;
+                    else { free(sender_nick); continue; }
                 } else if (sc_irc_check_mention(content, id->nick)) {
                     msg_content = content;      /* mid-message mention — full text */
                 } else {
@@ -770,6 +778,7 @@ static void irc_destroy(sc_channel_t *self)
         free(id->nick);
         free(id->username);
         free(id->password);
+        free(id->group_trigger);
         for (int i = 0; i < id->channel_count; i++)
             free(id->channels[i]);
         free(id->channels);
@@ -798,6 +807,7 @@ sc_channel_t *sc_channel_irc_new(sc_irc_config_t *cfg, sc_bus_t *bus)
     id->nick = sc_strdup(cfg->nick);
     id->username = sc_strdup(cfg->username ? cfg->username : cfg->nick);
     id->password = sc_strdup(cfg->password);
+    id->group_trigger = sc_strdup(cfg->group_trigger);
     id->use_tls = cfg->use_tls;
     id->sockfd = -1;
     id->recvbuf_len = 0;

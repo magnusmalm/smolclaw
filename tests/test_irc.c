@@ -150,6 +150,23 @@ static void test_mention_alone(void)
     ASSERT_INT_EQ(sc_irc_check_mention("botnick", "botnick"), 1);
 }
 
+static void test_group_trigger(void)
+{
+    /* Group trigger uses same highlight check as nick */
+    const char *result = sc_irc_check_highlight("claws: report status", "claws");
+    ASSERT_NOT_NULL(result);
+    ASSERT_STR_EQ(result, "report status");
+
+    /* Must be first word with separator */
+    result = sc_irc_check_highlight("hey claws: do something", "claws");
+    ASSERT_NULL(result);
+
+    /* Case insensitive */
+    result = sc_irc_check_highlight("CLAWS, hello", "claws");
+    ASSERT_NOT_NULL(result);
+    ASSERT_STR_EQ(result, "hello");
+}
+
 static void test_split_short(void)
 {
     int count = 0;
@@ -215,6 +232,7 @@ int main(void)
     RUN_TEST(test_mention_case_insensitive);
     RUN_TEST(test_mention_end_of_string);
     RUN_TEST(test_mention_alone);
+    RUN_TEST(test_group_trigger);
     RUN_TEST(test_split_short);
     RUN_TEST(test_split_long);
     RUN_TEST(test_split_exact);

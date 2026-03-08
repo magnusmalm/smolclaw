@@ -491,6 +491,7 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_str(&cfg->irc.nick,             "SMOLCLAW_CHANNELS_IRC_NICK");
     env_override_str(&cfg->irc.password,         "SMOLCLAW_CHANNELS_IRC_PASSWORD");
     env_override_bool(&cfg->irc.use_tls,         "SMOLCLAW_CHANNELS_IRC_TLS");
+    env_override_str(&cfg->irc.group_trigger,    "SMOLCLAW_CHANNELS_IRC_GROUP_TRIGGER");
     env_override_str(&cfg->irc.dm_policy,        "SMOLCLAW_CHANNELS_IRC_DM_POLICY");
 
     env_override_bool(&cfg->slack.enabled,       "SMOLCLAW_CHANNELS_SLACK_ENABLED");
@@ -786,6 +787,7 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->irc.username, irc, "username");
         override_str_field(&cfg->irc.password, irc, "password");
         cfg->irc.use_tls = sc_json_get_bool(irc, "tls", 0);
+        override_str_field(&cfg->irc.group_trigger, irc, "group_trigger");
         override_str_field(&cfg->irc.dm_policy, irc, "dm_policy");
         cfg->irc.join_channels = sc_json_parse_string_list(
             sc_json_get_array(irc, "join_channels"), &cfg->irc.join_channel_count);
@@ -1143,6 +1145,8 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
     if (cfg->irc.password)
         cJSON_AddStringToObject(irc_obj, "password", cfg->irc.password);
     cJSON_AddBoolToObject(irc_obj, "tls", cfg->irc.use_tls);
+    if (cfg->irc.group_trigger)
+        cJSON_AddStringToObject(irc_obj, "group_trigger", cfg->irc.group_trigger);
     if (cfg->irc.join_channel_count > 0) {
         cJSON *jc_arr = cJSON_AddArrayToObject(irc_obj, "join_channels");
         for (int i = 0; i < cfg->irc.join_channel_count; i++) {
@@ -1339,6 +1343,7 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->irc.nick);
     free(cfg->irc.username);
     free(cfg->irc.password);
+    free(cfg->irc.group_trigger);
     free(cfg->irc.dm_policy);
     for (int i = 0; i < cfg->irc.join_channel_count; i++)
         free(cfg->irc.join_channels[i]);

@@ -42,6 +42,7 @@ typedef struct {
     char **join_channels;  /* channels to auto-join */
     int join_channel_count;
     int use_tls;
+    char *group_trigger;   /* shared trigger word (e.g. "claws"), optional */
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
