@@ -235,11 +235,9 @@ static void *heartbeat_thread(void *arg)
 
         if (!ch->running || !sc_ws_is_connected(dd->ws)) break;
 
-        if (!dd->heartbeat_acked) {
+        if (!atomic_exchange(&dd->heartbeat_acked, 0)) {
             SC_LOG_WARN(DISCORD_TAG, "Heartbeat ACK not received, connection may be dead");
         }
-
-        dd->heartbeat_acked = 0;
         if (gw_heartbeat(dd->ws, dd->sequence) != 0) {
             SC_LOG_ERROR(DISCORD_TAG, "Failed to send heartbeat");
             break;

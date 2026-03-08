@@ -544,6 +544,8 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
         sc_tool_registry_set_allowed(agent->tools, NULL, 0);
     }
 
+    /* Note: exec_timeout_secs, max_output_chars, max_fetch_chars are captured
+     * by tools at construction time and cannot be updated by reload. */
     SC_LOG_INFO("agent", "Config reloaded (max_iterations=%d, max_tool_calls=%d, "
                 "max_turn_secs=%d, temperature=%.2f)",
                 agent->max_iterations, agent->max_tool_calls_per_turn,

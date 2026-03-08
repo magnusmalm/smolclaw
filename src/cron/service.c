@@ -282,6 +282,7 @@ static void recompute_next_runs(sc_cron_service_t *cs)
 static void check_jobs(sc_cron_service_t *cs)
 {
     long now = now_ms();
+    char *remove_id = NULL;
 
     for (int i = 0; i < cs->job_count; i++) {
         sc_cron_job_t *job = cs->jobs[i];
@@ -309,9 +310,7 @@ static void check_jobs(sc_cron_service_t *cs)
         /* Schedule next run or disable */
         if (job->schedule.kind && strcmp(job->schedule.kind, "at") == 0) {
             if (job->delete_after_run) {
-                sc_cron_service_remove_job(cs, job->id);
-                free(result);
-                return; /* Array was modified */
+                remove_id = sc_strdup(job->id);
             }
             job->enabled = 0;
             job->state.next_run_ms = 0;
@@ -321,6 +320,12 @@ static void check_jobs(sc_cron_service_t *cs)
 
         save_store(cs);
         free(result);
+    }
+
+    /* Remove after iteration so we don't skip jobs */
+    if (remove_id) {
+        sc_cron_service_remove_job(cs, remove_id);
+        free(remove_id);
     }
 }
 

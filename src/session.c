@@ -29,6 +29,7 @@ struct sc_session_manager {
     int count;
     int cap;
     char *storage_dir;
+    sc_session_t *last_session;  /* cache for repeated lookups */
 };
 
 /* ---- Internal helpers ---- */
@@ -73,9 +74,15 @@ static int session_ensure_cap(sc_session_t *s)
 
 static sc_session_t *find_session(sc_session_manager_t *sm, const char *key)
 {
+    /* Fast path: check cached last session */
+    if (sm->last_session && strcmp(sm->last_session->key, key) == 0)
+        return sm->last_session;
+
     for (int i = 0; i < sm->count; i++) {
-        if (strcmp(sm->sessions[i]->key, key) == 0)
+        if (strcmp(sm->sessions[i]->key, key) == 0) {
+            sm->last_session = sm->sessions[i];
             return sm->sessions[i];
+        }
     }
     return NULL;
 }

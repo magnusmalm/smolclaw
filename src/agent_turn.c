@@ -56,10 +56,11 @@ static int hourly_record(sc_agent_t *agent, const char *session_key,
     time_t oldest_time = now + 1;
 
     for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        double elapsed = difftime(now, slots[i].window_start);
         if (slots[i].key_hash == h &&
             strncmp(slots[i].key_prefix, session_key ? session_key : "",
                     sizeof(slots[i].key_prefix) - 1) == 0 &&
-            (now - slots[i].window_start) < 3600) {
+            elapsed >= 0 && elapsed < 3600) {
             slots[i].tool_calls += calls;
             return limit - slots[i].tool_calls;
         }
@@ -88,10 +89,11 @@ static int hourly_remaining(const sc_agent_t *agent, const char *session_key,
     time_t now = time(NULL);
 
     for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        double elapsed = difftime(now, slots[i].window_start);
         if (slots[i].key_hash == h &&
             strncmp(slots[i].key_prefix, session_key ? session_key : "",
                     sizeof(slots[i].key_prefix) - 1) == 0 &&
-            (now - slots[i].window_start) < 3600) {
+            elapsed >= 0 && elapsed < 3600) {
             return limit - slots[i].tool_calls;
         }
     }
