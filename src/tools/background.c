@@ -290,15 +290,30 @@ static sc_tool_result_t *bg_poll_execute(sc_tool_t *self, cJSON *args, void *ctx
         return sc_tool_result_error("No process in this slot");
     }
 
-    /* Read available output (non-blocking) */
+    /* Read available output (non-blocking), capped to prevent OOM */
     sc_strbuf_t output;
     sc_strbuf_init(&output);
     char buf[4096];
     ssize_t n;
+    int capped = 0;
     while ((n = read(proc->fd, buf, sizeof(buf) - 1)) > 0) {
+        if (output.len + (size_t)n > SC_MAX_OUTPUT_CHARS) {
+            size_t remaining = SC_MAX_OUTPUT_CHARS - output.len;
+            if (remaining > 0) {
+                buf[remaining] = '\0';
+                sc_strbuf_append(&output, buf);
+            }
+            capped = 1;
+            /* Drain remaining data without storing */
+            while (read(proc->fd, buf, sizeof(buf)) > 0)
+                ;
+            break;
+        }
         buf[n] = '\0';
         sc_strbuf_append(&output, buf);
     }
+    if (capped)
+        sc_strbuf_append(&output, "\n[output truncated]");
 
     /* Check if process has exited */
     if (proc->alive) {

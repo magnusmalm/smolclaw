@@ -40,6 +40,7 @@
 
 #define WEB_TAG "web"
 #define WEB_REQUEST_TIMEOUT 120  /* seconds */
+#define WEB_MAX_PENDING     100
 
 /* Pending request entry */
 typedef struct web_pending {
@@ -70,6 +71,7 @@ typedef struct {
     /* Pending request map (linked list, protected by mutex) */
     pthread_mutex_t pending_lock;
     web_pending_t *pending_head;
+    int pending_count;
 
     /* Pipe for thread-safe response delivery */
     int response_pipe[2];
@@ -219,12 +221,19 @@ static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
     wp->req = NULL; /* Mark as handled */
 }
 
-/* Add a pending request */
-static void add_pending(web_data_t *wd, const char *request_id,
-                          struct evhttp_request *req)
+/* Add a pending request. Returns 0 on success, -1 if at capacity. */
+static int add_pending(web_data_t *wd, const char *request_id,
+                         struct evhttp_request *req)
 {
+    pthread_mutex_lock(&wd->pending_lock);
+    if (wd->pending_count >= WEB_MAX_PENDING) {
+        pthread_mutex_unlock(&wd->pending_lock);
+        return -1;
+    }
+    pthread_mutex_unlock(&wd->pending_lock);
+
     web_pending_t *wp = calloc(1, sizeof(*wp));
-    if (!wp) return;
+    if (!wp) return -1;
 
     wp->request_id = sc_strdup(request_id);
     wp->req = req;
@@ -239,7 +248,9 @@ static void add_pending(web_data_t *wd, const char *request_id,
     pthread_mutex_lock(&wd->pending_lock);
     wp->next = wd->pending_head;
     wd->pending_head = wp;
+    wd->pending_count++;
     pthread_mutex_unlock(&wd->pending_lock);
+    return 0;
 }
 
 /* Find and remove a pending request by ID */
@@ -256,6 +267,7 @@ static web_pending_t *take_pending(web_data_t *wd, const char *request_id)
             else
                 wd->pending_head = cur->next;
             cur->next = NULL;
+            wd->pending_count--;
             pthread_mutex_unlock(&wd->pending_lock);
             return cur;
         }
@@ -332,7 +344,11 @@ static void handle_message(struct evhttp_request *req, void *arg)
     free(rid);
 
     /* Store pending request */
-    add_pending(wd, request_id, req);
+    if (add_pending(wd, request_id, req) != 0) {
+        cJSON_Delete(json);
+        send_json_error(req, 503, "Too many pending requests");
+        return;
+    }
 
     /* Build session key — namespace by bearer token so different clients
      * cannot access each other's sessions by guessing the session name. */

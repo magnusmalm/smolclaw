@@ -214,6 +214,7 @@ static char *build_prompt(sc_heartbeat_service_t *hs)
     fseek(f, 0, SEEK_SET);
 
     if (len <= 0) { fclose(f); return NULL; }
+    if (len > 256 * 1024) len = 256 * 1024;  /* cap at 256 KB */
 
     char *data = malloc(len + 1);
     if (!data) { fclose(f); return NULL; }

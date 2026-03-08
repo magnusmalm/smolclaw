@@ -14,6 +14,8 @@
 
 /* ---- Internal helpers ---- */
 
+#define MAX_MEMORY_FILE_SIZE (256 * 1024)  /* 256 KB cap for memory files */
+
 static char *read_file(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -23,6 +25,12 @@ static char *read_file(const char *path)
     long len = ftell(f);
     if (len <= 0) { fclose(f); return NULL; }
     fseek(f, 0, SEEK_SET);
+
+    if (len > MAX_MEMORY_FILE_SIZE) {
+        SC_LOG_WARN(LOG_TAG, "File %s is %ld bytes, truncating to %d",
+                    path, len, MAX_MEMORY_FILE_SIZE);
+        len = MAX_MEMORY_FILE_SIZE;
+    }
 
     char *buf = malloc((size_t)len + 1);
     if (!buf) { fclose(f); return NULL; }

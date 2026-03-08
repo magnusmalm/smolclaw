@@ -27,6 +27,7 @@
 #include "util/websocket.h"
 
 #define DISCORD_TAG "discord"
+#define DISCORD_MAX_MSG_LEN 2000
 
 /* Gateway intents: GUILD_MESSAGES (1<<9) | DIRECT_MESSAGES (1<<12) | MESSAGE_CONTENT (1<<15) */
 #define DISCORD_INTENTS ((1 << 9) | (1 << 12) | (1 << 15))
@@ -636,6 +637,17 @@ static int discord_stop(sc_channel_t *self)
     return 0;
 }
 
+/* Find the largest chunk size <= max that doesn't split a UTF-8 character */
+static size_t utf8_safe_chunk(const char *text, size_t len, size_t max)
+{
+    if (len <= max) return len;
+    size_t pos = max;
+    /* Walk back past continuation bytes (10xxxxxx) */
+    while (pos > 0 && ((unsigned char)text[pos] & 0xC0) == 0x80)
+        pos--;
+    return pos > 0 ? pos : max;
+}
+
 static int discord_send(sc_channel_t *self, sc_outbound_msg_t *msg)
 {
     if (!self->running) return -1;
@@ -645,29 +657,47 @@ static int discord_send(sc_channel_t *self, sc_outbound_msg_t *msg)
     }
     discord_data_t *dd = self->data;
 
-    sc_strbuf_t ep;
-    sc_strbuf_init(&ep);
-    sc_strbuf_appendf(&ep, "/channels/%s/messages", msg->chat_id);
-    char *endpoint = sc_strbuf_finish(&ep);
+    const char *text = msg->content;
+    size_t text_len = strlen(text);
+    int success = 1;
 
-    cJSON *payload = cJSON_CreateObject();
-    cJSON_AddStringToObject(payload, "content", msg->content);
+    while (text_len > 0) {
+        size_t chunk = utf8_safe_chunk(text, text_len, DISCORD_MAX_MSG_LEN);
 
-    cJSON *resp = discord_post(dd, endpoint, payload);
-    cJSON_Delete(payload);
-    free(endpoint);
+        sc_strbuf_t ep;
+        sc_strbuf_init(&ep);
+        sc_strbuf_appendf(&ep, "/channels/%s/messages", msg->chat_id);
+        char *endpoint = sc_strbuf_finish(&ep);
 
-    int success = 0;
-    if (resp) {
-        cJSON *id = cJSON_GetObjectItem(resp, "id");
-        success = (id && cJSON_IsString(id)); /* Message has an ID = success */
-        if (!success) {
-            cJSON *err_msg = cJSON_GetObjectItem(resp, "message");
-            SC_LOG_ERROR(DISCORD_TAG, "sendMessage failed: %s",
-                         (err_msg && cJSON_IsString(err_msg))
-                         ? err_msg->valuestring : "unknown error");
+        char *chunk_str = malloc(chunk + 1);
+        if (!chunk_str) { free(endpoint); return -1; }
+        memcpy(chunk_str, text, chunk);
+        chunk_str[chunk] = '\0';
+
+        cJSON *payload = cJSON_CreateObject();
+        cJSON_AddStringToObject(payload, "content", chunk_str);
+        free(chunk_str);
+
+        cJSON *resp = discord_post(dd, endpoint, payload);
+        cJSON_Delete(payload);
+        free(endpoint);
+
+        if (resp) {
+            cJSON *id = cJSON_GetObjectItem(resp, "id");
+            if (!id || !cJSON_IsString(id)) {
+                cJSON *err_msg = cJSON_GetObjectItem(resp, "message");
+                SC_LOG_ERROR(DISCORD_TAG, "sendMessage failed: %s",
+                             (err_msg && cJSON_IsString(err_msg))
+                             ? err_msg->valuestring : "unknown error");
+                success = 0;
+            }
+            cJSON_Delete(resp);
+        } else {
+            success = 0;
         }
-        cJSON_Delete(resp);
+
+        text += chunk;
+        text_len -= chunk;
     }
 
     return success ? 0 : -1;

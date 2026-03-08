@@ -355,6 +355,13 @@ static int slack_send(sc_channel_t *self, sc_outbound_msg_t *msg)
     while (text_len > 0) {
         size_t chunk = text_len > SLACK_MAX_MSG_LEN ? SLACK_MAX_MSG_LEN : text_len;
 
+        /* Walk back to avoid splitting a multi-byte UTF-8 character */
+        if (chunk < text_len) {
+            while (chunk > 0 && ((unsigned char)text[chunk] & 0xC0) == 0x80)
+                chunk--;
+        }
+        if (chunk == 0) chunk = text_len > SLACK_MAX_MSG_LEN ? SLACK_MAX_MSG_LEN : text_len;
+
         cJSON *payload = cJSON_CreateObject();
         cJSON_AddStringToObject(payload, "channel", msg->chat_id);
 

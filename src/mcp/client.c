@@ -35,6 +35,7 @@ struct sc_mcp_client {
     int next_id;
     int alive;
     char *tmpdir;    /* per-process temp dir (to clean up on stop) */
+    sc_strbuf_t readbuf;  /* persistent read buffer for partial lines */
 };
 
 /* ---------- Internal helpers ---------- */
@@ -71,12 +72,11 @@ static int mcp_send(sc_mcp_client_t *client, cJSON *msg)
 }
 
 /* Read a single newline-delimited line from server stdout with timeout.
+ * Uses client->readbuf as a persistent buffer so data after the first
+ * newline in a read() chunk is not lost.
  * Returns parsed cJSON or NULL on error/timeout. Caller owns result. */
 static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
 {
-    sc_strbuf_t sb;
-    sc_strbuf_init(&sb);
-
     struct timespec deadline;
     clock_gettime(CLOCK_MONOTONIC, &deadline);
     deadline.tv_sec += timeout_ms / 1000;
@@ -87,6 +87,36 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
     }
 
     for (;;) {
+        /* Check if there's already a complete line in the persistent buffer */
+        if (client->readbuf.data) {
+            char *nl = memchr(client->readbuf.data, '\n', client->readbuf.len);
+            if (nl) {
+                size_t line_len = (size_t)(nl - client->readbuf.data);
+                char *line = malloc(line_len + 1);
+                if (!line) return NULL;
+                memcpy(line, client->readbuf.data, line_len);
+                line[line_len] = '\0';
+
+                /* Shift remaining data forward */
+                size_t remaining = client->readbuf.len - line_len - 1;
+                if (remaining > 0)
+                    memmove(client->readbuf.data, nl + 1, remaining);
+                client->readbuf.len = remaining;
+
+                /* Skip empty lines */
+                if (line[0] == '\0') { free(line); continue; }
+
+                cJSON *json = cJSON_Parse(line);
+                free(line);
+                if (!json) {
+                    SC_LOG_ERROR(LOG_TAG, "[%s] failed to parse JSON response", client->name);
+                    return NULL;
+                }
+                return json;
+            }
+        }
+
+        /* No complete line — read more data */
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
         int remaining_ms = (int)((deadline.tv_sec - now.tv_sec) * 1000
@@ -98,61 +128,36 @@ static cJSON *mcp_read_line(sc_mcp_client_t *client, int timeout_ms)
         if (ret < 0) {
             if (errno == EINTR) continue;
             SC_LOG_ERROR(LOG_TAG, "[%s] poll failed: %s", client->name, strerror(errno));
-            sc_strbuf_free(&sb);
             return NULL;
         }
-        if (ret == 0) {
-            SC_LOG_ERROR(LOG_TAG, "[%s] read timeout (%dms)", client->name, timeout_ms);
-            sc_strbuf_free(&sb);
-            return NULL;
-        }
+        if (ret == 0) break;
 
         char buf[4096];
         ssize_t n = read(client->stdout_fd, buf, sizeof(buf));
         if (n < 0) {
             if (errno == EINTR) continue;
             SC_LOG_ERROR(LOG_TAG, "[%s] read failed: %s", client->name, strerror(errno));
-            sc_strbuf_free(&sb);
             return NULL;
         }
         if (n == 0) {
             SC_LOG_ERROR(LOG_TAG, "[%s] server closed stdout", client->name);
-            sc_strbuf_free(&sb);
             return NULL;
         }
 
-        /* Append to buffer, check for newline */
-        for (ssize_t i = 0; i < n; i++) {
-            if (buf[i] == '\n') {
-                /* Parse the accumulated line */
-                char *line = sc_strbuf_finish(&sb);
-                if (!line || line[0] == '\0') {
-                    free(line);
-                    sc_strbuf_init(&sb);
-                    continue; /* skip empty lines */
-                }
-                cJSON *json = cJSON_Parse(line);
-                free(line);
-                if (!json) {
-                    SC_LOG_ERROR(LOG_TAG, "[%s] failed to parse JSON response", client->name);
-                    return NULL;
-                }
-                return json;
-            }
-            sc_strbuf_append_char(&sb, buf[i]);
+        /* Append to persistent buffer */
+        for (ssize_t i = 0; i < n; i++)
+            sc_strbuf_append_char(&client->readbuf, buf[i]);
 
-            /* Cap response size to prevent OOM from malicious server */
-            if (sb.len > SC_MCP_MAX_RESPONSE_SIZE) {
-                SC_LOG_ERROR(LOG_TAG, "[%s] response too large", client->name);
-                sc_strbuf_free(&sb);
-                return NULL;
-            }
+        /* Cap buffer size to prevent OOM */
+        if (client->readbuf.len > SC_MCP_MAX_RESPONSE_SIZE) {
+            SC_LOG_ERROR(LOG_TAG, "[%s] response too large", client->name);
+            sc_strbuf_free(&client->readbuf);
+            sc_strbuf_init(&client->readbuf);
+            return NULL;
         }
-
     }
 
     SC_LOG_ERROR(LOG_TAG, "[%s] read timeout (%dms)", client->name, timeout_ms);
-    sc_strbuf_free(&sb);
     return NULL;
 }
 
@@ -177,13 +182,23 @@ static cJSON *mcp_request(sc_mcp_client_t *client, const char *method,
     }
     cJSON_Delete(req);
 
+    int expected_id = client->next_id - 1;
+
     /* Read response — skip notifications (no "id" field) */
     for (int attempts = 0; attempts < 50; attempts++) {
         cJSON *resp = mcp_read_line(client, timeout_ms);
         if (!resp) return NULL;
 
         /* JSON-RPC response must have "id" field */
-        if (cJSON_HasObjectItem(resp, "id")) {
+        cJSON *id_item = cJSON_GetObjectItem(resp, "id");
+        if (id_item) {
+            /* Validate response ID matches our request */
+            if (cJSON_IsNumber(id_item) && (int)id_item->valuedouble != expected_id) {
+                SC_LOG_WARN(LOG_TAG, "[%s] response id %d doesn't match expected %d, skipping",
+                            client->name, (int)id_item->valuedouble, expected_id);
+                cJSON_Delete(resp);
+                continue;
+            }
             return resp;
         }
 
@@ -355,6 +370,7 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
     client->next_id = 1;
     client->alive = 1;
     client->tmpdir = mcp_tmpdir;  /* parent owns cleanup */
+    sc_strbuf_init(&client->readbuf);
 
     SC_LOG_INFO(LOG_TAG, "[%s] started server (pid=%d, cmd=%s)", name, pid, command[0]);
 
@@ -613,6 +629,7 @@ void sc_mcp_client_free(sc_mcp_client_t *client)
         rmdir(client->tmpdir);
         free(client->tmpdir);
     }
+    sc_strbuf_free(&client->readbuf);
     free(client->name);
     free(client);
 }
