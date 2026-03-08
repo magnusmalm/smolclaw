@@ -226,10 +226,12 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
     sc_deny_list_init(&d->deny);
 
     /* Initialize process table — refuse if active processes exist */
+    pthread_mutex_lock(&bg_lock);
     if (bg_procs) {
         for (int i = 0; i < bg_max_procs; i++) {
             if (bg_procs[i].pid > 0) {
                 SC_LOG_ERROR("background", "Cannot reinitialize: active processes exist");
+                pthread_mutex_unlock(&bg_lock);
                 sc_deny_list_free(&d->deny);
                 free(d->workspace);
                 free(d);
@@ -241,6 +243,7 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
     }
     bg_max_procs = max_procs > 0 ? max_procs : SC_BG_MAX_PROCS;
     bg_procs = calloc((size_t)bg_max_procs, sizeof(sc_bg_process_t));
+    pthread_mutex_unlock(&bg_lock);
     if (!bg_procs) {
         sc_deny_list_free(&d->deny);
         free(d->workspace);

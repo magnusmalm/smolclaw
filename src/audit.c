@@ -21,7 +21,7 @@
 
 static pthread_mutex_t audit_lock = PTHREAD_MUTEX_INITIALIZER;
 static FILE *audit_file;
-static const char *audit_model;  /* current LLM model, set per-turn */
+static char *audit_model;  /* current LLM model, set per-turn (owned) */
 
 /* Ensure parent directory exists (single level) */
 static void ensure_parent_dir(const char *path)
@@ -87,6 +87,8 @@ void sc_audit_shutdown(void)
         fclose(audit_file);
         audit_file = NULL;
     }
+    free(audit_model);
+    audit_model = NULL;
 }
 
 void sc_audit_log_ext(const char *tool, const char *args_summary,
@@ -153,6 +155,7 @@ void sc_audit_log(const char *tool, const char *args_summary,
 void sc_audit_set_model(const char *model)
 {
     pthread_mutex_lock(&audit_lock);
-    audit_model = model;
+    free(audit_model);
+    audit_model = model ? sc_strdup(model) : NULL;
     pthread_mutex_unlock(&audit_lock);
 }

@@ -48,6 +48,7 @@ typedef struct {
     /* Line buffer for recv_line */
     char recvbuf[IRC_RECV_BUF];
     int recvbuf_len;
+    char linebuf[IRC_RECV_BUF];  /* output buffer for irc_recv_line */
 } irc_data_t;
 
 /* ------------------------------------------------------------------ */
@@ -63,22 +64,21 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
     command[0] = '\0';
     params[0] = '\0';
 
-    const char *p = line;
-
-    /* Strip trailing \r\n */
+    /* Compute effective length, ignoring trailing \r\n (no allocation) */
     size_t line_len = strlen(line);
-    char *tmp = malloc(line_len + 1);
-    if (!tmp) return -1;
-    memcpy(tmp, line, line_len + 1);
-    while (line_len > 0 && (tmp[line_len - 1] == '\r' || tmp[line_len - 1] == '\n'))
-        tmp[--line_len] = '\0';
-    p = tmp;
+    while (line_len > 0 && (line[line_len - 1] == '\r' || line[line_len - 1] == '\n'))
+        line_len--;
+    if (line_len == 0) return -1;
+
+    /* Work within line[0..line_len) using pointer+bounds */
+    const char *end = line + line_len;
+    const char *p = line;
 
     /* Parse prefix (starts with :) */
     if (*p == ':') {
         p++;
-        const char *space = strchr(p, ' ');
-        if (!space) { free(tmp); return -1; }
+        const char *space = memchr(p, ' ', (size_t)(end - p));
+        if (!space) return -1;
         if (prefix) {
             size_t len = (size_t)(space - p);
             if (len >= prefix_sz) len = prefix_sz - 1;
@@ -92,7 +92,7 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
     while (*p == ' ') p++;
 
     /* Parse command */
-    const char *cmd_end = strchr(p, ' ');
+    const char *cmd_end = memchr(p, ' ', (size_t)(end - p));
     if (cmd_end) {
         size_t len = (size_t)(cmd_end - p);
         if (len >= command_sz) len = command_sz - 1;
@@ -101,11 +101,10 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
         p = cmd_end + 1;
     } else {
         /* Command with no params */
-        size_t len = strlen(p);
+        size_t len = (size_t)(end - p);
         if (len >= command_sz) len = command_sz - 1;
         memcpy(command, p, len);
         command[len] = '\0';
-        free(tmp);
         return 0;
     }
 
@@ -115,7 +114,7 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
     /* Parse params — find trailing (starts with :) */
     const char *trailing = NULL;
     const char *scan = p;
-    while (*scan) {
+    while (scan < end) {
         if (*scan == ':' && (scan == p || *(scan - 1) == ' ')) {
             trailing = scan + 1;
             break;
@@ -129,6 +128,7 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
         /* Trim trailing spaces from middle */
         while (mid_len > 0 && p[mid_len - 1] == ' ') mid_len--;
 
+        size_t trail_len = (size_t)(end - trailing);
         sc_strbuf_t sb;
         sc_strbuf_init(&sb);
         if (mid_len > 0) {
@@ -141,7 +141,14 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
                 free(mid);
             }
         }
-        sc_strbuf_append(&sb, trailing);
+        /* Append trailing with known length */
+        char *trail_str = malloc(trail_len + 1);
+        if (trail_str) {
+            memcpy(trail_str, trailing, trail_len);
+            trail_str[trail_len] = '\0';
+            sc_strbuf_append(&sb, trail_str);
+            free(trail_str);
+        }
         char *result = sc_strbuf_finish(&sb);
         if (result) {
             size_t len = strlen(result);
@@ -152,13 +159,12 @@ int sc_irc_parse_message(const char *line, char *prefix, size_t prefix_sz,
         }
     } else {
         /* No trailing, all middle params */
-        size_t len = strlen(p);
+        size_t len = (size_t)(end - p);
         if (len >= params_sz) len = params_sz - 1;
         memcpy(params, p, len);
         params[len] = '\0';
     }
 
-    free(tmp);
     return 0;
 }
 
@@ -315,10 +321,9 @@ static int irc_send_line(irc_data_t *id, const char *fmt, ...)
     return irc_send_raw(id, buf);
 }
 
-/* Read one \r\n-terminated line. Returns static buffer or NULL on error. */
+/* Read one \r\n-terminated line. Returns instance buffer or NULL on error. */
 static char *irc_recv_line(irc_data_t *id)
 {
-    static char linebuf[IRC_RECV_BUF];
 
     for (;;) {
         /* Check if we already have a complete line in the buffer */
@@ -326,14 +331,14 @@ static char *irc_recv_line(irc_data_t *id)
             if (id->recvbuf[i] == '\r' && id->recvbuf[i + 1] == '\n') {
                 int line_len = i;
                 if (line_len >= IRC_RECV_BUF) line_len = IRC_RECV_BUF - 1;
-                memcpy(linebuf, id->recvbuf, (size_t)line_len);
-                linebuf[line_len] = '\0';
+                memcpy(id->linebuf, id->recvbuf, (size_t)line_len);
+                id->linebuf[line_len] = '\0';
                 /* Shift buffer */
                 int consumed = i + 2;
                 id->recvbuf_len -= consumed;
                 if (id->recvbuf_len > 0)
                     memmove(id->recvbuf, id->recvbuf + consumed, (size_t)id->recvbuf_len);
-                return linebuf;
+                return id->linebuf;
             }
         }
 
@@ -343,13 +348,13 @@ static char *irc_recv_line(irc_data_t *id)
                 int line_len = i;
                 if (line_len > 0 && id->recvbuf[line_len - 1] == '\r') line_len--;
                 if (line_len >= IRC_RECV_BUF) line_len = IRC_RECV_BUF - 1;
-                memcpy(linebuf, id->recvbuf, (size_t)line_len);
-                linebuf[line_len] = '\0';
+                memcpy(id->linebuf, id->recvbuf, (size_t)line_len);
+                id->linebuf[line_len] = '\0';
                 int consumed = i + 1;
                 id->recvbuf_len -= consumed;
                 if (id->recvbuf_len > 0)
                     memmove(id->recvbuf, id->recvbuf + consumed, (size_t)id->recvbuf_len);
-                return linebuf;
+                return id->linebuf;
             }
         }
 

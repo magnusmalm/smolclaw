@@ -41,6 +41,7 @@ static sc_session_t *session_create(const char *key)
 
     s->key         = sc_strdup(key);
     s->messages    = calloc(INITIAL_MSG_CAP, sizeof(sc_llm_message_t));
+    if (!s->messages) { free(s->key); free(s); return NULL; }
     s->message_cap = INITIAL_MSG_CAP;
     s->created     = (long)time(NULL);
     s->updated     = s->created;

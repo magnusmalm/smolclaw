@@ -200,6 +200,6 @@ void sc_channel_base_free(sc_channel_t *ch)
     }
     sc_pairing_store_free(ch->pairing_store);
     sc_rate_limiter_free(ch->rate_limiter);
-    free(ch->data);
+    /* ch->data is owned and freed by channel-specific destroy() */
     free(ch);
 }
