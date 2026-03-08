@@ -17,7 +17,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 | Category        | Features                                                                                                                                                  |
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI)                                                                                       |
+| **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
 | **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
 | **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, memory read/write/log/search, message, cron, spawn, background processes (19 built-in)               |
 | **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
@@ -105,7 +105,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
 
 ## Architecture
 
@@ -128,7 +128,7 @@ User ─── Channel ──┘         │
 | Providers       | `src/providers/`             | Claude, HTTP (OpenAI-compat), factory routing    |
 | Tools           | `src/tools/`                 | Registry + individual tools                      |
 | MCP             | `src/mcp/`                   | External tool servers via JSON-RPC 2.0           |
-| Channels        | `src/channels/`              | CLI, Telegram, Discord, IRC, Slack, Web          |
+| Channels        | `src/channels/`              | CLI, Telegram, Discord, IRC, Slack, Web, X       |
 | Memory          | `src/memory.c`               | Long-term memory + daily notes                   |
 | Sessions        | `src/session.c`              | Per-conversation JSON, auto-truncation + summarization |
 | Context         | `src/context.c`              | System prompt builder                            |
@@ -158,7 +158,8 @@ Config lives at `~/.smolclaw/config.json`. Every field can be overridden via env
     "telegram": { "enabled": true, "token": "..." },
     "discord": { "enabled": true, "token": "..." },
     "slack": { "enabled": true, "bot_token": "xoxb-...", "app_token": "xapp-..." },
-    "web": { "enabled": true, "port": 8080, "bearer_token": "..." }
+    "web": { "enabled": true, "port": 8080, "bearer_token": "..." },
+    "x": { "enabled": true, "read_only": true }
   }
 }
 ```
@@ -171,6 +172,90 @@ Store API keys securely with AES-256-GCM encryption:
 smolclaw vault init
 smolclaw vault set anthropic_api_key
 # Then reference in config: "api_key": "vault://anthropic_api_key"
+```
+
+Non-interactive mode (for scripted provisioning over SSH):
+
+```bash
+echo "mypassword" | smolclaw vault init --password-stdin
+echo "sk-secret-key" | SMOLCLAW_VAULT_PASSWORD=mypassword smolclaw vault set anthropic_api_key --value-stdin
+```
+
+### X (Twitter)
+
+smolclaw supports X/Twitter in two complementary ways:
+
+**1. X MCP server (recommended)** — gives the agent X read/write tools accessible from *any* channel. Ask your agent via IRC, Telegram, or CLI to analyze a tweet thread, search X, look up a user, etc. Uses [x-mcp](https://github.com/magnusmalm/x-mcp), a standalone MCP server for the X API v2.
+
+**2. X channel** — the agent has its own X presence, polling for @mentions and replying as tweets. This is the bot-on-X use case.
+
+You can use either or both. Most users will want the MCP server — it's simpler and doesn't require the agent to have its own X account.
+
+#### X MCP server
+
+Add to the `mcp.servers` section of your config. The agent gains tools like `x_get_tweet`, `x_get_thread`, `x_search`, `x_get_user`, and (if not read-only) `x_post_tweet`, `x_like`, etc.
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "x": {
+        "command": ["node", "/path/to/x-mcp/dist/index.js"],
+        "env": {
+          "X_CONSUMER_KEY": "vault://x_consumer_key",
+          "X_CONSUMER_SECRET": "vault://x_consumer_secret",
+          "X_ACCESS_TOKEN": "vault://x_access_token",
+          "X_ACCESS_TOKEN_SECRET": "vault://x_access_token_secret",
+          "X_READ_ONLY": "true"
+        }
+      }
+    }
+  }
+}
+```
+
+With `X_READ_ONLY=true`, all write tools (post, delete, like, retweet, DM) are blocked server-side. The agent can only read. Set to `false` to allow posting.
+
+Setup:
+
+```bash
+git clone https://github.com/magnusmalm/x-mcp.git
+cd x-mcp && npm install && npm run build
+```
+
+The four OAuth 1.0a credentials come from the [X Developer Portal](https://developer.x.com/). The Free tier cannot read tweets — you need **Pay-Per-Use** or **Basic** minimum.
+
+#### X channel
+
+For running a bot that actively monitors and replies on X. Polls for @mentions and optional DMs, responds as threaded tweets.
+
+**Read-only mode** is on by default — the channel polls and processes inbound mentions, but all outbound tweets and DMs are blocked. This prevents accidental posts from rogue agent behavior. Set `"read_only": false` only when you're confident in your agent's configuration.
+
+```json
+{
+  "channels": {
+    "x": {
+      "enabled": true,
+      "consumer_key": "vault://x_consumer_key",
+      "consumer_secret": "vault://x_consumer_secret",
+      "access_token": "vault://x_access_token",
+      "access_token_secret": "vault://x_access_token_secret",
+      "read_only": true,
+      "poll_interval_sec": 60,
+      "enable_dms": false,
+      "dm_policy": "allowlist",
+      "allow_from": ["user_id_1"]
+    }
+  }
+}
+```
+
+Env var overrides: `SMOLCLAW_CHANNELS_X_CONSUMER_KEY`, `SMOLCLAW_CHANNELS_X_CONSUMER_SECRET`, `SMOLCLAW_CHANNELS_X_ACCESS_TOKEN`, `SMOLCLAW_CHANNELS_X_ACCESS_TOKEN_SECRET`, `SMOLCLAW_CHANNELS_X_READ_ONLY`, `SMOLCLAW_CHANNELS_X_POLL_INTERVAL`, `SMOLCLAW_CHANNELS_X_ENABLE_DMS`, `SMOLCLAW_CHANNELS_X_DM_POLICY`.
+
+Build with `SC_ENABLE_X=ON` (off by default since it requires paid API access):
+
+```bash
+cmake -B build -DSC_ENABLE_X=ON
 ```
 
 ### Self-update
@@ -226,6 +311,7 @@ smolclaw update      Check for and apply updates
 smolclaw cost        View token usage and costs
 smolclaw analytics   Usage analytics (summary, today, week, month, model, channel)
 smolclaw doctor      Validate configuration and dependencies
+                     --config <path>  Validate a specific config file
 smolclaw version     Show version (includes git hash and build date)
 ```
 

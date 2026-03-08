@@ -132,6 +132,7 @@ static void print_help(void)
     printf("  pairing     Manage channel pairing requests\n");
     printf("  cost        View token usage and costs\n");
     printf("  doctor      Validate configuration and dependencies\n");
+    printf("              --config <path>  Validate a specific config file\n");
 #if SC_ENABLE_VAULT
     printf("  vault       Manage encrypted secret vault\n");
 #endif
@@ -514,26 +515,52 @@ static void *typing_thread_fn(void *arg)
 #if SC_ENABLE_VAULT
 
 /* Create a new vault with password confirmation */
-static void vault_cmd_init(const char *vault_path)
+static void vault_cmd_init(const char *vault_path, int argc, char **argv)
 {
     if (sc_vault_exists(vault_path)) {
         fprintf(stderr, "Vault already exists at %s\n", vault_path);
         return;
     }
 
-    char *pw1 = sc_vault_prompt_password("New vault password: ");
-    if (!pw1 || pw1[0] == '\0') {
-        fprintf(stderr, "Password cannot be empty\n");
-        sc_vault_free_password(pw1);
-        return;
+    /* Check for --password-stdin flag */
+    int password_stdin = 0;
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--password-stdin") == 0) {
+            password_stdin = 1;
+            break;
+        }
     }
 
-    char *pw2 = sc_vault_prompt_password("Confirm password: ");
-    if (!pw2 || strcmp(pw1, pw2) != 0) {
-        fprintf(stderr, "Passwords do not match\n");
-        sc_vault_free_password(pw1);
-        sc_vault_free_password(pw2);
-        return;
+    char *pw1 = NULL;
+    char *pw2 = NULL;
+
+    if (password_stdin) {
+        char buf[256];
+        if (!fgets(buf, sizeof(buf), stdin) || buf[0] == '\n') {
+            fprintf(stderr, "Password cannot be empty\n");
+            return;
+        }
+        /* Strip trailing newline */
+        size_t len = strlen(buf);
+        if (len > 0 && buf[len - 1] == '\n')
+            buf[len - 1] = '\0';
+        pw1 = sc_strdup(buf);
+        memset(buf, 0, sizeof(buf));
+    } else {
+        pw1 = sc_vault_prompt_password("New vault password: ");
+        if (!pw1 || pw1[0] == '\0') {
+            fprintf(stderr, "Password cannot be empty\n");
+            sc_vault_free_password(pw1);
+            return;
+        }
+
+        pw2 = sc_vault_prompt_password("Confirm password: ");
+        if (!pw2 || strcmp(pw1, pw2) != 0) {
+            fprintf(stderr, "Passwords do not match\n");
+            sc_vault_free_password(pw1);
+            sc_vault_free_password(pw2);
+            return;
+        }
     }
 
     sc_vault_t *v = sc_vault_new(vault_path);
@@ -585,10 +612,33 @@ static sc_vault_t *vault_load_and_unlock(const char *vault_path)
 static void vault_cmd_set(sc_vault_t *v, int argc, char **argv)
 {
     if (argc < 4) {
-        fprintf(stderr, "Usage: %s vault set <key>\n", SC_NAME);
+        fprintf(stderr, "Usage: %s vault set <key> [--value-stdin]\n", SC_NAME);
         return;
     }
-    char *value = sc_vault_prompt_password("Secret value: ");
+
+    /* Check for --value-stdin flag */
+    int value_stdin = 0;
+    for (int i = 4; i < argc; i++) {
+        if (strcmp(argv[i], "--value-stdin") == 0) {
+            value_stdin = 1;
+            break;
+        }
+    }
+
+    char *value = NULL;
+    if (value_stdin) {
+        char buf[4096];
+        if (fgets(buf, sizeof(buf), stdin) && buf[0] != '\0' && buf[0] != '\n') {
+            size_t len = strlen(buf);
+            if (len > 0 && buf[len - 1] == '\n')
+                buf[len - 1] = '\0';
+            value = sc_strdup(buf);
+            memset(buf, 0, sizeof(buf));
+        }
+    } else {
+        value = sc_vault_prompt_password("Secret value: ");
+    }
+
     if (value && value[0] != '\0') {
         sc_vault_set(v, argv[3], value);
         if (sc_vault_save(v) == 0)
@@ -683,13 +733,15 @@ static void cmd_vault(int argc, char **argv)
     if (argc < 3) {
         printf("Usage: %s vault <subcommand>\n\n", SC_NAME);
         printf("Subcommands:\n");
-        printf("  init              Create a new encrypted vault\n");
-        printf("  set <key>         Store a secret (prompts for value)\n");
-        printf("  get <key>         Print a decrypted secret\n");
-        printf("  list              List stored key names\n");
-        printf("  remove <key>      Remove a secret\n");
-        printf("  export            Print all key=value pairs\n");
-        printf("  change-password   Re-encrypt with a new password\n");
+        printf("  init                       Create a new encrypted vault\n");
+        printf("    --password-stdin         Read password from stdin (non-interactive)\n");
+        printf("  set <key>                  Store a secret (prompts for value)\n");
+        printf("    --value-stdin            Read value from stdin (non-interactive)\n");
+        printf("  get <key>                  Print a decrypted secret\n");
+        printf("  list                       List stored key names\n");
+        printf("  remove <key>               Remove a secret\n");
+        printf("  export                     Print all key=value pairs\n");
+        printf("  change-password            Re-encrypt with a new password\n");
         return;
     }
 
@@ -697,7 +749,7 @@ static void cmd_vault(int argc, char **argv)
     char *vault_path = sc_vault_get_path();
 
     if (strcmp(subcmd, "init") == 0) {
-        vault_cmd_init(vault_path);
+        vault_cmd_init(vault_path, argc, argv);
         free(vault_path);
         return;
     }
@@ -961,18 +1013,28 @@ static void doctor_check_channels(const sc_config_t *cfg, int *pass, int *fail)
     }
 }
 
-static void cmd_doctor(void)
+static int cmd_doctor(int argc, char **argv)
 {
     int pass = 0, fail = 0;
 
     printf("%s doctor\n", SC_NAME);
 
+    /* Parse --config <path> flag */
+    char *config_path = NULL;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
+            config_path = sc_strdup(argv[++i]);
+            break;
+        }
+    }
+    if (!config_path)
+        config_path = sc_config_get_path();
+
     /* 1. Config file */
-    char *config_path = sc_config_get_path();
     if (!config_path) {
         DOC_FAIL(&fail, "Could not determine config path");
         printf("\n  %d passed, %d failed\n", pass, fail);
-        return;
+        return 1;
     }
 
     sc_config_t *cfg = sc_config_load(config_path);
@@ -982,7 +1044,7 @@ static void cmd_doctor(void)
         DOC_FAIL(&fail, "Config file (%s) — not found or invalid", config_path);
         free(config_path);
         printf("\n  %d passed, %d failed\n", pass, fail);
-        return;
+        return 1;
     }
 
     /* 2. Workspace */
@@ -1050,6 +1112,7 @@ static void cmd_doctor(void)
 
     sc_config_free(cfg);
     free(config_path);
+    return fail > 0 ? 1 : 0;
 }
 
 #undef DOC_PASS
@@ -1398,7 +1461,7 @@ int main(int argc, char **argv)
         cmd_analytics(argc, argv);
 #endif
     } else if (strcmp(command, "doctor") == 0) {
-        cmd_doctor();
+        return cmd_doctor(argc, argv);
 #if SC_ENABLE_VAULT
     } else if (strcmp(command, "vault") == 0) {
         cmd_vault(argc, argv);
