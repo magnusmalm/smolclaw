@@ -1,6 +1,7 @@
 #ifndef SC_CHANNEL_BASE_H
 #define SC_CHANNEL_BASE_H
 
+#include <pthread.h>
 #include <unistd.h>
 
 #include "bus.h"
@@ -38,6 +39,7 @@ struct sc_channel {
     sc_dm_policy_t dm_policy;
     sc_pairing_store_t *pairing_store; /* NULL unless policy==pairing */
     sc_rate_limiter_t *rate_limiter;   /* NULL = no rate limiting */
+    pthread_mutex_t security_mutex;    /* protects allow_list + rate_limiter */
     volatile int running;
     void *data;
 

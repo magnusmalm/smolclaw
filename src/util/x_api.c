@@ -216,9 +216,14 @@ static char *oauth_sign(const sc_x_creds_t *creds, const char *method,
     free(enc_url);
     free(enc_params);
     free(base_string);
+    /* Cleanse secret key material before freeing */
+    OPENSSL_cleanse(enc_cs, strlen(enc_cs));
     free(enc_cs);
+    OPENSSL_cleanse(enc_ts, strlen(enc_ts));
     free(enc_ts);
+    OPENSSL_cleanse(signing_key, strlen(signing_key));
     free(signing_key);
+    OPENSSL_cleanse(hmac_result, sizeof(hmac_result));
     free(signature);
     free(enc_sig);
     free(enc_nonce);

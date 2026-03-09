@@ -339,29 +339,36 @@ int sc_channel_manager_send_typing(sc_channel_manager_t *mgr,
     return ch->send_typing(ch, chat_id);
 }
 
-/* Helper: replace a channel's allow_from list */
+/* Helper: replace a channel's allow_from list (thread-safe) */
 static void reload_allow_list(sc_channel_t *ch, char **allow_from,
                                int allow_from_count)
 {
     if (!ch) return;
-    /* Free old list */
-    for (int i = 0; i < ch->allow_list_count; i++)
-        free(ch->allow_list[i]);
-    free(ch->allow_list);
-    /* Copy new list */
+
+    /* Build new list before taking lock */
+    char **new_list = NULL;
+    int new_count = 0;
     if (allow_from_count > 0 && allow_from) {
-        ch->allow_list = calloc((size_t)allow_from_count, sizeof(char *));
-        if (ch->allow_list) {
-            ch->allow_list_count = allow_from_count;
+        new_list = calloc((size_t)allow_from_count, sizeof(char *));
+        if (new_list) {
+            new_count = allow_from_count;
             for (int i = 0; i < allow_from_count; i++)
-                ch->allow_list[i] = sc_strdup(allow_from[i]);
-        } else {
-            ch->allow_list_count = 0;
+                new_list[i] = sc_strdup(allow_from[i]);
         }
-    } else {
-        ch->allow_list = NULL;
-        ch->allow_list_count = 0;
     }
+
+    /* Swap under lock */
+    pthread_mutex_lock(&ch->security_mutex);
+    char **old_list = ch->allow_list;
+    int old_count = ch->allow_list_count;
+    ch->allow_list = new_list;
+    ch->allow_list_count = new_count;
+    pthread_mutex_unlock(&ch->security_mutex);
+
+    /* Free old list outside lock */
+    for (int i = 0; i < old_count; i++)
+        free(old_list[i]);
+    free(old_list);
 }
 
 void sc_channel_manager_reload_config(sc_channel_manager_t *mgr,
@@ -399,14 +406,17 @@ void sc_channel_manager_reload_config(sc_channel_manager_t *mgr,
             ch->dm_policy = sc_dm_policy_from_str(cfg->x.dm_policy);
         }
 
-        /* Update rate limiter — always free old before recreating */
-        if (ch->rate_limiter) {
-            sc_rate_limiter_free(ch->rate_limiter);
-            ch->rate_limiter = NULL;
-        }
-        if (cfg->rate_limit_per_minute > 0) {
-            ch->rate_limiter = sc_rate_limiter_new(cfg->rate_limit_per_minute);
-        }
+        /* Update rate limiter (thread-safe swap) */
+        sc_rate_limiter_t *new_rl = NULL;
+        if (cfg->rate_limit_per_minute > 0)
+            new_rl = sc_rate_limiter_new(cfg->rate_limit_per_minute);
+
+        pthread_mutex_lock(&ch->security_mutex);
+        sc_rate_limiter_t *old_rl = ch->rate_limiter;
+        ch->rate_limiter = new_rl;
+        pthread_mutex_unlock(&ch->security_mutex);
+
+        sc_rate_limiter_free(old_rl);
     }
 
     SC_LOG_INFO("channels", "Channel config reloaded (allow_from, dm_policy, rate_limits)");

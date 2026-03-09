@@ -18,6 +18,8 @@ void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
 {
     if (!ch) return;
 
+    pthread_mutex_init(&ch->security_mutex, NULL);
+
     /* Copy allow list */
     if (allow_from_count > 0 && allow_from) {
         ch->allow_list_count = allow_from_count;
@@ -41,9 +43,13 @@ int sc_channel_is_allowed(sc_channel_t *ch, const char *sender_id)
 {
     if (!ch || !sender_id) return 0;
 
+    pthread_mutex_lock(&ch->security_mutex);
+
     /* Empty allow list: open policy allows all, others deny */
     if (ch->allow_list_count == 0 || !ch->allow_list) {
-        return (ch->dm_policy == SC_DM_POLICY_OPEN) ? 1 : 0;
+        int result = (ch->dm_policy == SC_DM_POLICY_OPEN) ? 1 : 0;
+        pthread_mutex_unlock(&ch->security_mutex);
+        return result;
     }
 
     /* Extract parts from compound senderID like "123456|username" */
@@ -111,6 +117,7 @@ int sc_channel_is_allowed(sc_channel_t *ch, const char *sender_id)
         free(aid_buf);
     }
 
+    pthread_mutex_unlock(&ch->security_mutex);
     free(id_buf);
     return allowed;
 }
@@ -159,12 +166,15 @@ void sc_channel_handle_message(sc_channel_t *ch, const char *sender_id,
     }
 
     /* Rate limiting */
-    if (ch->rate_limiter) {
+    pthread_mutex_lock(&ch->security_mutex);
+    sc_rate_limiter_t *rl = ch->rate_limiter;
+    pthread_mutex_unlock(&ch->security_mutex);
+    if (rl) {
         sc_strbuf_t rk;
         sc_strbuf_init(&rk);
         sc_strbuf_appendf(&rk, "%s:%s", ch->name, chat_id ? chat_id : "unknown");
         char *rate_key = sc_strbuf_finish(&rk);
-        int allowed = sc_rate_limiter_check(ch->rate_limiter, rate_key);
+        int allowed = sc_rate_limiter_check(rl, rate_key);
         free(rate_key);
         if (!allowed) {
             SC_LOG_WARN("channel", "Rate limited: %s:%s from %s",
@@ -192,6 +202,7 @@ void sc_channel_handle_message(sc_channel_t *ch, const char *sender_id,
 void sc_channel_base_free(sc_channel_t *ch)
 {
     if (!ch) return;
+    pthread_mutex_destroy(&ch->security_mutex);
     if (ch->allow_list) {
         for (int i = 0; i < ch->allow_list_count; i++) {
             free(ch->allow_list[i]);

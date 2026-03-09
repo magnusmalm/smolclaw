@@ -9,6 +9,7 @@
  * All read-only — never posts. Uses OAuth 1.0a via util/x_api.
  */
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -22,6 +23,25 @@
 #include "cJSON.h"
 
 #define LOG_TAG "x-tools"
+
+/* Validate tweet ID: digits only */
+static int is_valid_tweet_id(const char *s)
+{
+    if (!s || !*s) return 0;
+    for (const char *p = s; *p; p++)
+        if (!isdigit((unsigned char)*p)) return 0;
+    return 1;
+}
+
+/* Validate username: alphanumeric + underscore, max 15 chars */
+static int is_valid_username(const char *s)
+{
+    if (!s || !*s) return 0;
+    int len = 0;
+    for (const char *p = s; *p; p++, len++)
+        if (!isalnum((unsigned char)*p) && *p != '_') return 0;
+    return len <= 15;
+}
 
 /* ---- Shared helpers ---- */
 
@@ -174,6 +194,8 @@ static sc_tool_result_t *get_tweet_exec(sc_tool_t *self, cJSON *args, void *ctx)
     const char *tweet_id = sc_json_get_string(args, "tweet_id", NULL);
     if (!tweet_id || !tweet_id[0])
         return sc_tool_result_error("tweet_id is required");
+    if (!is_valid_tweet_id(tweet_id))
+        return sc_tool_result_error("tweet_id must contain only digits");
 
     char path[128];
     snprintf(path, sizeof(path), "/2/tweets/%s", tweet_id);
@@ -265,6 +287,8 @@ static sc_tool_result_t *get_thread_exec(sc_tool_t *self, cJSON *args, void *ctx
     const char *tweet_id = sc_json_get_string(args, "tweet_id", NULL);
     if (!tweet_id || !tweet_id[0])
         return sc_tool_result_error("tweet_id is required");
+    if (!is_valid_tweet_id(tweet_id))
+        return sc_tool_result_error("tweet_id must contain only digits");
 
     int max_results = sc_json_get_int(args, "max_results", 20);
     if (max_results < 10) max_results = 10;
@@ -504,6 +528,9 @@ static sc_tool_result_t *get_user_exec(sc_tool_t *self, cJSON *args, void *ctx)
 
     /* Strip leading @ if present */
     if (username[0] == '@') username++;
+
+    if (!is_valid_username(username))
+        return sc_tool_result_error("username must be alphanumeric/underscore, max 15 chars");
 
     char path[256];
     snprintf(path, sizeof(path), "/2/users/by/username/%s", username);

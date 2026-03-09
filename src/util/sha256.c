@@ -121,7 +121,9 @@ char *sc_sha256_file(const char *path)
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
         sc_sha256_update(&ctx, buf, n);
+    int err = ferror(f);
     fclose(f);
+    if (err) return NULL;
 
     uint8_t hash[32];
     sc_sha256_final(&ctx, hash);

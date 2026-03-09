@@ -284,6 +284,11 @@ static void cmd_pairing_revoke(const char *channel, const char *user_id)
 {
     char *config_path = sc_config_get_path();
     sc_config_t *cfg = sc_config_load(config_path);
+    if (!cfg) {
+        fprintf(stderr, "Could not load config\n");
+        free(config_path);
+        return;
+    }
 
     char ***allow_from = NULL;
     int *count = NULL;
@@ -541,7 +546,7 @@ typedef struct {
     sc_channel_manager_t *mgr;
     const char *channel;
     const char *chat_id;
-    int running;
+    volatile int running;
 } typing_ctx_t;
 
 static void *typing_thread_fn(void *arg)

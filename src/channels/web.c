@@ -37,6 +37,7 @@
 #include "util/str.h"
 #include "util/uuid.h"
 #include "util/json_helpers.h"
+#include "util/sha256.h"
 
 #define WEB_TAG "web"
 #define WEB_REQUEST_TIMEOUT 120  /* seconds */
@@ -355,9 +356,19 @@ static void handle_message(struct evhttp_request *req, void *arg)
     sc_strbuf_t sk;
     sc_strbuf_init(&sk);
     const char *sess_name = session && session[0] ? session : request_id;
-    if (wd->bearer_token)
-        sc_strbuf_appendf(&sk, "web:%s:%s", wd->bearer_token, sess_name);
-    else
+    if (wd->bearer_token) {
+        /* Hash the token so it doesn't appear in session filenames */
+        sc_sha256_ctx_t ctx;
+        sc_sha256_init(&ctx);
+        sc_sha256_update(&ctx, (const uint8_t *)wd->bearer_token,
+                         strlen(wd->bearer_token));
+        uint8_t hash[32];
+        sc_sha256_final(&ctx, hash);
+        char token_hash[17];
+        for (int i = 0; i < 8; i++)
+            snprintf(token_hash + i * 2, 3, "%02x", hash[i]);
+        sc_strbuf_appendf(&sk, "web:%s:%s", token_hash, sess_name);
+    } else
         sc_strbuf_appendf(&sk, "web:%s", sess_name);
     char *session_key = sc_strbuf_finish(&sk);
 

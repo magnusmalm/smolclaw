@@ -53,6 +53,11 @@ static void make_timestamp(char *buf, size_t bufsz)
 
 static int copy_file(const char *src, const char *dst)
 {
+    /* Reject symlinks */
+    struct stat lst;
+    if (lstat(src, &lst) != 0 || !S_ISREG(lst.st_mode))
+        return -1;
+
     FILE *in = fopen(src, "rb");
     if (!in) return -1;
     FILE *out = fopen(dst, "wb");
@@ -118,7 +123,7 @@ static int copy_dir(const char *src, const char *dst,
             copy_dir(src_path, dst_path, files, rel_path);
         } else if (S_ISREG(st.st_mode)) {
             if (copy_file(src_path, dst_path) != 0) continue;
-            char *hash = sc_sha256_file(dst_path);
+            char *hash = sc_sha256_file(src_path);
             cJSON *entry = cJSON_CreateObject();
             cJSON_AddStringToObject(entry, "path", rel_path);
             cJSON_AddStringToObject(entry, "sha256", hash ? hash : "");
@@ -152,7 +157,7 @@ static int backup_file(const char *base, const char *backup_dir,
 
     if (copy_file(src, dst) != 0) return -1;
 
-    char *hash = sc_sha256_file(dst);
+    char *hash = sc_sha256_file(src);
     cJSON *entry = cJSON_CreateObject();
     cJSON_AddStringToObject(entry, "path", rel_path);
     cJSON_AddStringToObject(entry, "sha256", hash ? hash : "");
@@ -258,6 +263,27 @@ static int list_backups(char ***out_names)
     return count;
 }
 
+/* Recursively remove a directory */
+static void rmdir_recursive(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) return;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        char child[PATH_MAX];
+        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+        struct stat st;
+        if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode))
+            rmdir_recursive(child);
+        else
+            remove(child);
+    }
+    closedir(d);
+    rmdir(path);
+}
+
 /* Prune old backups, keeping at most SC_BACKUP_MAX_KEEP */
 static void prune_old_backups(void)
 {
@@ -280,47 +306,11 @@ static void prune_old_backups(void)
     for (int i = SC_BACKUP_MAX_KEEP; i < count; i++) {
         char dir[PATH_MAX];
         snprintf(dir, sizeof(dir), "%s/%s", root, names[i]);
-        /* Remove files in backup dir, then the dir itself */
-        DIR *d = opendir(dir);
-        if (d) {
-            struct dirent *ent;
-            while ((ent = readdir(d)) != NULL) {
-                if (ent->d_name[0] == '.') continue;
-                char fpath[PATH_MAX];
-                snprintf(fpath, sizeof(fpath), "%s/%s", dir, ent->d_name);
-                /* For simplicity, only remove regular files at top level.
-                 * Nested dirs (workspace/) are left for manual cleanup. */
-                remove(fpath);
-            }
-            closedir(d);
-        }
-        /* Try rmdir — works only if empty (safe) */
-        rmdir(dir);
+        rmdir_recursive(dir);
     }
     free(root);
     for (int i = 0; i < count; i++) free(names[i]);
     free(names);
-}
-
-/* Recursively remove a directory (for restoring over existing dirs) */
-static void rmdir_recursive(const char *path)
-{
-    DIR *d = opendir(path);
-    if (!d) return;
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
-            continue;
-        char child[PATH_MAX];
-        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
-        struct stat st;
-        if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode))
-            rmdir_recursive(child);
-        else
-            remove(child);
-    }
-    closedir(d);
-    rmdir(path);
 }
 
 /* ---- public API ---- */
@@ -557,6 +547,13 @@ int sc_backup_restore(const char *name, int dry_run)
         const char *rel_path = cJSON_GetStringValue(
             cJSON_GetObjectItem(entry, "path"));
         if (!rel_path) continue;
+
+        /* Reject path traversal attempts */
+        if (rel_path[0] == '/' || strstr(rel_path, "..")) {
+            fprintf(stderr, "  skip: %s (unsafe path)\n", rel_path);
+            errors++;
+            continue;
+        }
 
         char src[PATH_MAX], dst[PATH_MAX];
         snprintf(src, sizeof(src), "%s/%s", backup_dir, rel_path);
