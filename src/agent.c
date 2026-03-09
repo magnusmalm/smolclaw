@@ -45,6 +45,9 @@
 #if SC_ENABLE_GIT
 #include "tools/git.h"
 #endif
+#if SC_ENABLE_X_TOOLS
+#include "tools/x_tools.h"
+#endif
 #include "cost.h"
 #if SC_ENABLE_TEE
 #include "tee.h"
@@ -154,6 +157,22 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     sc_tool_t *search = sc_tool_web_search_new(web_opts);
     if (search) sc_tool_registry_register(agent->tools, search);
     sc_tool_registry_register(agent->tools, sc_tool_web_fetch_new(cfg->max_fetch_chars));
+#endif
+
+    /* X tools */
+#if SC_ENABLE_X_TOOLS
+    if (cfg->x.consumer_key && cfg->x.consumer_key[0] &&
+        cfg->x.access_token && cfg->x.access_token[0]) {
+        sc_tool_t *xt;
+        xt = sc_tool_x_get_tweet_new(&cfg->x);
+        if (xt) sc_tool_registry_register(agent->tools, xt);
+        xt = sc_tool_x_get_thread_new(&cfg->x);
+        if (xt) sc_tool_registry_register(agent->tools, xt);
+        xt = sc_tool_x_search_new(&cfg->x);
+        if (xt) sc_tool_registry_register(agent->tools, xt);
+        xt = sc_tool_x_get_user_new(&cfg->x);
+        if (xt) sc_tool_registry_register(agent->tools, xt);
+    }
 #endif
 
     /* Message tool */

@@ -250,10 +250,20 @@ static int has_vault_refs(const sc_config_t *cfg)
         cfg->irc.password, cfg->slack.bot_token,
         cfg->slack.app_token, cfg->web.bearer_token,
         cfg->web_tools.brave_api_key,
+        cfg->x.consumer_key, cfg->x.consumer_secret,
+        cfg->x.access_token, cfg->x.access_token_secret,
     };
     for (int i = 0; i < (int)(sizeof(fields) / sizeof(fields[0])); i++) {
         if (fields[i] && strncmp(fields[i], "vault://", 8) == 0)
             return 1;
+    }
+    /* Check MCP server env values */
+    for (int s = 0; s < cfg->mcp.server_count; s++) {
+        for (int e = 0; e < cfg->mcp.servers[s].env_count; e++) {
+            const char *v = cfg->mcp.servers[s].env_values[e];
+            if (v && strncmp(v, "vault://", 8) == 0)
+                return 1;
+        }
     }
     return 0;
 }
@@ -344,7 +354,54 @@ static void resolve_vault_refs(sc_config_t *cfg)
     resolve_vault_field(&cfg->x.access_token_secret, vault);
     resolve_vault_field(&cfg->web_tools.brave_api_key, vault);
 
+    /* Resolve vault:// references in MCP server env values */
+    for (int s = 0; s < cfg->mcp.server_count; s++) {
+        for (int e = 0; e < cfg->mcp.servers[s].env_count; e++)
+            resolve_vault_field(&cfg->mcp.servers[s].env_values[e], vault);
+    }
+
     sc_vault_free(vault);
+}
+
+int sc_config_collect_vault_keys(const sc_config_t *cfg, char ***keys)
+{
+    if (!cfg || !cfg->raw || !keys) return 0;
+
+    *keys = NULL;
+    int count = 0, cap = 0;
+
+    /* Walk JSON tree iteratively, collect vault:// string values */
+    const cJSON *stack[64];
+    int sp = 0;
+    stack[sp++] = cfg->raw->child;
+
+    while (sp > 0) {
+        const cJSON *item = stack[--sp];
+        while (item) {
+            if (cJSON_IsString(item) && item->valuestring &&
+                strncmp(item->valuestring, "vault://", 8) == 0) {
+                const char *key_name = item->valuestring + 8;
+                int dup = 0;
+                for (int i = 0; i < count; i++) {
+                    if (strcmp((*keys)[i], key_name) == 0) { dup = 1; break; }
+                }
+                if (!dup) {
+                    if (count >= cap) {
+                        cap = cap ? cap * 2 : 8;
+                        char **tmp = realloc(*keys, (size_t)cap * sizeof(char *));
+                        if (!tmp) return count;
+                        *keys = tmp;
+                    }
+                    (*keys)[count++] = sc_strdup(key_name);
+                }
+            }
+            if (item->child && sp < 64)
+                stack[sp++] = item->child;
+            item = item->next;
+        }
+    }
+
+    return count;
 }
 #endif /* SC_ENABLE_VAULT */
 

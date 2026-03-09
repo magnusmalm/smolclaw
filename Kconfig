@@ -75,6 +75,15 @@ config SC_ENABLE_WEB_TOOLS
 	  Enable web_search (Brave/SearXNG/DuckDuckGo) and web_fetch tools.
 	  Includes SSRF protection with private IP blocking.
 
+config SC_ENABLE_X_TOOLS
+	bool "X (Twitter) read tools (get_tweet, search, etc.)"
+	default n
+	select NEED_OPENSSL
+	help
+	  Enable X API read tools: x_get_tweet, x_get_thread, x_search, x_get_user.
+	  Requires API credentials in config. Independent of the X channel.
+	  Uses OAuth 1.0a (OpenSSL). Read-only — never posts.
+
 config SC_ENABLE_VOICE
 	bool "Voice transcription (Groq Whisper)"
 	default y

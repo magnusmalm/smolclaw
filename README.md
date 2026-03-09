@@ -19,7 +19,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
 | **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
-| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, memory read/write/log/search, message, cron, spawn, background processes (19 built-in)               |
+| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, X read tools, memory read/write/log/search, message, cron, spawn, background processes (up to 23 built-in) |
 | **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
 | **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense      |
 | **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators                                                               |
@@ -105,7 +105,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
 
 ## Architecture
 
@@ -183,13 +183,35 @@ echo "sk-secret-key" | SMOLCLAW_VAULT_PASSWORD=mypassword smolclaw vault set ant
 
 ### X (Twitter)
 
-smolclaw supports X/Twitter in two complementary ways:
+smolclaw supports X/Twitter in three complementary ways:
 
-**1. X MCP server (recommended)** — gives the agent X read/write tools accessible from *any* channel. Ask your agent via IRC, Telegram, or CLI to analyze a tweet thread, search X, look up a user, etc. Uses [x-mcp](https://github.com/magnusmalm/x-mcp), a standalone MCP server for the X API v2.
+**1. Built-in X tools** — four read-only tools (`x_get_tweet`, `x_get_thread`, `x_search`, `x_get_user`) compiled directly into the binary. No external dependencies. Supports long tweets (`note_tweet`) and X Articles. Build with `SC_ENABLE_X_TOOLS=ON` and provide OAuth credentials in `channels.x`.
 
-**2. X channel** — the agent has its own X presence, polling for @mentions and replying as tweets. This is the bot-on-X use case.
+**2. X MCP server** — gives the agent X read/write tools via [x-mcp](https://github.com/magnusmalm/x-mcp), a standalone MCP server for the X API v2. Useful if you need write access (posting, liking, DMs) or want to keep X tools in a separate process.
 
-You can use either or both. Most users will want the MCP server — it's simpler and doesn't require the agent to have its own X account.
+**3. X channel** — the agent has its own X presence, polling for @mentions and replying as tweets. This is the bot-on-X use case.
+
+You can mix and match. For most read-only use cases, the built-in tools (option 1) are simplest — no Node.js or MCP setup needed.
+
+#### Built-in X tools
+
+Build with `SC_ENABLE_X_TOOLS=ON` (requires OpenSSL for OAuth 1.0a signing). Add credentials to `channels.x` in your config — the tools register automatically when `consumer_key` and `access_token` are present:
+
+```json
+{
+  "channels": {
+    "x": {
+      "consumer_key": "vault://x_consumer_key",
+      "consumer_secret": "vault://x_consumer_secret",
+      "access_token": "vault://x_access_token",
+      "access_token_secret": "vault://x_access_token_secret",
+      "read_only": true
+    }
+  }
+}
+```
+
+The four tools are then available from any channel (IRC, CLI, Web, etc.). Independent of `SC_ENABLE_X` (the channel flag).
 
 #### X MCP server
 

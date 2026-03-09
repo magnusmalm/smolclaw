@@ -1013,6 +1013,92 @@ static void doctor_check_channels(const sc_config_t *cfg, int *pass, int *fail)
     }
 }
 
+#if SC_ENABLE_VAULT
+static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
+{
+    char *vault_path = sc_vault_get_path();
+
+    char **ref_keys = NULL;
+    int ref_count = sc_config_collect_vault_keys(cfg, &ref_keys);
+
+    if (ref_count == 0) {
+        if (sc_vault_exists(vault_path)) {
+            struct stat vst;
+            if (stat(vault_path, &vst) == 0 && (vst.st_mode & 0077) == 0)
+                DOC_PASS(pass, "Vault: %s (0600, no refs in config)", vault_path);
+            else
+                DOC_FAIL(fail, "Vault: %s (permissions too open)", vault_path);
+        } else {
+            DOC_PASS(pass, "Vault: not initialized (no refs in config)");
+        }
+        free(vault_path);
+        return;
+    }
+
+    /* Config has vault:// references — vault is required */
+    if (!sc_vault_exists(vault_path)) {
+        DOC_FAIL(fail, "Vault: %s — not found (config has %d vault:// ref%s)",
+                 vault_path, ref_count, ref_count > 1 ? "s" : "");
+        for (int i = 0; i < ref_count; i++) {
+            DOC_FAIL(fail, "  vault key '%s' — vault missing", ref_keys[i]);
+            free(ref_keys[i]);
+        }
+        free(ref_keys);
+        free(vault_path);
+        return;
+    }
+
+    struct stat vst;
+    if (stat(vault_path, &vst) == 0 && (vst.st_mode & 0077) != 0)
+        DOC_FAIL(fail, "Vault: %s (permissions too open: %04o)",
+                 vault_path, vst.st_mode & 0777);
+    else
+        DOC_PASS(pass, "Vault: %s (0600)", vault_path);
+
+    /* Try to unlock and verify referenced keys */
+    sc_vault_t *vault = sc_vault_new(vault_path);
+    free(vault_path);
+    if (!vault) {
+        DOC_FAIL(fail, "Vault: failed to open");
+        for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
+        free(ref_keys);
+        return;
+    }
+
+    const char *env_pw = getenv("SMOLCLAW_VAULT_PASSWORD");
+    if (!env_pw || env_pw[0] == '\0') {
+        DOC_FAIL(fail, "Vault: SMOLCLAW_VAULT_PASSWORD not set — cannot verify %d key%s",
+                 ref_count, ref_count > 1 ? "s" : "");
+        sc_vault_free(vault);
+        for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
+        free(ref_keys);
+        return;
+    }
+
+    if (sc_vault_unlock(vault, env_pw) != 0) {
+        DOC_FAIL(fail, "Vault: unlock failed (wrong password or corrupted)");
+        sc_vault_free(vault);
+        for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
+        free(ref_keys);
+        return;
+    }
+
+    DOC_PASS(pass, "Vault: unlocked (%d ref%s to check)",
+             ref_count, ref_count > 1 ? "s" : "");
+
+    for (int i = 0; i < ref_count; i++) {
+        const char *val = sc_vault_get(vault, ref_keys[i]);
+        if (val && val[0])
+            DOC_PASS(pass, "  vault key '%s' — present", ref_keys[i]);
+        else
+            DOC_FAIL(fail, "  vault key '%s' — MISSING from vault", ref_keys[i]);
+        free(ref_keys[i]);
+    }
+    free(ref_keys);
+    sc_vault_free(vault);
+}
+#endif
+
 static int cmd_doctor(int argc, char **argv)
 {
     int pass = 0, fail = 0;
@@ -1064,19 +1150,7 @@ static int cmd_doctor(int argc, char **argv)
 
     /* 6. Vault */
 #if SC_ENABLE_VAULT
-    {
-        char *vault_path = sc_vault_get_path();
-        if (sc_vault_exists(vault_path)) {
-            struct stat vst;
-            if (stat(vault_path, &vst) == 0 && (vst.st_mode & 0077) == 0)
-                DOC_PASS(&pass, "Vault: %s (0600 permissions)", vault_path);
-            else
-                DOC_FAIL(&fail, "Vault: %s (permissions too open)", vault_path);
-        } else {
-            DOC_PASS(&pass, "Vault: not initialized (optional)");
-        }
-        free(vault_path);
-    }
+    doctor_check_vault(cfg, &pass, &fail);
 #endif
 
     /* 7. Updater */

@@ -11,9 +11,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <errno.h>
+#include <time.h>
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
@@ -29,6 +31,8 @@
 #define IRC_RECV_BUF 4096
 #define IRC_RECONNECT_DELAY     5   /* initial backoff seconds */
 #define IRC_RECONNECT_MAX_DELAY 300 /* cap at 5 minutes */
+#define IRC_KEEPALIVE_INTERVAL  120 /* send PING after this many seconds idle */
+#define IRC_KEEPALIVE_TIMEOUT   30  /* disconnect if no PONG within this */
 
 typedef struct {
     char *hostname;
@@ -321,9 +325,13 @@ static int irc_send_line(irc_data_t *id, const char *fmt, ...)
     return irc_send_raw(id, buf);
 }
 
-/* Read one \r\n-terminated line. Returns instance buffer or NULL on error. */
-static char *irc_recv_line(irc_data_t *id)
+/* Read one \r\n-terminated line with poll() timeout.
+ * Returns instance buffer, or NULL on error/EOF.
+ * Sets *timed_out to 1 if the call returned due to timeout (no data). */
+static char *irc_recv_line_timeout(irc_data_t *id, int timeout_ms,
+                                    int *timed_out)
 {
+    if (timed_out) *timed_out = 0;
 
     for (;;) {
         /* Check if we already have a complete line in the buffer */
@@ -364,6 +372,20 @@ static char *irc_recv_line(irc_data_t *id)
             id->recvbuf_len = 0;
         }
 
+        /* Wait for data with timeout (skip poll for TLS — SSL may have
+         * buffered data that poll() can't see) */
+        if (!id->ssl && timeout_ms > 0) {
+            struct pollfd pfd = { .fd = id->sockfd, .events = POLLIN };
+            int pr = poll(&pfd, 1, timeout_ms);
+            if (pr == 0) {
+                if (timed_out) *timed_out = 1;
+                return NULL; /* timeout */
+            }
+            if (pr < 0) return NULL; /* error */
+            if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+                return NULL;
+        }
+
         int space = IRC_RECV_BUF - 1 - id->recvbuf_len;
         int n;
         if (id->ssl) {
@@ -374,6 +396,12 @@ static char *irc_recv_line(irc_data_t *id)
         if (n <= 0) return NULL;
         id->recvbuf_len += n;
     }
+}
+
+/* Backwards-compatible wrapper */
+static char *irc_recv_line(irc_data_t *id)
+{
+    return irc_recv_line_timeout(id, -1, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -584,6 +612,8 @@ static void *recv_thread(void *arg)
     SC_LOG_INFO(IRC_TAG, "Receive thread started");
 
     int backoff = IRC_RECONNECT_DELAY;
+    time_t last_recv = 0;
+    int ping_pending = 0;
 
     while (ch->running) {
         if (id->sockfd < 0) {
@@ -599,9 +629,42 @@ static void *recv_thread(void *arg)
                 continue;
             }
             backoff = IRC_RECONNECT_DELAY; /* reset on success */
+            last_recv = time(NULL);
+            ping_pending = 0;
         }
 
-        char *line = irc_recv_line(id);
+        /* Use keepalive timeout for poll:
+         * - If ping is pending, wait KEEPALIVE_TIMEOUT for PONG
+         * - Otherwise, wait KEEPALIVE_INTERVAL before sending PING */
+        int timeout_ms = ping_pending
+            ? IRC_KEEPALIVE_TIMEOUT * 1000
+            : IRC_KEEPALIVE_INTERVAL * 1000;
+
+        int timed_out = 0;
+        char *line = irc_recv_line_timeout(id, timeout_ms, &timed_out);
+
+        if (!line && timed_out) {
+            if (ping_pending) {
+                /* No PONG received — connection is dead */
+                SC_LOG_WARN(IRC_TAG, "No PONG received in %ds — connection dead",
+                            IRC_KEEPALIVE_TIMEOUT);
+                irc_close_socket(id);
+                sc_channel_sleep(&ch->running, backoff);
+                continue;
+            }
+            /* Idle too long — send keepalive PING */
+            SC_LOG_DEBUG(IRC_TAG, "Idle %ds, sending keepalive PING",
+                         IRC_KEEPALIVE_INTERVAL);
+            if (irc_send_line(id, "PING :smolclaw-keepalive") != 0) {
+                SC_LOG_WARN(IRC_TAG, "Failed to send keepalive PING");
+                irc_close_socket(id);
+                sc_channel_sleep(&ch->running, backoff);
+                continue;
+            }
+            ping_pending = 1;
+            continue;
+        }
+
         if (!line) {
             if (!ch->running) break;
             SC_LOG_WARN(IRC_TAG, "Connection lost, reconnecting in %ds", backoff);
@@ -613,6 +676,11 @@ static void *recv_thread(void *arg)
                 backoff = IRC_RECONNECT_MAX_DELAY;
             continue;
         }
+
+        /* Got data — reset keepalive state */
+        last_recv = time(NULL);
+        (void)last_recv; /* used for debugging; keepalive is timer-based */
+        ping_pending = 0;
 
         SC_LOG_DEBUG(IRC_TAG, "< %s", line);
 

@@ -23,3 +23,13 @@ configured port, then increments up to +10.
 ## ~~X (Twitter) channel~~ ✓
 
 Done. See `src/channels/x.c`, `tests/test_x.c`.
+
+## X tools: `note_tweet` support
+
+Add `note_tweet` to `tweet.fields` in `x_get_thread` and `x_search` API
+requests so long tweets (up to 25k chars, Premium feature) return the
+full untruncated text instead of the 280-char truncation.
+
+Currently only `x_get_tweet` requests `note_tweet`. The `format_tweet()`
+helper already handles `note_tweet.text` — just needs the field requested
+in the other endpoints' `tweet.fields` params.

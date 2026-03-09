@@ -263,7 +263,7 @@ build_openssl() {
 # =============================================================================
 
 build_libevent() {
-    if [ -f "${PREFIX}/lib/libevent.a" ]; then
+    if [ -f "${PREFIX}/lib/libevent.a" ] && [ -f "${PREFIX}/lib/libevent_openssl.a" ]; then
         echo "=== libevent already built ==="
         return
     fi

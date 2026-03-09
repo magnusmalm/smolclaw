@@ -246,4 +246,11 @@ char *sc_config_get_path(void);
 /* Free config */
 void sc_config_free(sc_config_t *cfg);
 
+#if SC_ENABLE_VAULT
+/* Collect vault:// reference key names from raw config JSON.
+ * Returns count of keys found. Sets *keys to malloc'd array of strings.
+ * Caller owns the array and its strings. Returns 0 if none found. */
+int sc_config_collect_vault_keys(const sc_config_t *cfg, char ***keys);
+#endif
+
 #endif /* SC_CONFIG_H */
