@@ -1123,29 +1123,42 @@ sc_config_t *sc_config_load(const char *path)
     return cfg;
 }
 
-/* Copy existing config to .bak before overwriting */
+/* Rotate config backups: .bak.4 deleted, .bak.N → .bak.N+1, current → .bak */
 static void backup_config(const char *path)
 {
-    size_t len = strlen(path);
-    char *bak = malloc(len + 5);
-    if (!bak) return;
-    memcpy(bak, path, len);
-    memcpy(bak + len, ".bak", 5);
+    char old_path[PATH_MAX], new_path[PATH_MAX];
 
+    /* Delete oldest */
+    snprintf(old_path, sizeof(old_path), "%s.bak.4", path);
+    remove(old_path);
+
+    /* Rotate .bak.3→4, .bak.2→3, .bak.1→2 */
+    for (int i = 3; i >= 1; i--) {
+        snprintf(old_path, sizeof(old_path), "%s.bak.%d", path, i);
+        snprintf(new_path, sizeof(new_path), "%s.bak.%d", path, i + 1);
+        rename(old_path, new_path);
+    }
+
+    /* .bak → .bak.1 */
+    snprintf(old_path, sizeof(old_path), "%s.bak", path);
+    snprintf(new_path, sizeof(new_path), "%s.bak.1", path);
+    rename(old_path, new_path);
+
+    /* Copy current → .bak */
+    snprintf(new_path, sizeof(new_path), "%s.bak", path);
     FILE *src = fopen(path, "rb");
     if (src) {
-        FILE *dst = fopen(bak, "wb");
+        FILE *dst = fopen(new_path, "wb");
         if (dst) {
             char buf[4096];
             size_t n;
             while ((n = fread(buf, 1, sizeof(buf), src)) > 0)
                 fwrite(buf, 1, n, dst);
             fclose(dst);
-            chmod(bak, 0600);
+            chmod(new_path, 0600);
         }
         fclose(src);
     }
-    free(bak);
 }
 
 /* Serialize agents.defaults section to JSON */

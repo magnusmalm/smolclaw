@@ -43,6 +43,7 @@
 #include "updater/transport_http.h"
 #endif
 #include "cost.h"
+#include "backup.h"
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
@@ -109,6 +110,46 @@ static void print_version(void)
            SC_GIT_HASH, SC_BUILD_DATE);
 }
 
+static int cmd_backup(int argc, char **argv)
+{
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s backup <create|verify|list|restore> [options]\n", SC_NAME);
+        return 1;
+    }
+    const char *sub = argv[2];
+
+    if (strcmp(sub, "create") == 0) {
+        int config_only = 0, include_sessions = 0;
+        const char *name = NULL;
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--config-only") == 0) config_only = 1;
+            else if (strcmp(argv[i], "--include-sessions") == 0) include_sessions = 1;
+            else if (strcmp(argv[i], "--name") == 0 && i + 1 < argc) name = argv[++i];
+        }
+        char *result = sc_backup_create(name, config_only, include_sessions);
+        if (!result) return 1;
+        printf("%s\n", result);
+        free(result);
+        return 0;
+    } else if (strcmp(sub, "verify") == 0) {
+        const char *name = (argc > 3) ? argv[3] : NULL;
+        return sc_backup_verify(name) == 0 ? 0 : 1;
+    } else if (strcmp(sub, "list") == 0) {
+        return sc_backup_list() >= 0 ? 0 : 1;
+    } else if (strcmp(sub, "restore") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "Usage: %s backup restore <name> [--dry-run]\n", SC_NAME);
+            return 1;
+        }
+        int dry_run = 0;
+        for (int i = 4; i < argc; i++)
+            if (strcmp(argv[i], "--dry-run") == 0) dry_run = 1;
+        return sc_backup_restore(argv[3], dry_run);
+    }
+    fprintf(stderr, "Unknown backup subcommand: %s\n", sub);
+    return 1;
+}
+
 #if SC_ENABLE_STREAMING
 /* Streaming callback: print text deltas to stdout as they arrive */
 static void stream_print_cb(const char *delta, void *ctx)
@@ -139,6 +180,9 @@ static void print_help(void)
 #if SC_ENABLE_UPDATER
     printf("  update      Check for and apply updates\n");
 #endif
+    printf("  backup      Backup and restore state\n");
+    printf("              create [--config-only] [--include-sessions] [--name TAG]\n");
+    printf("              verify [NAME]    list    restore NAME [--dry-run]\n");
     printf("  version     Show version information\n");
 }
 
@@ -1534,6 +1578,8 @@ int main(int argc, char **argv)
     } else if (strcmp(command, "analytics") == 0) {
         cmd_analytics(argc, argv);
 #endif
+    } else if (strcmp(command, "backup") == 0) {
+        return cmd_backup(argc, argv);
     } else if (strcmp(command, "doctor") == 0) {
         return cmd_doctor(argc, argv);
 #if SC_ENABLE_VAULT

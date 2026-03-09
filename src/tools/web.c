@@ -483,13 +483,20 @@ static cJSON *web_search_parameters(sc_tool_t *self)
     cJSON_AddNumberToObject(count, "minimum", 1);
     cJSON_AddNumberToObject(count, "maximum", 10);
 
+    cJSON *context = cJSON_AddObjectToObject(props, "context");
+    cJSON_AddStringToObject(context, "type", "boolean");
+    cJSON_AddStringToObject(context, "description",
+        "If true, return extended page snippets for LLM grounding (Brave only)");
+
     cJSON *req = cJSON_AddArrayToObject(schema, "required");
     cJSON_AddItemToArray(req, cJSON_CreateString("query"));
     return schema;
 }
 
-/* Parse Brave search JSON response */
-static char *parse_brave_results(const char *json_body, const char *query, int max_results)
+/* Parse Brave search JSON response.
+ * When context_mode is true, include extra_snippets for LLM grounding. */
+static char *parse_brave_results(const char *json_body, const char *query,
+                                 int max_results, int context_mode)
 {
     cJSON *root = cJSON_Parse(json_body);
     if (!root)
@@ -522,6 +529,19 @@ static char *parse_brave_results(const char *json_body, const char *query, int m
         sc_strbuf_appendf(&sb, "%d. %s\n   %s\n", i + 1, title, url);
         if (desc[0])
             sc_strbuf_appendf(&sb, "   %s\n", desc);
+
+        /* Append extra snippets when in context mode */
+        if (context_mode) {
+            cJSON *snippets = cJSON_GetObjectItem(item, "extra_snippets");
+            if (snippets && cJSON_IsArray(snippets)) {
+                int scount = cJSON_GetArraySize(snippets);
+                for (int j = 0; j < scount; j++) {
+                    cJSON *s = cJSON_GetArrayItem(snippets, j);
+                    if (cJSON_IsString(s) && s->valuestring[0])
+                        sc_strbuf_appendf(&sb, "   > %s\n", s->valuestring);
+                }
+            }
+        }
     }
 
     cJSON_Delete(root);
@@ -664,6 +684,7 @@ static sc_tool_result_t *web_search_execute(sc_tool_t *self, cJSON *args, void *
         return sc_tool_result_error("query is required");
 
     int count = sc_json_get_int(args, "count", 0);
+    int context_mode = cJSON_IsTrue(cJSON_GetObjectItem(args, "context"));
 
     char *result_text = NULL;
 
@@ -680,6 +701,8 @@ static sc_tool_result_t *web_search_execute(sc_tool_t *self, cJSON *args, void *
         sc_strbuf_appendf(&urlbuf,
             "%s/res/v1/web/search?q=%s&count=%d",
             base, encoded_q, max);
+        if (context_mode)
+            sc_strbuf_append(&urlbuf, "&extra_snippets=true");
         char *url = sc_strbuf_finish(&urlbuf);
         free(encoded_q);
 
@@ -699,7 +722,7 @@ static sc_tool_result_t *web_search_execute(sc_tool_t *self, cJSON *args, void *
         free(token_hdr);
 
         if (body) {
-            result_text = parse_brave_results(body, query, max);
+            result_text = parse_brave_results(body, query, max, context_mode);
             free(body);
         } else {
             result_text = sc_strdup("Brave search request failed");

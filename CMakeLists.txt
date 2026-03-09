@@ -193,8 +193,10 @@ set(SC_SOURCES
     src/util/curl_common.c
     src/util/prompt_guard.c
     src/util/sandbox.c
+    src/util/sha256.c
     src/logger.c
     src/config.c
+    src/backup.c
     src/bus.c
     src/session.c
     src/state.c
