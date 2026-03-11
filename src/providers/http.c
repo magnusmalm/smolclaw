@@ -85,6 +85,7 @@ sc_llm_message_t sc_msg_assistant_with_tools(const char *content,
 
     if (count > 0 && calls) {
         msg.tool_calls = calloc((size_t)count, sizeof(sc_tool_call_t));
+        if (!msg.tool_calls) { msg.tool_call_count = 0; return msg; }
         for (int i = 0; i < count; i++) {
             msg.tool_calls[i].id = sc_strdup(calls[i].id);
             msg.tool_calls[i].name = sc_strdup(calls[i].name);
@@ -146,6 +147,7 @@ sc_llm_message_t sc_llm_message_clone(const sc_llm_message_t *msg)
     if (msg->tool_call_count > 0 && msg->tool_calls) {
         clone.tool_calls = calloc((size_t)msg->tool_call_count,
                                   sizeof(sc_tool_call_t));
+        if (!clone.tool_calls) { clone.tool_call_count = 0; return clone; }
         for (int i = 0; i < msg->tool_call_count; i++) {
             clone.tool_calls[i].id = sc_strdup(msg->tool_calls[i].id);
             clone.tool_calls[i].name = sc_strdup(msg->tool_calls[i].name);
@@ -540,6 +542,7 @@ static void http_stream_event(const char *data, void *ctx)
                     sc->tool_arg_buf_count++;
                 }
 
+                if (idx >= sc->tool_call_count) continue;
                 sc_tool_call_t *tc = &sc->tool_calls[idx];
 
                 const char *id = sc_json_get_string(tc_delta, "id", NULL);

@@ -359,6 +359,10 @@ static void process_message_create(sc_channel_t *ch, cJSON *d)
 
     /* Extract sender ID: "user_id|username" */
     cJSON *author_id = cJSON_GetObjectItem(author, "id");
+    if (!author_id || !cJSON_IsString(author_id)) {
+        free(msg_content);
+        return;
+    }
     cJSON *username = cJSON_GetObjectItem(author, "username");
     char sender_id[256];
     if (username && cJSON_IsString(username)) {

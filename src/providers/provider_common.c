@@ -27,6 +27,7 @@ size_t sc_curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     size_t total = size * nmemb;
     if (sb->len + total > SC_CURL_MAX_RESPONSE) return 0;
     char *tmp = malloc(total + 1);
+    if (!tmp) return 0;
     memcpy(tmp, ptr, total);
     tmp[total] = '\0';
     sc_strbuf_append(sb, tmp);

@@ -285,6 +285,10 @@ static void process_update(sc_channel_t *ch, cJSON *update)
 
     /* Extract sender ID */
     cJSON *user_id = cJSON_GetObjectItem(from, "id");
+    if (!user_id || !cJSON_IsNumber(user_id)) {
+        free(content);
+        return;
+    }
     cJSON *username = cJSON_GetObjectItem(from, "username");
 
     char sender_id[256];
