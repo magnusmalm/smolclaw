@@ -228,6 +228,34 @@ void sc_drain_summarize(sc_agent_t *agent)
     apply_summarize_result(agent);
 }
 
+/* Score message information density for smart chunking.
+ * Higher score = more important to include in summarization transcript. */
+static int score_msg_density(const sc_llm_message_t *msg)
+{
+    if (!msg->content || !msg->role) return 0;
+    if (strcmp(msg->role, "system") == 0) return 0;
+
+    int len = (int)strlen(msg->content);
+    if (len < 10) return 1;
+
+    /* Base: content length capped to avoid long outputs dominating */
+    int score = len > 500 ? 500 : len;
+
+    /* Role weights: user intent and tool results carry more information */
+    if (strcmp(msg->role, "user") == 0)
+        score = score * 3 / 2;
+    else if (msg->tool_call_count > 0)
+        score = score * 5 / 4;
+    else if (msg->tool_call_id)
+        score = score * 4 / 3;
+
+    /* Pattern bonuses for high-information content */
+    if (strstr(msg->content, "```")) score += 100;
+    if (strstr(msg->content, "rror")) score += 50;
+
+    return score;
+}
+
 void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
 {
     /* Drain previous summarization thread if still active */
@@ -254,28 +282,63 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
         sc_strbuf_appendf(&transcript, "Previous summary: %s\n\n", existing_summary);
     }
 
+    /* Smart chunking: score messages by density and select the most
+     * informative ones within the transcript budget */
+    int *scores = calloc((size_t)discard_count, sizeof(int));
+    int *selected = calloc((size_t)discard_count, sizeof(int));
+    if (!scores || !selected) {
+        free(scores);
+        free(selected);
+        /* Fall through to empty transcript — summarization will handle it */
+        goto build_done;
+    }
+
+    for (int i = 0; i < discard_count; i++)
+        scores[i] = score_msg_density(&history[i]);
+
+    /* Greedily select highest-scored messages until budget is filled */
+    {
+        int budget = agent->summary_max_transcript - (int)transcript.len;
+        for (;;) {
+            int best = -1;
+            for (int i = 0; i < discard_count; i++) {
+                if (!selected[i] && scores[i] > 0 &&
+                    (best < 0 || scores[i] > scores[best]))
+                    best = i;
+            }
+            if (best < 0) break;
+            int cost = (int)strlen(history[best].content ? history[best].content : "") + 30;
+            if (cost > budget) { scores[best] = 0; continue; }
+            selected[best] = 1;
+            budget -= cost;
+            scores[best] = 0;
+            if (budget <= 0) break;
+        }
+    }
+
+    /* Build transcript from selected messages in chronological order */
     for (int i = 0; i < discard_count; i++) {
+        if (!selected[i]) continue;
+
         const char *role = history[i].role;
-        if (!role || strcmp(role, "system") == 0)
-            continue;
+        if (!role || strcmp(role, "system") == 0) continue;
 
         const char *label = role;
-        if (history[i].tool_call_id) {
+        if (history[i].tool_call_id)
             label = "tool_result";
-        } else if (history[i].tool_call_count > 0) {
+        else if (history[i].tool_call_count > 0)
             label = "assistant (tool_use)";
-        }
 
         const char *content = history[i].content;
         if (!content) content = "";
 
         sc_strbuf_appendf(&transcript, "[%s] %s\n", label, content);
-
-        if ((int)transcript.len >= agent->summary_max_transcript) {
-            sc_strbuf_append(&transcript, "\n[...truncated...]");
-            break;
-        }
     }
+
+    free(scores);
+    free(selected);
+build_done:
+    (void)0;
 
     char *transcript_str = sc_strbuf_finish(&transcript);
 

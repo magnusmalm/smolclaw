@@ -29,7 +29,10 @@ typedef struct {
 /* ---------- Turn context ---------- */
 
 #define SC_MAX_RECENT_CALLS 10
+#define SC_TOOL_CACHE_MAX 32
+
 typedef struct { uint32_t hash; int count; } sc_recent_call_t;
+typedef struct { uint32_t key; char *result_for_llm; } sc_cache_entry_t;
 
 /* Per-turn mutable state shared across LLM iteration helpers */
 typedef struct {
@@ -53,6 +56,13 @@ typedef struct {
     /* Stuck-loop detection */
     sc_recent_call_t recent_calls[SC_MAX_RECENT_CALLS];
     int recent_count;
+
+    /* Intent threading: original user question (borrowed, not owned) */
+    const char *user_intent;
+
+    /* Per-turn tool result cache for read-only tools */
+    sc_cache_entry_t tool_cache[SC_TOOL_CACHE_MAX];
+    int tool_cache_count;
 } sc_turn_ctx_t;
 
 /* ---------- agent_turn.c ---------- */

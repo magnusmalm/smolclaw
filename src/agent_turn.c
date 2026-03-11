@@ -100,6 +100,62 @@ static int hourly_remaining(const sc_agent_t *agent, const char *session_key,
     return limit;
 }
 
+/* ---------- Intent threading ---------- */
+
+/* Extract user's original question from the message array (last user msg) */
+static const char *extract_user_intent(const sc_llm_message_t *msgs, int count)
+{
+    for (int i = count - 1; i >= 0; i--) {
+        if (msgs[i].role && strcmp(msgs[i].role, "user") == 0 && msgs[i].content)
+            return msgs[i].content;
+    }
+    return NULL;
+}
+
+/* ---------- Per-turn tool result cache ---------- */
+
+static const char * const read_only_tools[] = {
+    "read_file", "list_dir", "memory_read", "memory_search", NULL
+};
+
+static int is_read_only_tool(const char *name)
+{
+    for (int i = 0; read_only_tools[i]; i++)
+        if (strcmp(name, read_only_tools[i]) == 0) return 1;
+    return 0;
+}
+
+static uint32_t cache_key_hash(const char *name, cJSON *args)
+{
+    uint32_t h = fnv1a_str(name);
+    char *s = args ? cJSON_PrintUnformatted(args) : NULL;
+    if (s) {
+        for (const char *p = s; *p; p++)
+            h = (h ^ (uint8_t)*p) * 16777619u;
+        free(s);
+    }
+    return h;
+}
+
+static sc_tool_result_t *cache_lookup(const sc_turn_ctx_t *tc, uint32_t key)
+{
+    for (int i = 0; i < tc->tool_cache_count; i++) {
+        if (tc->tool_cache[i].key == key)
+            return sc_tool_result_new(tc->tool_cache[i].result_for_llm);
+    }
+    return NULL;
+}
+
+static void cache_store(sc_turn_ctx_t *tc, uint32_t key,
+                        const sc_tool_result_t *result)
+{
+    if (tc->tool_cache_count >= SC_TOOL_CACHE_MAX) return;
+    if (!result || result->is_error) return;
+    int i = tc->tool_cache_count++;
+    tc->tool_cache[i].key = key;
+    tc->tool_cache[i].result_for_llm = sc_strdup(result->for_llm);
+}
+
 /* ---------- Helpers ---------- */
 
 static int is_valid_response(const sc_llm_response_t *resp)
@@ -420,38 +476,55 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
 
         SC_LOG_INFO("agent", "Tool call: %s", call->name);
 
-        int stuck = check_stuck_loop(call, tc, iteration);
-        if (stuck == 2) {
-            *out_content = sc_strdup("Stopped: repeated tool call detected.");
-            return 1;
-        }
-        if (stuck == 1) {
-            sc_llm_message_t hint_msg = sc_msg_tool_result(call->id,
-                "Error: You have called this tool with identical arguments "
-                "multiple times and it keeps failing. Try a different "
-                "approach or different parameters.");
-            if (tc->msgs_len + 1 > tc->msgs_cap) {
-                int new_cap = tc->msgs_cap + 16;
-                sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
-                    (size_t)new_cap * sizeof(sc_llm_message_t));
-                if (new_msgs) {
-                    tc->msgs = new_msgs; tc->msgs_cap = new_cap;
-                } else {
-                    SC_LOG_ERROR("agent", "OOM growing message array for hint");
-                }
-            }
-            if (tc->msgs_len < tc->msgs_cap) {
-                tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&hint_msg);
-                sc_session_add_full_message(agent->sessions,
-                                             tc->session_key, &hint_msg);
-            }
-            sc_llm_message_free_fields(&hint_msg);
-            continue;
+        /* Check per-turn cache for read-only tools */
+        sc_tool_result_t *result = NULL;
+        int cacheable = is_read_only_tool(call->name);
+        uint32_t ckey = 0;
+
+        if (cacheable) {
+            ckey = cache_key_hash(call->name, call->arguments);
+            result = cache_lookup(tc, ckey);
+            if (result)
+                SC_LOG_DEBUG("agent", "Tool cache hit: %s", call->name);
         }
 
-        sc_tool_result_t *result = sc_tool_registry_execute(
-            agent->tools, call->name, call->arguments,
-            tc->channel, tc->chat_id, NULL);
+        if (!result) {
+            int stuck = check_stuck_loop(call, tc, iteration);
+            if (stuck == 2) {
+                *out_content = sc_strdup("Stopped: repeated tool call detected.");
+                return 1;
+            }
+            if (stuck == 1) {
+                sc_llm_message_t hint_msg = sc_msg_tool_result(call->id,
+                    "Error: You have called this tool with identical arguments "
+                    "multiple times and it keeps failing. Try a different "
+                    "approach or different parameters.");
+                if (tc->msgs_len + 1 > tc->msgs_cap) {
+                    int new_cap = tc->msgs_cap + 16;
+                    sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
+                        (size_t)new_cap * sizeof(sc_llm_message_t));
+                    if (new_msgs) {
+                        tc->msgs = new_msgs; tc->msgs_cap = new_cap;
+                    } else {
+                        SC_LOG_ERROR("agent", "OOM growing message array for hint");
+                    }
+                }
+                if (tc->msgs_len < tc->msgs_cap) {
+                    tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&hint_msg);
+                    sc_session_add_full_message(agent->sessions,
+                                                 tc->session_key, &hint_msg);
+                }
+                sc_llm_message_free_fields(&hint_msg);
+                continue;
+            }
+
+            result = sc_tool_registry_execute(
+                agent->tools, call->name, call->arguments,
+                tc->channel, tc->chat_id, (void *)tc->user_intent);
+
+            if (cacheable && result && !result->is_error)
+                cache_store(tc, ckey, result);
+        }
 
         sc_llm_message_t tool_msg = wrap_tool_output(call, result, tc);
 
@@ -553,6 +626,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         tc.msgs[i] = sc_llm_message_clone(&messages[i]);
     }
 
+    /* Intent threading: extract the user's original question */
+    tc.user_intent = extract_user_intent(tc.msgs, tc.msgs_len);
+
     int tool_count = 0;
     sc_tool_definition_t *tool_defs = sc_tool_registry_to_defs(agent->tools, &tool_count);
 
@@ -621,6 +697,8 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         sc_llm_message_free_fields(&tc.msgs[i]);
     }
     free(tc.msgs);
+    for (int i = 0; i < tc.tool_cache_count; i++)
+        free(tc.tool_cache[i].result_for_llm);
     sc_tool_definitions_free(tool_defs, tool_count);
 
     *out_iterations = iteration;
