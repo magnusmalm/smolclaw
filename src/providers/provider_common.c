@@ -37,6 +37,7 @@ size_t sc_curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 
 size_t sc_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
+    if (nitems > 0 && size > SIZE_MAX / nitems) return 0;
     size_t total = size * nitems;
     sc_header_ctx_t *ctx = userdata;
     if (total > 13 && strncasecmp(buffer, "retry-after:", 12) == 0) {

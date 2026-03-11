@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 
 static FILE *log_file;
 static sc_log_level_t min_level = SC_LOG_INFO;
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Weak fallback — overridden by strong definition in main.c */
 __attribute__((weak)) int sc_shutdown_requested(void) { return 0; }
@@ -85,10 +87,12 @@ void sc_log(sc_log_level_t level, const char *component, const char *fmt, ...)
         snprintf(line, sizeof(line), "[%s] [%s] %s", ts, lname, msg);
     }
 
+    pthread_mutex_lock(&log_mutex);
     fprintf(stderr, "%s\n", line);
 
     if (log_file) {
         fprintf(log_file, "%s\n", line);
         fflush(log_file);
     }
+    pthread_mutex_unlock(&log_mutex);
 }

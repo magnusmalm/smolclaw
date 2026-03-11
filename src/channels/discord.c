@@ -49,6 +49,7 @@ typedef struct {
     sc_ws_t *ws;
     pthread_t gateway_thread;
     pthread_t heartbeat_thread;
+    pthread_mutex_t ws_write_mutex;  /* Serialize WebSocket writes (SSL not thread-safe) */
     int thread_started;
     int heartbeat_started;
     int heartbeat_interval_ms;
@@ -178,11 +179,20 @@ static int gw_send(sc_ws_t *ws, int opcode, cJSON *data)
     return ret;
 }
 
-/* Send IDENTIFY */
-static int gw_identify(sc_ws_t *ws, const char *token)
+/* Thread-safe wrapper: serialize WebSocket writes via mutex */
+static int gw_send_locked(discord_data_t *dd, int opcode, cJSON *data)
+{
+    pthread_mutex_lock(&dd->ws_write_mutex);
+    int ret = gw_send(dd->ws, opcode, data);
+    pthread_mutex_unlock(&dd->ws_write_mutex);
+    return ret;
+}
+
+/* Send IDENTIFY (uses locked wrapper for thread safety) */
+static int gw_identify(discord_data_t *dd)
 {
     cJSON *d = cJSON_CreateObject();
-    cJSON_AddStringToObject(d, "token", token);
+    cJSON_AddStringToObject(d, "token", dd->token);
     cJSON_AddNumberToObject(d, "intents", DISCORD_INTENTS);
 
     cJSON *props = cJSON_CreateObject();
@@ -191,13 +201,13 @@ static int gw_identify(sc_ws_t *ws, const char *token)
     cJSON_AddStringToObject(props, "device", "smolclaw");
     cJSON_AddItemToObject(d, "properties", props);
 
-    int ret = gw_send(ws, GW_IDENTIFY, d);
+    int ret = gw_send_locked(dd, GW_IDENTIFY, d);
     cJSON_Delete(d);
     return ret;
 }
 
-/* Send heartbeat */
-static int gw_heartbeat(sc_ws_t *ws, int sequence)
+/* Send heartbeat (uses locked wrapper for thread safety) */
+static int gw_heartbeat(discord_data_t *dd, int sequence)
 {
     cJSON *msg = cJSON_CreateObject();
     cJSON_AddNumberToObject(msg, "op", GW_HEARTBEAT);
@@ -210,7 +220,9 @@ static int gw_heartbeat(sc_ws_t *ws, int sequence)
     char *text = cJSON_PrintUnformatted(msg);
     cJSON_Delete(msg);
 
-    int ret = sc_ws_send_text(ws, text, strlen(text));
+    pthread_mutex_lock(&dd->ws_write_mutex);
+    int ret = sc_ws_send_text(dd->ws, text, strlen(text));
+    pthread_mutex_unlock(&dd->ws_write_mutex);
     free(text);
     return ret;
 }
@@ -238,7 +250,7 @@ static void *heartbeat_thread(void *arg)
         if (!atomic_exchange(&dd->heartbeat_acked, 0)) {
             SC_LOG_WARN(DISCORD_TAG, "Heartbeat ACK not received, connection may be dead");
         }
-        if (gw_heartbeat(dd->ws, dd->sequence) != 0) {
+        if (gw_heartbeat(dd, dd->sequence) != 0) {
             SC_LOG_ERROR(DISCORD_TAG, "Failed to send heartbeat");
             break;
         }
@@ -490,7 +502,7 @@ static int process_gateway_opcode(sc_channel_t *ch, discord_data_t *dd,
             dd->heartbeat_started = 1;
         }
 
-        gw_identify(dd->ws, dd->token);
+        gw_identify(dd);
         break;
     }
 
@@ -500,7 +512,7 @@ static int process_gateway_opcode(sc_channel_t *ch, discord_data_t *dd,
         break;
 
     case GW_HEARTBEAT:
-        gw_heartbeat(dd->ws, dd->sequence);
+        gw_heartbeat(dd, dd->sequence);
         break;
 
     case GW_RECONNECT:
@@ -718,6 +730,7 @@ static void discord_destroy(sc_channel_t *self)
         if (dd->ws) {
             sc_ws_close(dd->ws);
         }
+        pthread_mutex_destroy(&dd->ws_write_mutex);
         free(dd->token);
         free(dd->api_base);
         free(dd->bot_user_id);
@@ -745,6 +758,7 @@ sc_channel_t *sc_channel_discord_new(sc_discord_config_t *cfg, sc_bus_t *bus)
     dd->thread_started = 0;
     dd->sequence = -1;
     dd->heartbeat_acked = 1;
+    pthread_mutex_init(&dd->ws_write_mutex, NULL);
 
     ch->name = SC_CHANNEL_DISCORD;
     ch->start = discord_start;

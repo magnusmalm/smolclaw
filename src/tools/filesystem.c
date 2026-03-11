@@ -123,6 +123,10 @@ static int is_sensitive_path(const char *resolved)
             return 1;
     }
 
+    /* Git hooks directory (writable → arbitrary code execution) */
+    if (strstr(resolved, "/.git/hooks/") || str_ends_with(resolved, "/.git/hooks"))
+        return 1;
+
     /* Cloud provider credential directories */
     if (strstr(resolved, "/.docker/") || str_ends_with(resolved, "/.docker"))
         return 1;
@@ -572,21 +576,39 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
 
     free(content);
 
-    /* Write back */
-    f = fs_open_nofollow(resolved, O_WRONLY | O_CREAT | O_TRUNC, "wb");
+    /* Atomic write: write to temp file, then rename */
+    sc_strbuf_t tmp_sb;
+    sc_strbuf_init(&tmp_sb);
+    sc_strbuf_appendf(&tmp_sb, "%s.tmp", resolved);
+    char *tmp_path = sc_strbuf_finish(&tmp_sb);
+
+    f = fs_open_nofollow(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, "wb");
     if (!f) {
         free(new_content);
+        free(tmp_path);
         free(resolved);
-        return sc_tool_result_error("failed to open file for writing");
+        return sc_tool_result_error("failed to open temp file for writing");
     }
 
     size_t written = fwrite(new_content, 1, result_len, f);
     fclose(f);
     free(new_content);
-    free(resolved);
 
-    if (written != result_len)
+    if (written != result_len) {
+        unlink(tmp_path);
+        free(tmp_path);
+        free(resolved);
         return sc_tool_result_error("failed to write complete content");
+    }
+
+    if (rename(tmp_path, resolved) != 0) {
+        unlink(tmp_path);
+        free(tmp_path);
+        free(resolved);
+        return sc_tool_result_error("failed to finalize file write");
+    }
+    free(tmp_path);
+    free(resolved);
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);

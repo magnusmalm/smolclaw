@@ -11,6 +11,7 @@
 #include "util/str.h"
 
 #include "sc_features.h"
+#include "sc_version.h"
 #include "constants.h"
 #include "logger.h"
 #include "rate_limit.h"
@@ -228,6 +229,52 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
     }
 #endif
 
+    /* Build announce message if enabled */
+    if (cfg->announce_on_join && mgr->count > 0) {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "smolclaw %s", SC_VERSION_FULL);
+
+        /* Compile-time feature list */
+        const char *features[] = {
+#if SC_ENABLE_VOICE
+            "voice",
+#endif
+#if SC_ENABLE_MCP
+            "mcp",
+#endif
+#if SC_ENABLE_GIT
+            "git",
+#endif
+#if SC_ENABLE_WEB_TOOLS
+            "web-tools",
+#endif
+#if SC_ENABLE_STREAMING
+            "streaming",
+#endif
+#if SC_ENABLE_MEMORY_SEARCH
+            "memory-search",
+#endif
+#if SC_ENABLE_VAULT
+            "vault",
+#endif
+        };
+        int nfeat = (int)(sizeof(features) / sizeof(features[0]));
+        if (nfeat > 0) {
+            sc_strbuf_append(&sb, " [");
+            for (int i = 0; i < nfeat; i++) {
+                if (i > 0) sc_strbuf_append(&sb, ", ");
+                sc_strbuf_append(&sb, features[i]);
+            }
+            sc_strbuf_append(&sb, "]");
+        }
+
+        char *msg = sc_strbuf_finish(&sb);
+        for (int i = 0; i < mgr->count; i++)
+            mgr->channels[i]->announce_message = sc_strdup(msg);
+        free(msg);
+    }
+
     SC_LOG_INFO("channels", "Channel initialization completed: %d channels", mgr->count);
     return mgr;
 }
@@ -341,7 +388,7 @@ int sc_channel_manager_send_typing(sc_channel_manager_t *mgr,
 
 /* Helper: replace a channel's allow_from list (thread-safe) */
 static void reload_allow_list(sc_channel_t *ch, char **allow_from,
-                               int allow_from_count)
+                               int allow_from_count, const char *dm_policy)
 {
     if (!ch) return;
 
@@ -357,12 +404,15 @@ static void reload_allow_list(sc_channel_t *ch, char **allow_from,
         }
     }
 
-    /* Swap under lock */
+    sc_dm_policy_t new_policy = sc_dm_policy_from_str(dm_policy);
+
+    /* Swap under lock (dm_policy + allow_list must be consistent) */
     pthread_mutex_lock(&ch->security_mutex);
     char **old_list = ch->allow_list;
     int old_count = ch->allow_list_count;
     ch->allow_list = new_list;
     ch->allow_list_count = new_count;
+    ch->dm_policy = new_policy;
     pthread_mutex_unlock(&ch->security_mutex);
 
     /* Free old list outside lock */
@@ -382,28 +432,28 @@ void sc_channel_manager_reload_config(sc_channel_manager_t *mgr,
 
         if (strcmp(ch->name, SC_CHANNEL_TELEGRAM) == 0) {
             reload_allow_list(ch, cfg->telegram.allow_from,
-                              cfg->telegram.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->telegram.dm_policy);
+                              cfg->telegram.allow_from_count,
+                              cfg->telegram.dm_policy);
         } else if (strcmp(ch->name, SC_CHANNEL_DISCORD) == 0) {
             reload_allow_list(ch, cfg->discord.allow_from,
-                              cfg->discord.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->discord.dm_policy);
+                              cfg->discord.allow_from_count,
+                              cfg->discord.dm_policy);
         } else if (strcmp(ch->name, SC_CHANNEL_IRC) == 0) {
             reload_allow_list(ch, cfg->irc.allow_from,
-                              cfg->irc.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->irc.dm_policy);
+                              cfg->irc.allow_from_count,
+                              cfg->irc.dm_policy);
         } else if (strcmp(ch->name, SC_CHANNEL_SLACK) == 0) {
             reload_allow_list(ch, cfg->slack.allow_from,
-                              cfg->slack.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->slack.dm_policy);
+                              cfg->slack.allow_from_count,
+                              cfg->slack.dm_policy);
         } else if (strcmp(ch->name, SC_CHANNEL_WEB) == 0) {
             reload_allow_list(ch, cfg->web.allow_from,
-                              cfg->web.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->web.dm_policy);
+                              cfg->web.allow_from_count,
+                              cfg->web.dm_policy);
         } else if (strcmp(ch->name, SC_CHANNEL_X) == 0) {
             reload_allow_list(ch, cfg->x.allow_from,
-                              cfg->x.allow_from_count);
-            ch->dm_policy = sc_dm_policy_from_str(cfg->x.dm_policy);
+                              cfg->x.allow_from_count,
+                              cfg->x.dm_policy);
         }
 
         /* Update rate limiter (thread-safe swap) */
