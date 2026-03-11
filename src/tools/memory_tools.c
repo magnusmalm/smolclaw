@@ -85,14 +85,16 @@ static sc_tool_result_t *memory_read_execute(sc_tool_t *self, cJSON *args, void 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
 
+    int had_long_term = (long_term != NULL);
     if (long_term) {
         sc_strbuf_append(&sb, "## Long-term Memory\n\n");
         sc_strbuf_append(&sb, long_term);
         free(long_term);
+        long_term = NULL;
     }
 
     if (recent) {
-        if (long_term)
+        if (had_long_term)
             sc_strbuf_append(&sb, "\n\n---\n\n");
         sc_strbuf_append(&sb, "## Recent Daily Notes (last 7 days)\n\n");
         sc_strbuf_append(&sb, recent);

@@ -9,6 +9,7 @@
 
 #include <unistd.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "util/curl_common.h"
 
@@ -21,7 +22,7 @@ static const char *known_ca_paths[] = {
 };
 
 static const char *cached_ca_bundle;
-static int ca_probed;
+static pthread_once_t ca_once = PTHREAD_ONCE_INIT;
 
 static const char *probe_ca_bundle(void)
 {
@@ -37,12 +38,14 @@ static const char *probe_ca_bundle(void)
     return NULL;
 }
 
+static void ca_probe_once(void)
+{
+    cached_ca_bundle = probe_ca_bundle();
+}
+
 const char *sc_curl_find_ca_bundle(void)
 {
-    if (!ca_probed) {
-        cached_ca_bundle = probe_ca_bundle();
-        ca_probed = 1;
-    }
+    pthread_once(&ca_once, ca_probe_once);
     return cached_ca_bundle;
 }
 

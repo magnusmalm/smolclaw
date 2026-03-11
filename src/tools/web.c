@@ -164,6 +164,7 @@ static void curl_buf_init(curl_buf_t *buf)
     buf->data = malloc(buf->cap);
     buf->len = 0;
     if (buf->data) buf->data[0] = '\0';
+    else buf->cap = 0;
 }
 
 static void curl_buf_free(curl_buf_t *buf)
@@ -1131,7 +1132,7 @@ static sc_tool_result_t *web_fetch_execute(sc_tool_t *self, cJSON *args, void *c
 
     int truncated = 0;
     size_t text_len = text ? strlen(text) : 0;
-    if ((int)text_len > max_chars) {
+    if (max_chars > 0 && text_len > (size_t)max_chars) {
         text[max_chars] = '\0';
         text_len = (size_t)max_chars;
         truncated = 1;
