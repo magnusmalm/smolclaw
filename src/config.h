@@ -187,6 +187,9 @@ typedef struct {
     /* Auto-extract facts from session summaries into daily notes */
     int memory_consolidation;
 
+    /* Send version/feature info to channels on join */
+    int announce_on_join;
+
     /* Model aliases for in-prompt override */
     char **model_alias_names;
     char **model_alias_models;

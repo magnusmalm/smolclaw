@@ -41,6 +41,7 @@ struct sc_channel {
     sc_rate_limiter_t *rate_limiter;   /* NULL = no rate limiting */
     pthread_mutex_t security_mutex;    /* protects allow_list + rate_limiter */
     volatile int running;
+    char *announce_message;         /* NULL = no announcement on join */
     void *data;
 
     /* Optional voice transcriber (shared, not owned) */

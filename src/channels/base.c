@@ -203,6 +203,7 @@ void sc_channel_base_free(sc_channel_t *ch)
 {
     if (!ch) return;
     pthread_mutex_destroy(&ch->security_mutex);
+    free(ch->announce_message);
     if (ch->allow_list) {
         for (int i = 0; i < ch->allow_list_count; i++) {
             free(ch->allow_list[i]);

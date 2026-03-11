@@ -631,6 +631,15 @@ static void *recv_thread(void *arg)
             backoff = IRC_RECONNECT_DELAY; /* reset on success */
             last_recv = time(NULL);
             ping_pending = 0;
+
+            /* Announce to joined channels if configured */
+            if (ch->announce_message) {
+                for (int i = 0; i < id->channel_count; i++) {
+                    if (id->channels[i] && id->channels[i][0])
+                        irc_send_line(id, "PRIVMSG %s :%s",
+                                      id->channels[i], ch->announce_message);
+                }
+            }
         }
 
         /* Use keepalive timeout for poll:
