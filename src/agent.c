@@ -14,6 +14,7 @@
 #include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "cJSON.h"
 #include "sc_features.h"
@@ -45,6 +46,9 @@
 #if SC_ENABLE_GIT
 #include "tools/git.h"
 #endif
+#if SC_ENABLE_CODE_GRAPH
+#include "tools/code_graph.h"
+#endif
 #if SC_ENABLE_X_TOOLS
 #include "tools/x_tools.h"
 #endif
@@ -59,10 +63,11 @@
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #include "tools/memory_search.h"
+#include "tools/context_tools.h"
 
 static void memory_index_cb(const char *source, const char *content, void *ctx)
 {
-    sc_memory_index_put((sc_memory_index_t *)ctx, source, content);
+    sc_memory_index_put_chunked((sc_memory_index_t *)ctx, source, content);
 }
 #endif
 
@@ -97,7 +102,141 @@ static int message_send_cb(const char *channel, const char *chat_id,
     return 0;
 }
 
-/* Register all default tools into the agent's registry */
+/* Register standalone tools (no agent dependency).
+ * Used by both the full agent and the MCP server mode. */
+void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
+                                   const char *workspace)
+{
+    int restrict_ws = cfg->restrict_to_workspace;
+
+    /* Filesystem tools */
+    sc_tool_registry_register(reg, sc_tool_read_file_new(workspace, restrict_ws));
+    sc_tool_registry_register(reg, sc_tool_write_file_new(workspace, restrict_ws));
+    sc_tool_registry_register(reg, sc_tool_list_dir_new(workspace, restrict_ws));
+    sc_tool_registry_register(reg, sc_tool_edit_file_new(workspace, restrict_ws));
+    sc_tool_registry_register(reg, sc_tool_append_file_new(workspace, restrict_ws));
+
+    /* Shell */
+    sc_tool_t *exec_tool = sc_tool_exec_new(workspace, restrict_ws,
+                                             cfg->max_output_chars,
+                                             cfg->exec_timeout_secs);
+    if (cfg->exec_use_allowlist && cfg->exec_allowed_commands) {
+        sc_tool_exec_set_allowlist(exec_tool, 1,
+                                    cfg->exec_allowed_commands,
+                                    cfg->exec_allowed_command_count);
+    }
+    sc_tool_exec_set_sandbox(exec_tool, cfg->sandbox_enabled);
+    if (cfg->sandbox_enabled) {
+        int avail = sc_sandbox_available();
+        if (!(avail & SC_SANDBOX_LANDLOCK))
+            SC_LOG_WARN("agent", "Landlock not available — exec children will run without filesystem sandbox");
+        if (!(avail & SC_SANDBOX_SECCOMP))
+            SC_LOG_WARN("agent", "seccomp-bpf not available — exec children will run without syscall filter");
+    }
+    sc_tool_registry_register(reg, exec_tool);
+
+    /* Web tools */
+#if SC_ENABLE_WEB_TOOLS
+    sc_web_search_opts_t web_opts = {
+        .brave_enabled = cfg->web_tools.brave_enabled,
+        .brave_api_key = cfg->web_tools.brave_api_key,
+        .brave_base_url = cfg->web_tools.brave_base_url,
+        .brave_max_results = cfg->web_tools.brave_max_results,
+        .searxng_enabled = cfg->web_tools.searxng_enabled,
+        .searxng_base_url = cfg->web_tools.searxng_base_url,
+        .searxng_max_results = cfg->web_tools.searxng_max_results,
+        .duckduckgo_enabled = cfg->web_tools.duckduckgo_enabled,
+        .duckduckgo_max_results = cfg->web_tools.duckduckgo_max_results,
+    };
+    sc_tool_t *search = sc_tool_web_search_new(web_opts);
+    if (search) sc_tool_registry_register(reg, search);
+    sc_tool_registry_register(reg, sc_tool_web_fetch_new(cfg->max_fetch_chars));
+#endif
+
+    /* X tools */
+#if SC_ENABLE_X_TOOLS
+    if (cfg->x.consumer_key && cfg->x.consumer_key[0] &&
+        cfg->x.access_token && cfg->x.access_token[0]) {
+        sc_tool_t *xt;
+        xt = sc_tool_x_get_tweet_new(&cfg->x);
+        if (xt) sc_tool_registry_register(reg, xt);
+        xt = sc_tool_x_get_thread_new(&cfg->x);
+        if (xt) sc_tool_registry_register(reg, xt);
+        xt = sc_tool_x_search_new(&cfg->x);
+        if (xt) sc_tool_registry_register(reg, xt);
+        xt = sc_tool_x_get_user_new(&cfg->x);
+        if (xt) sc_tool_registry_register(reg, xt);
+    }
+#endif
+
+    /* Memory tools */
+    sc_tool_registry_register(reg, sc_tool_memory_read_new(workspace));
+    sc_tool_registry_register(reg, sc_tool_memory_write_new(workspace));
+    sc_tool_registry_register(reg, sc_tool_memory_log_new(workspace));
+
+    /* Memory search (FTS5 index) — standalone mode */
+#if SC_ENABLE_MEMORY_SEARCH
+    {
+        sc_strbuf_t db_sb;
+        sc_strbuf_init(&db_sb);
+        sc_strbuf_appendf(&db_sb, "%s/memory/search.db", workspace);
+        char *db_path = sc_strbuf_finish(&db_sb);
+
+        sc_memory_index_t *midx = sc_memory_index_new(db_path);
+        free(db_path);
+
+        if (midx) {
+            sc_strbuf_t mem_sb;
+            sc_strbuf_init(&mem_sb);
+            sc_strbuf_appendf(&mem_sb, "%s/memory", workspace);
+            char *mem_dir = sc_strbuf_finish(&mem_sb);
+            sc_memory_index_rebuild(midx, mem_dir);
+            free(mem_dir);
+
+            sc_tool_registry_register(reg,
+                                       sc_tool_memory_search_new(midx));
+
+            /* Index context artifacts directory if it exists */
+            {
+                sc_strbuf_t ctx_sb;
+                sc_strbuf_init(&ctx_sb);
+                sc_strbuf_appendf(&ctx_sb, "%s/context", workspace);
+                char *ctx_dir = sc_strbuf_finish(&ctx_sb);
+                struct stat ctx_st;
+                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode)) {
+                    static const char *ctx_exts[] = {
+                        ".md", ".txt", ".yaml", ".yml",
+                        ".json", ".sql", ".toml"
+                    };
+                    sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
+                        ctx_exts, 7);
+                    sc_tool_registry_register(reg,
+                        sc_tool_context_search_new(midx));
+                }
+                free(ctx_dir);
+            }
+            /* Note: midx ownership leaks in standalone mode —
+             * acceptable since the process exits after MCP server stops */
+        }
+    }
+#endif
+
+    /* Git tool */
+#if SC_ENABLE_GIT
+    sc_tool_registry_register(reg,
+                               sc_tool_git_new(workspace, restrict_ws));
+#endif
+
+    /* Code graph tool */
+#if SC_ENABLE_CODE_GRAPH
+    sc_tool_registry_register(reg,
+                               sc_tool_code_graph_new(workspace));
+#endif
+}
+
+/* Register all default tools into the agent's registry.
+ * This includes agent-specific tools (message, spawn, tee) that
+ * sc_register_tools_standalone() omits. */
 static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
 {
     const char *workspace = agent->workspace;
@@ -175,7 +314,7 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     }
 #endif
 
-    /* Message tool */
+    /* Message tool (agent-specific: needs bus callback) */
     sc_tool_t *msg_tool = sc_tool_message_new();
     sc_tool_message_set_callback(msg_tool, message_send_cb, agent);
     if (cfg->restrict_message_tool)
@@ -217,6 +356,26 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                          memory_index_cb, midx);
             sc_tool_memory_set_index_cb(mem_log_tool,
                                          memory_index_cb, midx);
+
+            /* Index context artifacts directory if it exists */
+            {
+                sc_strbuf_t ctx_sb;
+                sc_strbuf_init(&ctx_sb);
+                sc_strbuf_appendf(&ctx_sb, "%s/context", workspace);
+                char *ctx_dir = sc_strbuf_finish(&ctx_sb);
+                struct stat ctx_st;
+                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode)) {
+                    static const char *ctx_exts[] = {
+                        ".md", ".txt", ".yaml", ".yml",
+                        ".json", ".sql", ".toml"
+                    };
+                    sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
+                        ctx_exts, 7);
+                    sc_tool_registry_register(agent->tools,
+                        sc_tool_context_search_new(midx));
+                }
+                free(ctx_dir);
+            }
         }
     }
 #endif
@@ -227,7 +386,13 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                sc_tool_git_new(workspace, restrict_ws));
 #endif
 
-    /* Spawn tool (subagent) */
+    /* Code graph tool */
+#if SC_ENABLE_CODE_GRAPH
+    sc_tool_registry_register(agent->tools,
+                               sc_tool_code_graph_new(workspace));
+#endif
+
+    /* Spawn tool (agent-specific: needs agent pointer) */
 #if SC_ENABLE_SPAWN
     sc_tool_registry_register(agent->tools, sc_tool_spawn_new(agent));
 #endif
@@ -386,6 +551,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_output_total = cfg->max_output_total;
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
+    agent->verbose = cfg->verbose;
     agent->running = 0;
     agent->hourly_slots = calloc(SC_HOURLY_SLOTS, sizeof(sc_hourly_slot_t));
 
@@ -550,6 +716,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_turn_secs = cfg->max_turn_secs;
     agent->max_output_total = cfg->max_output_total;
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
+    agent->verbose = cfg->verbose;
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;
     agent->max_fetch_chars = cfg->max_fetch_chars;
@@ -576,6 +743,16 @@ char *sc_agent_process_direct(sc_agent_t *agent, const char *content,
 {
     const char *sk = session_key ? session_key : "cli:default";
     return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0);
+}
+
+char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
+                                const char *session_key,
+                                const char *channel, const char *chat_id)
+{
+    const char *sk = session_key ? session_key : "cli:default";
+    const char *ch = channel ? channel : SC_CHANNEL_CLI;
+    const char *cid = chat_id ? chat_id : "direct";
+    return run_agent_loop(agent, sk, ch, cid, content, 0);
 }
 
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,

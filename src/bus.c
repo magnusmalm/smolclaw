@@ -238,6 +238,17 @@ void sc_bus_set_outbound_handler(sc_bus_t *bus, sc_msg_handler_t handler, void *
     bus->outbound_handler_ctx = ctx;
 }
 
+void sc_bus_flush_outbound(sc_bus_t *bus)
+{
+    if (!bus || !bus->outbound_handler) return;
+
+    sc_outbound_msg_t *msg;
+    while ((msg = queue_pop(&bus->outbound)) != NULL) {
+        bus->outbound_handler(msg, bus->outbound_handler_ctx);
+        sc_outbound_msg_free(msg);
+    }
+}
+
 /* ---- Message create/free ---- */
 
 sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,

@@ -296,8 +296,13 @@ static sc_llm_response_t *parse_response(const char *body)
     cJSON *choice0 = cJSON_GetArrayItem(choices, 0);
     cJSON *message = sc_json_get_object(choice0, "message");
 
-    /* Content */
+    /* Content — some reasoning models (kimi, deepseek-r1) put the visible
+     * response in "content" and internal chain-of-thought in "reasoning_content".
+     * If "content" is null/empty, fall back to "reasoning_content" so the
+     * caller gets *something* rather than a blank response. */
     const char *content = sc_json_get_string(message, "content", NULL);
+    if (!content || !content[0])
+        content = sc_json_get_string(message, "reasoning_content", NULL);
     resp->content = sc_strdup(content);
 
     /* Finish reason */

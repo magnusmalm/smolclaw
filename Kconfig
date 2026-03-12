@@ -98,6 +98,14 @@ config SC_ENABLE_BACKGROUND
 	  Enable exec_background, bg_poll, and bg_kill tools for
 	  running and managing background processes.
 
+config SC_ENABLE_CODE_GRAPH
+	bool "Code dependency graph tool"
+	default y
+	help
+	  Enable the code_graph tool for analyzing import dependencies.
+	  Regex-based extraction from JS/TS, Python, C/C++, Go, Rust.
+	  Actions: build, query, stats, cycles.
+
 endmenu
 
 menu "Output"
@@ -179,6 +187,15 @@ config SC_ENABLE_MCP
 	  Enable the Model Context Protocol client.
 	  Extends tools via external JSON-RPC 2.0 servers
 	  communicating over stdin/stdout.
+
+config SC_ENABLE_MCP_SERVER
+	bool "MCP server mode (expose tools via stdio)"
+	default y
+	help
+	  Enable the MCP server mode. Exposes smolclaw's tool
+	  registry as a JSON-RPC 2.0 server on stdin/stdout,
+	  usable from Claude Code, Cursor, etc.
+	  Lightweight: no LLM, agent, bus, or channels.
 
 endmenu
 

@@ -190,6 +190,9 @@ typedef struct {
     /* Send version/feature info to channels on join */
     int announce_on_join;
 
+    /* Send progress updates (LLM calls, tool calls) to the channel */
+    int verbose;
+
     /* Model aliases for in-prompt override */
     char **model_alias_names;
     char **model_alias_models;

@@ -1615,6 +1615,183 @@ static void test_bootstrap_case_insensitive(void)
     rmdir(tmpdir);
 }
 
+/* ---- .gitignore filtering tests ---- */
+
+static void test_list_dir_filters_builtin(void)
+{
+    /* Default list_dir should filter node_modules, .git, etc. */
+    char tmpdir[] = "/tmp/sc_test_gi_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/node_modules", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/.git", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/__pycache__", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/src", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/README.md", tmpdir);
+    FILE *f = fopen(path, "w");
+    fprintf(f, "hello");
+    fclose(f);
+
+    sc_tool_t *tool = sc_tool_list_dir_new(tmpdir, 0);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", tmpdir);
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+
+    /* Builtin filtered dirs should not appear */
+    ASSERT(strstr(r->for_llm, "node_modules") == NULL,
+           "node_modules should be filtered");
+    ASSERT(strstr(r->for_llm, "__pycache__") == NULL,
+           "__pycache__ should be filtered");
+    /* Normal entries should appear */
+    ASSERT(strstr(r->for_llm, "src") != NULL, "src should appear");
+    ASSERT(strstr(r->for_llm, "README.md") != NULL, "README.md should appear");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_list_dir_show_all(void)
+{
+    /* show_all=true should include everything */
+    char tmpdir[] = "/tmp/sc_test_gi2_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/node_modules", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/src", tmpdir);
+    mkdir(path, 0755);
+
+    sc_tool_t *tool = sc_tool_list_dir_new(tmpdir, 0);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", tmpdir);
+    cJSON_AddStringToObject(args, "show_all", "true");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+
+    ASSERT(strstr(r->for_llm, "node_modules") != NULL,
+           "node_modules should appear with show_all");
+    ASSERT(strstr(r->for_llm, "src") != NULL, "src should appear");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_list_dir_gitignore_file(void)
+{
+    /* list_dir should respect .gitignore patterns */
+    char tmpdir[] = "/tmp/sc_test_gi3_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Create a .git dir so gitignore loading finds the root */
+    char path[256];
+    snprintf(path, sizeof(path), "%s/.git", tmpdir);
+    mkdir(path, 0755);
+
+    /* Write a .gitignore that filters *.log and build/ */
+    snprintf(path, sizeof(path), "%s/.gitignore", tmpdir);
+    FILE *f = fopen(path, "w");
+    fprintf(f, "*.log\nbuild/\n");
+    fclose(f);
+
+    /* Create matching entries */
+    snprintf(path, sizeof(path), "%s/build", tmpdir);
+    mkdir(path, 0755);
+    snprintf(path, sizeof(path), "%s/debug.log", tmpdir);
+    f = fopen(path, "w");
+    fprintf(f, "log data");
+    fclose(f);
+    snprintf(path, sizeof(path), "%s/main.c", tmpdir);
+    f = fopen(path, "w");
+    fprintf(f, "int main() {}");
+    fclose(f);
+
+    sc_tool_t *tool = sc_tool_list_dir_new(tmpdir, 0);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", tmpdir);
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+
+    /* .gitignore-matched entries should not appear */
+    ASSERT(strstr(r->for_llm, "debug.log") == NULL,
+           "*.log should be filtered by .gitignore");
+    /* build/ is already filtered by builtin, but .gitignore should also catch it */
+    ASSERT(strstr(r->for_llm, "main.c") != NULL, "main.c should appear");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_list_dir_gitignore_negation(void)
+{
+    /* Negation patterns (!) should un-ignore entries */
+    char tmpdir[] = "/tmp/sc_test_gi4_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/.git", tmpdir);
+    mkdir(path, 0755);
+
+    /* Write .gitignore: ignore all .log except important.log */
+    snprintf(path, sizeof(path), "%s/.gitignore", tmpdir);
+    FILE *f = fopen(path, "w");
+    fprintf(f, "*.log\n!important.log\n");
+    fclose(f);
+
+    snprintf(path, sizeof(path), "%s/debug.log", tmpdir);
+    f = fopen(path, "w");
+    fprintf(f, "debug");
+    fclose(f);
+    snprintf(path, sizeof(path), "%s/important.log", tmpdir);
+    f = fopen(path, "w");
+    fprintf(f, "important");
+    fclose(f);
+
+    sc_tool_t *tool = sc_tool_list_dir_new(tmpdir, 0);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", tmpdir);
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+
+    ASSERT(strstr(r->for_llm, "debug.log") == NULL,
+           "debug.log should be filtered");
+    ASSERT(strstr(r->for_llm, "important.log") != NULL,
+           "important.log should be un-ignored by negation");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
 int main(void)
 {
     printf("test_tools\n");
@@ -1657,6 +1834,10 @@ int main(void)
     RUN_TEST(test_symlink_nofollow);
     RUN_TEST(test_sensitive_path_cloud_credentials);
     RUN_TEST(test_bootstrap_case_insensitive);
+    RUN_TEST(test_list_dir_filters_builtin);
+    RUN_TEST(test_list_dir_show_all);
+    RUN_TEST(test_list_dir_gitignore_file);
+    RUN_TEST(test_list_dir_gitignore_negation);
 
     TEST_REPORT();
 }

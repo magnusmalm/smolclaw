@@ -16,6 +16,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <strings.h>
+#include <fnmatch.h>
 
 #include "constants.h"
 
@@ -406,6 +407,172 @@ sc_tool_t *sc_tool_write_file_new(const char *workspace, int restrict_to_ws)
         fs_data_new(workspace, restrict_to_ws));
 }
 
+/* ========== gitignore filtering for list_dir ========== */
+
+typedef struct {
+    char *pattern;
+    int negated;
+    int dir_only;
+} gitignore_pattern_t;
+
+typedef struct {
+    gitignore_pattern_t *patterns;
+    int count;
+    int cap;
+} gitignore_set_t;
+
+static void gitignore_set_init(gitignore_set_t *gs)
+{
+    gs->patterns = NULL;
+    gs->count = 0;
+    gs->cap = 0;
+}
+
+static void gitignore_set_free(gitignore_set_t *gs)
+{
+    for (int i = 0; i < gs->count; i++)
+        free(gs->patterns[i].pattern);
+    free(gs->patterns);
+}
+
+static void gitignore_set_add(gitignore_set_t *gs, const char *pattern,
+                               int negated, int dir_only)
+{
+    if (gs->count >= gs->cap) {
+        int new_cap = gs->cap ? gs->cap * 2 : 32;
+        gitignore_pattern_t *tmp = realloc(gs->patterns,
+            (size_t)new_cap * sizeof(gitignore_pattern_t));
+        if (!tmp) return;
+        gs->patterns = tmp;
+        gs->cap = new_cap;
+    }
+    gs->patterns[gs->count].pattern = sc_strdup(pattern);
+    gs->patterns[gs->count].negated = negated;
+    gs->patterns[gs->count].dir_only = dir_only;
+    gs->count++;
+}
+
+static void gitignore_set_add_builtin(gitignore_set_t *gs)
+{
+    static const char *builtins[] = {
+        ".git", "node_modules", "__pycache__", ".venv", "build",
+        "dist", "target", ".next", ".tox", ".mypy_cache",
+        ".pytest_cache", "vendor"
+    };
+    for (int i = 0; i < (int)(sizeof(builtins) / sizeof(builtins[0])); i++)
+        gitignore_set_add(gs, builtins[i], 0, 1);
+}
+
+/* Parse a .gitignore file and add patterns to the set */
+static void load_gitignore_file(gitignore_set_t *gs, const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+
+    char line[1024];
+    while (fgets(line, sizeof(line), f)) {
+        /* Strip trailing newline/whitespace */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' ||
+                           line[len-1] == ' ' || line[len-1] == '\t'))
+            line[--len] = '\0';
+
+        /* Skip empty lines and comments */
+        if (len == 0 || line[0] == '#') continue;
+
+        const char *p = line;
+        int negated = 0;
+        if (*p == '!') { negated = 1; p++; }
+
+        /* Strip leading whitespace */
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '\0') continue;
+
+        /* Check for dir-only marker (trailing /) */
+        int dir_only = 0;
+        len = strlen(p);
+        if (len > 0 && p[len-1] == '/') {
+            dir_only = 1;
+            char *pat = sc_strdup(p);
+            pat[len-1] = '\0';
+            gitignore_set_add(gs, pat, negated, dir_only);
+            free(pat);
+        } else {
+            gitignore_set_add(gs, p, negated, dir_only);
+        }
+    }
+    fclose(f);
+}
+
+/* Walk up from dir to find .git/, load .gitignore files */
+static void load_gitignore_files(gitignore_set_t *gs, const char *dir_path)
+{
+    /* Find repo root by looking for .git/ */
+    char *check = sc_strdup(dir_path);
+    char *root = NULL;
+
+    while (check && check[0] == '/') {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "%s/.git", check);
+        char *git_path = sc_strbuf_finish(&sb);
+
+        struct stat st;
+        if (stat(git_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+            root = sc_strdup(check);
+            free(git_path);
+            break;
+        }
+        free(git_path);
+
+        /* Go up one level */
+        char *slash = strrchr(check, '/');
+        if (!slash || slash == check) break;
+        *slash = '\0';
+    }
+    free(check);
+
+    if (!root) return;
+
+    /* Load root .gitignore */
+    {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "%s/.gitignore", root);
+        char *gi = sc_strbuf_finish(&sb);
+        load_gitignore_file(gs, gi);
+        free(gi);
+    }
+
+    /* Load .gitignore in target dir if different from root */
+    if (strcmp(root, dir_path) != 0) {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "%s/.gitignore", dir_path);
+        char *gi = sc_strbuf_finish(&sb);
+        load_gitignore_file(gs, gi);
+        free(gi);
+    }
+
+    free(root);
+}
+
+/* Check if a name matches the gitignore set. Returns 1 if ignored.
+ * Uses last-match-wins semantics. */
+static int gitignore_set_matches(const gitignore_set_t *gs, const char *name,
+                                  int is_dir)
+{
+    int matched = 0;
+    for (int i = 0; i < gs->count; i++) {
+        const gitignore_pattern_t *p = &gs->patterns[i];
+        if (p->dir_only && !is_dir) continue;
+        if (fnmatch(p->pattern, name, FNM_PATHNAME) == 0) {
+            matched = p->negated ? 0 : 1;
+        }
+    }
+    return matched;
+}
+
 /* ========== list_dir ========== */
 
 static cJSON *list_dir_parameters(sc_tool_t *self)
@@ -413,6 +580,9 @@ static cJSON *list_dir_parameters(sc_tool_t *self)
     (void)self;
     cJSON *schema = sc_schema_new();
     sc_schema_add_string(schema, "path", "Path to list", 1);
+    sc_schema_add_string(schema, "show_all",
+        "Set to \"true\" to show all entries including gitignored dirs "
+        "(node_modules, .git, __pycache__, etc.)", 0);
     return schema;
 }
 
@@ -431,6 +601,18 @@ static sc_tool_result_t *list_dir_execute(sc_tool_t *self, cJSON *args, void *ct
     if (!dir) {
         free(resolved);
         return sc_tool_result_error("failed to read directory");
+    }
+
+    /* Check show_all parameter */
+    const char *show_all_str = sc_json_get_string(args, "show_all", NULL);
+    int show_all = (show_all_str && strcmp(show_all_str, "true") == 0);
+
+    /* Build gitignore pattern set if filtering */
+    gitignore_set_t gi;
+    if (!show_all) {
+        gitignore_set_init(&gi);
+        gitignore_set_add_builtin(&gi);
+        load_gitignore_files(&gi, resolved);
     }
 
     sc_strbuf_t sb;
@@ -456,7 +638,16 @@ static sc_tool_result_t *list_dir_execute(sc_tool_t *self, cJSON *args, void *ct
         char *fullpath = sc_strbuf_finish(&pathbuf);
 
         struct stat st;
-        if (fullpath && stat(fullpath, &st) == 0 && S_ISDIR(st.st_mode))
+        int is_dir_entry = (fullpath && stat(fullpath, &st) == 0 &&
+                            S_ISDIR(st.st_mode));
+
+        /* Check gitignore filter */
+        if (!show_all && gitignore_set_matches(&gi, entry->d_name, is_dir_entry)) {
+            free(fullpath);
+            continue;
+        }
+
+        if (is_dir_entry)
             sc_strbuf_appendf(&sb, "DIR:  %s\n", entry->d_name);
         else
             sc_strbuf_appendf(&sb, "FILE: %s\n", entry->d_name);
@@ -464,6 +655,9 @@ static sc_tool_result_t *list_dir_execute(sc_tool_t *self, cJSON *args, void *ct
     }
     closedir(dir);
     free(resolved);
+
+    if (!show_all)
+        gitignore_set_free(&gi);
 
     char *result_str = sc_strbuf_finish(&sb);
     sc_tool_result_t *result = sc_tool_result_new(result_str);

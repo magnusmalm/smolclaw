@@ -70,6 +70,10 @@ sc_inbound_msg_t *sc_bus_consume_inbound(sc_bus_t *bus);
 /* Set outbound handler (called by libevent when outbound messages arrive) */
 void sc_bus_set_outbound_handler(sc_bus_t *bus, sc_msg_handler_t handler, void *ctx);
 
+/* Synchronously drain and dispatch all queued outbound messages.
+ * Call from the agent thread to flush progress messages immediately. */
+void sc_bus_flush_outbound(sc_bus_t *bus);
+
 /* Free messages */
 void sc_inbound_msg_free(sc_inbound_msg_t *msg);
 void sc_outbound_msg_free(sc_outbound_msg_t *msg);

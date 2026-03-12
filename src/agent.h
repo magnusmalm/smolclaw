@@ -33,6 +33,7 @@ typedef struct sc_agent {
     int max_output_total;
     int max_tool_calls_per_hour;
     int memory_consolidation;
+    int verbose;
     sc_session_manager_t *sessions;
     sc_state_t *state;
     sc_context_builder_t *context_builder;
@@ -78,6 +79,11 @@ void sc_agent_stop(sc_agent_t *agent);
 char *sc_agent_process_direct(sc_agent_t *agent, const char *content,
                                const char *session_key);
 
+/* Channel message processing (for gateway mode — preserves channel/chat_id) */
+char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
+                                const char *session_key,
+                                const char *channel, const char *chat_id);
+
 /* Heartbeat processing (no session history) */
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,
                                   const char *channel, const char *chat_id);
@@ -97,5 +103,10 @@ void sc_agent_wait_summarize(sc_agent_t *agent);
 
 /* Hot-reload safe config fields (limits, allowlist, rate limits) */
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);
+
+/* Register standalone tools (no agent dependency) into a registry.
+ * Used by MCP server mode for headless tool exposure. */
+void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
+                                   const char *workspace);
 
 #endif /* SC_AGENT_H */

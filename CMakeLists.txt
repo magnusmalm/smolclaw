@@ -296,8 +296,17 @@ if(SC_ENABLE_MCP)
     list(APPEND SC_SOURCES src/mcp/client.c src/mcp/bridge.c)
 endif()
 
+if(SC_ENABLE_MCP_SERVER)
+    list(APPEND SC_SOURCES src/mcp/server.c)
+endif()
+
+if(SC_ENABLE_CODE_GRAPH)
+    list(APPEND SC_SOURCES src/tools/code_graph.c)
+endif()
+
 if(SC_ENABLE_MEMORY_SEARCH)
-    list(APPEND SC_SOURCES src/memory_index.c src/tools/memory_search.c)
+    list(APPEND SC_SOURCES src/memory_index.c src/tools/memory_search.c
+                           src/tools/context_tools.c)
 endif()
 
 if(SC_ENABLE_VAULT)
@@ -473,6 +482,14 @@ if(SC_ENABLE_MEMORY_SEARCH)
     list(APPEND TEST_SOURCES tests/test_memory_search.c)
 endif()
 
+if(SC_ENABLE_MCP_SERVER)
+    list(APPEND TEST_SOURCES tests/test_mcp_server.c)
+endif()
+
+if(SC_ENABLE_CODE_GRAPH)
+    list(APPEND TEST_SOURCES tests/test_code_graph.c)
+endif()
+
 if(SC_ENABLE_VAULT)
     list(APPEND TEST_SOURCES tests/test_vault.c)
 endif()
@@ -565,6 +582,8 @@ message(STATUS "  Heartbeat service ... ${SC_ENABLE_HEARTBEAT}")
 message(STATUS "  Background procs .... ${SC_ENABLE_BACKGROUND}")
 message(STATUS "  IRC channel ......... ${SC_ENABLE_IRC}")
 message(STATUS "  MCP client ......... ${SC_ENABLE_MCP}")
+message(STATUS "  MCP server ......... ${SC_ENABLE_MCP_SERVER}")
+message(STATUS "  Code graph ......... ${SC_ENABLE_CODE_GRAPH}")
 message(STATUS "  Memory search ...... ${SC_ENABLE_MEMORY_SEARCH}")
 message(STATUS "  Vault encryption ... ${SC_ENABLE_VAULT}")
 message(STATUS "  Git tool ........... ${SC_ENABLE_GIT}")

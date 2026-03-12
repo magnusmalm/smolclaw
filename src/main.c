@@ -47,6 +47,9 @@
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
+#if SC_ENABLE_MCP_SERVER
+#include "mcp/server.h"
+#endif
 #include <curl/curl.h>
 
 /* Global for signal handling */
@@ -170,6 +173,9 @@ static void print_help(void)
     printf("  onboard     Initialize configuration and workspace\n");
     printf("  agent       Interact with the agent directly\n");
     printf("  gateway     Start gateway (channels + agent + services)\n");
+#if SC_ENABLE_MCP_SERVER
+    printf("  mcp-server  Run as MCP server (JSON-RPC over stdio)\n");
+#endif
     printf("  pairing     Manage channel pairing requests\n");
     printf("  cost        View token usage and costs\n");
     printf("  doctor      Validate configuration and dependencies\n");
@@ -185,6 +191,41 @@ static void print_help(void)
     printf("              verify [NAME]    list    restore NAME [--dry-run]\n");
     printf("  version     Show version information\n");
 }
+
+#if SC_ENABLE_MCP_SERVER
+static void cmd_mcp_server(void)
+{
+    sc_config_t *cfg = load_config_or_exit();
+    char *workspace = sc_config_workspace_path(cfg);
+
+    /* Create tool registry with standalone tools */
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    if (!reg) {
+        fprintf(stderr, "Error: could not create tool registry\n");
+        free(workspace);
+        sc_config_free(cfg);
+        return;
+    }
+
+    sc_register_tools_standalone(reg, cfg, workspace);
+
+    /* Apply allowlist if configured */
+    if (cfg->allowed_tools && cfg->allowed_tool_count > 0) {
+        sc_tool_registry_set_allowed(reg, cfg->allowed_tools,
+                                      cfg->allowed_tool_count);
+    }
+
+    SC_LOG_INFO("main", "Starting MCP server with %d tools",
+                sc_tool_registry_count(reg));
+
+    /* Run stdio server — blocks until EOF or shutdown */
+    sc_mcp_server_run(reg);
+
+    sc_tool_registry_free(reg);
+    free(workspace);
+    sc_config_free(cfg);
+}
+#endif
 
 #if SC_ENABLE_HEARTBEAT
 /* Heartbeat handler callback */
@@ -1260,7 +1301,8 @@ static void gateway_process_message(sc_agent_t *agent,
     if (msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0) {
         SC_LOG_INFO("gateway", "System message received");
     } else {
-        response = sc_agent_process_direct(agent, msg->content, msg->session_key);
+        response = sc_agent_process_channel(agent, msg->content, msg->session_key,
+                                                  msg->channel, msg->chat_id);
     }
 
     /* Stop typing thread */
@@ -1280,6 +1322,13 @@ static void gateway_process_message(sc_agent_t *agent,
     }
 
     free(response);
+}
+
+/* Outbound handler: forward bus messages to channel manager (for verbose progress) */
+static void gateway_outbound_handler(sc_outbound_msg_t *msg, void *ctx)
+{
+    sc_channel_manager_t *ch_mgr = ctx;
+    sc_channel_manager_send(ch_mgr, msg->channel, msg->chat_id, msg->content);
 }
 
 /* Gateway auto-approves — deny patterns and allowlist are the guards */
@@ -1540,6 +1589,7 @@ static void cmd_gateway(int argc, char **argv)
 
     /* Channel manager */
     sc_channel_manager_t *ch_mgr = sc_channel_manager_new(cfg, bus);
+    sc_bus_set_outbound_handler(bus, gateway_outbound_handler, ch_mgr);
 
     printf("\n%s %s Gateway v%s\n", SC_LOGO, SC_NAME, SC_VERSION);
     sc_channel_manager_start_all(ch_mgr);
@@ -1575,6 +1625,10 @@ int main(int argc, char **argv)
         cmd_agent(argc, argv);
     } else if (strcmp(command, "gateway") == 0) {
         cmd_gateway(argc, argv);
+#if SC_ENABLE_MCP_SERVER
+    } else if (strcmp(command, "mcp-server") == 0) {
+        cmd_mcp_server();
+#endif
     } else if (strcmp(command, "pairing") == 0) {
         cmd_pairing(argc, argv);
     } else if (strcmp(command, "cost") == 0) {

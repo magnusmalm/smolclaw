@@ -6,6 +6,7 @@
 
 #include "agent_internal.h"
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -24,6 +25,30 @@
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
+
+/* ---------- Verbose progress ---------- */
+
+static void emit_progress(sc_agent_t *agent, const sc_turn_ctx_t *tc,
+                          const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
+static void emit_progress(sc_agent_t *agent, const sc_turn_ctx_t *tc,
+                          const char *fmt, ...)
+{
+    if (!agent->verbose || !tc->channel || !tc->chat_id) return;
+
+    char buf[400]; /* IRC-safe chunk size */
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+
+    sc_outbound_msg_t *msg = sc_outbound_msg_new(tc->channel, tc->chat_id, buf);
+    if (msg) {
+        sc_bus_publish_outbound(agent->bus, msg);
+        sc_bus_flush_outbound(agent->bus);
+    }
+}
 
 /* ---------- Cross-turn rate tracking ---------- */
 
@@ -475,6 +500,7 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
         }
 
         SC_LOG_INFO("agent", "Tool call: %s", call->name);
+        emit_progress(agent, tc, "  -> %s ...", call->name);
 
         /* Check per-turn cache for read-only tools */
         sc_tool_result_t *result = NULL;
@@ -524,6 +550,15 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
 
             if (cacheable && result && !result->is_error)
                 cache_store(tc, ckey, result);
+        }
+
+        if (result && result->is_error) {
+            char *preview = sc_truncate(result->for_llm, 200);
+            emit_progress(agent, tc, "  <- %s ERROR: %s", call->name,
+                          preview ? preview : "(no detail)");
+            free(preview);
+        } else {
+            emit_progress(agent, tc, "  <- %s ok", call->name);
         }
 
         sc_llm_message_t tool_msg = wrap_tool_output(call, result, tc);
@@ -638,6 +673,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         SC_LOG_DEBUG("agent", "LLM iteration %d/%d (messages=%d, tools=%d)",
                      iteration, agent->max_iterations, tc.msgs_len, tool_count);
 
+        emit_progress(agent, &tc, "[%d/%d] Calling LLM (%d messages)...",
+                      iteration, agent->max_iterations, tc.msgs_len);
+
         sc_llm_response_t *resp = call_llm_with_fallback(
             agent, provider, model, tc.msgs, tc.msgs_len,
             tool_defs, tool_count, &tc, iteration);
@@ -662,6 +700,10 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
         SC_LOG_INFO("agent", "LLM requested %d tool calls at iteration %d",
                      resp->tool_call_count, iteration);
+        emit_progress(agent, &tc, "[%d/%d] LLM requested %d tool call%s",
+                      iteration, agent->max_iterations,
+                      resp->tool_call_count,
+                      resp->tool_call_count != 1 ? "s" : "");
 
         sc_llm_message_t assist_msg = sc_msg_assistant_with_tools(
             resp->content, resp->tool_calls, resp->tool_call_count);
