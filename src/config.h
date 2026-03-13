@@ -144,6 +144,20 @@ typedef struct {
     int auto_apply;            /* default 0 */
 } sc_updater_config_t;
 
+/* Delegation target config */
+typedef struct {
+    char *name;           /* "researcher" */
+    char *url;            /* "http://10.100.0.3:8082/api/message" */
+    char *bearer_token;   /* supports vault:// */
+    int   timeout_secs;   /* default 120 */
+} sc_delegate_target_t;
+
+/* Delegation config */
+typedef struct {
+    sc_delegate_target_t *targets;
+    int target_count;
+} sc_delegation_config_t;
+
 /* Main config struct */
 typedef struct {
     /* Agent defaults */
@@ -242,6 +256,9 @@ typedef struct {
 
     /* Updater */
     sc_updater_config_t updater;
+
+    /* Delegation */
+    sc_delegation_config_t delegation;
 
     /* Raw JSON for round-trip preservation */
     cJSON *raw;

@@ -1021,6 +1021,35 @@ static void load_mcp_config(sc_config_t *cfg, const cJSON *root)
     }
 }
 
+/* Load delegation section from JSON */
+static void load_delegation_config(sc_config_t *cfg, const cJSON *root)
+{
+    const cJSON *deleg = sc_json_get_object(root, "delegation");
+    if (!deleg) return;
+
+    const cJSON *targets = sc_json_get_object(deleg, "targets");
+    if (!targets) return;
+
+    int n = cJSON_GetArraySize(targets);
+    if (n <= 0) return;
+
+    cfg->delegation.targets = calloc((size_t)n, sizeof(sc_delegate_target_t));
+    if (!cfg->delegation.targets) return;
+
+    const cJSON *tgt;
+    cJSON_ArrayForEach(tgt, targets) {
+        if (!tgt->string || !cJSON_IsObject(tgt)) continue;
+        sc_delegate_target_t *t = &cfg->delegation.targets[cfg->delegation.target_count];
+        t->name = sc_strdup(tgt->string);
+        const char *url = sc_json_get_string(tgt, "url", NULL);
+        if (url) t->url = sc_strdup(url);
+        const char *token = sc_json_get_string(tgt, "bearer_token", NULL);
+        if (token) t->bearer_token = sc_strdup(token);
+        t->timeout_secs = sc_json_get_int(tgt, "timeout_secs", 120);
+        cfg->delegation.target_count++;
+    }
+}
+
 sc_config_t *sc_config_load(const char *path)
 {
     sc_config_t *cfg = sc_config_default();
@@ -1127,6 +1156,7 @@ sc_config_t *sc_config_load(const char *path)
     }
 
     load_mcp_config(cfg, root);
+    load_delegation_config(cfg, root);
 
     /* Apply environment variable overrides last */
     apply_env_overrides(cfg);
@@ -1412,6 +1442,26 @@ static void save_mcp_config(cJSON *root, const sc_config_t *cfg)
     }
 }
 
+/* Serialize delegation section to JSON */
+static void save_delegation_config(cJSON *root, const sc_config_t *cfg)
+{
+    if (cfg->delegation.target_count <= 0) return;
+
+    cJSON *deleg_obj = cJSON_AddObjectToObject(root, "delegation");
+    cJSON *targets_obj = cJSON_AddObjectToObject(deleg_obj, "targets");
+    for (int i = 0; i < cfg->delegation.target_count; i++) {
+        const sc_delegate_target_t *t = &cfg->delegation.targets[i];
+        if (!t->name) continue;
+        cJSON *tgt = cJSON_AddObjectToObject(targets_obj, t->name);
+        if (t->url)
+            cJSON_AddStringToObject(tgt, "url", t->url);
+        if (t->bearer_token)
+            cJSON_AddStringToObject(tgt, "bearer_token", t->bearer_token);
+        if (t->timeout_secs != 120)
+            cJSON_AddNumberToObject(tgt, "timeout_secs", t->timeout_secs);
+    }
+}
+
 int sc_config_save(const char *path, const sc_config_t *cfg)
 {
     backup_config(path);
@@ -1471,6 +1521,7 @@ int sc_config_save(const char *path, const sc_config_t *cfg)
     cJSON_AddBoolToObject(upd_obj, "auto_apply", cfg->updater.auto_apply);
 
     save_mcp_config(root, cfg);
+    save_delegation_config(root, cfg);
 
     int ret = sc_json_save_file(path, root);
     cJSON_Delete(root);
@@ -1603,6 +1654,15 @@ void sc_config_free(sc_config_t *cfg)
         free(s->env_values);
     }
     free(cfg->mcp.servers);
+
+    /* Delegation */
+    for (int i = 0; i < cfg->delegation.target_count; i++) {
+        sc_delegate_target_t *t = &cfg->delegation.targets[i];
+        free(t->name);
+        free(t->url);
+        free(t->bearer_token);
+    }
+    free(cfg->delegation.targets);
 
     /* Updater */
     free(cfg->updater.manifest_url);

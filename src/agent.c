@@ -37,6 +37,9 @@
 #if SC_ENABLE_SPAWN
 #include "tools/spawn.h"
 #endif
+#if SC_ENABLE_DELEGATE
+#include "tools/delegate.h"
+#endif
 #if SC_ENABLE_BACKGROUND
 #include "tools/background.h"
 #endif
@@ -395,6 +398,13 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     /* Spawn tool (agent-specific: needs agent pointer) */
 #if SC_ENABLE_SPAWN
     sc_tool_registry_register(agent->tools, sc_tool_spawn_new(agent));
+#endif
+
+    /* Delegate tool (agent-to-agent task routing) */
+#if SC_ENABLE_DELEGATE
+    if (cfg->delegation.target_count > 0)
+        sc_tool_registry_register(agent->tools,
+                                   sc_tool_delegate_new(&cfg->delegation));
 #endif
 
     /* Background process tools */

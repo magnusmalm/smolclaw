@@ -112,9 +112,9 @@ static char *build_identity(const sc_context_builder_t *cb)
 char *sc_context_load_bootstrap(const sc_context_builder_t *cb)
 {
     static const char *bootstrap_files[] = {
-        "AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"
+        "AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md", "CAPABILITIES.md"
     };
-    static const int n_files = 4;
+    static const int n_files = 5;
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);

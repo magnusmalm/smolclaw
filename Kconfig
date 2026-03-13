@@ -161,6 +161,14 @@ config SC_ENABLE_SPAWN
 	  Enable the spawn tool for creating subagent instances
 	  on separate sessions. Depth limited to 3.
 
+config SC_ENABLE_DELEGATE
+	bool "Delegate tool (agent-to-agent task routing)"
+	default n
+	help
+	  Enable the delegate tool for sending tasks to other smolclaw
+	  agents via their Web channel REST API. Requires delegation
+	  targets in config.json.
+
 config SC_ENABLE_MEMORY_SEARCH
 	bool "Memory full-text search (SQLite FTS5)"
 	default y
