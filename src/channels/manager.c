@@ -258,8 +258,9 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
 #if SC_ENABLE_VAULT
             "vault",
 #endif
+            NULL  /* sentinel — avoids zero-size array in minimal builds */
         };
-        int nfeat = (int)(sizeof(features) / sizeof(features[0]));
+        int nfeat = (int)(sizeof(features) / sizeof(features[0])) - 1;
         if (nfeat > 0) {
             sc_strbuf_append(&sb, " [");
             for (int i = 0; i < nfeat; i++) {
