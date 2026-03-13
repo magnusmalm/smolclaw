@@ -523,6 +523,51 @@ static void init_model_aliases(sc_agent_t *agent, sc_config_t *cfg)
 }
 
 /* ======================================================================
+ * Per-channel tool allowlists
+ * ====================================================================== */
+
+static void free_channel_tools(sc_agent_t *agent)
+{
+    for (int i = 0; i < agent->channel_tools_count; i++) {
+        free(agent->channel_tools[i].channel);
+        for (int j = 0; j < agent->channel_tools[i].tool_count; j++)
+            free(agent->channel_tools[i].tools[j]);
+        free(agent->channel_tools[i].tools);
+    }
+    agent->channel_tools_count = 0;
+}
+
+static void add_channel_tools(sc_agent_t *agent, const char *channel,
+                               char **tools, int count)
+{
+    if (!tools || count <= 0) return;
+    if (agent->channel_tools_count >= SC_MAX_CHANNEL_TOOL_ENTRIES) return;
+
+    int idx = agent->channel_tools_count++;
+    agent->channel_tools[idx].channel = sc_strdup(channel);
+    agent->channel_tools[idx].tools = calloc((size_t)count, sizeof(char *));
+    if (!agent->channel_tools[idx].tools) {
+        agent->channel_tools_count--;
+        return;
+    }
+    for (int i = 0; i < count; i++)
+        agent->channel_tools[idx].tools[i] = sc_strdup(tools[i]);
+    agent->channel_tools[idx].tool_count = count;
+    SC_LOG_INFO("agent", "Channel '%s': %d tools in allowlist", channel, count);
+}
+
+static void load_channel_tools(sc_agent_t *agent, const sc_config_t *cfg)
+{
+    free_channel_tools(agent);
+    add_channel_tools(agent, "telegram", cfg->telegram.tools, cfg->telegram.tool_count);
+    add_channel_tools(agent, "discord", cfg->discord.tools, cfg->discord.tool_count);
+    add_channel_tools(agent, "irc", cfg->irc.tools, cfg->irc.tool_count);
+    add_channel_tools(agent, "slack", cfg->slack.tools, cfg->slack.tool_count);
+    add_channel_tools(agent, "web", cfg->web.tools, cfg->web.tool_count);
+    add_channel_tools(agent, "x", cfg->x.tools, cfg->x.tool_count);
+}
+
+/* ======================================================================
  * Public API
  * ====================================================================== */
 
@@ -595,6 +640,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     init_fallback_providers(agent, cfg);
     init_model_aliases(agent, cfg);
 
+    /* Per-channel tool allowlists */
+    load_channel_tools(agent, cfg);
+
     return agent;
 }
 
@@ -625,6 +673,7 @@ void sc_agent_free(sc_agent_t *agent)
     sc_bg_cleanup_all();
 #endif
     sc_audit_shutdown();
+    free_channel_tools(agent);
     free(agent->workspace);
     free(agent->model);
     sc_session_manager_free(agent->sessions);
@@ -729,6 +778,9 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     } else {
         sc_tool_registry_set_allowed(agent->tools, NULL, 0);
     }
+
+    /* Per-channel tool allowlists */
+    load_channel_tools(agent, cfg);
 
     /* Note: exec_timeout_secs, max_output_chars, max_fetch_chars are captured
      * by tools at construction time and cannot be updated by reload. */
@@ -839,18 +891,26 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
 
     /* Run LLM iteration loop */
     int iterations = 0;
+    char *failure_reason = NULL;
     char *final_content = sc_run_llm_iteration(agent, use_provider, use_model,
                                                 messages, msg_count,
                                                 session_key, channel, chat_id,
-                                                &iterations);
+                                                &iterations, &failure_reason);
 
     sc_llm_message_array_free(messages, msg_count);
 
-    /* Handle empty response */
+    /* Handle empty response — use failure reason if available */
     if (!final_content || final_content[0] == '\0') {
         free(final_content);
-        final_content = sc_strdup("I've completed processing but have no response to give.");
+        if (failure_reason) {
+            final_content = failure_reason;
+            failure_reason = NULL;
+        } else {
+            final_content = sc_strdup(
+                "I've completed processing but have no response to give.");
+        }
     }
+    free(failure_reason);
 
     /* Outbound secret scanning */
     char *redacted_final = sc_redact_secrets(final_content);

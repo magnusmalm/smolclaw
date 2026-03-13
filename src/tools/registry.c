@@ -264,6 +264,22 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
 
 sc_tool_definition_t *sc_tool_registry_to_defs(sc_tool_registry_t *reg, int *out_count)
 {
+    return sc_tool_registry_to_defs_filtered(reg, out_count, NULL, 0);
+}
+
+static int is_in_channel_list(const char *name, char **list, int count)
+{
+    for (int i = 0; i < count; i++) {
+        if (list[i] && strcmp(list[i], name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+sc_tool_definition_t *sc_tool_registry_to_defs_filtered(
+    sc_tool_registry_t *reg, int *out_count,
+    char **channel_tools, int channel_tool_count)
+{
     if (!reg || !out_count) return NULL;
     *out_count = 0;
 
@@ -276,6 +292,10 @@ sc_tool_definition_t *sc_tool_registry_to_defs(sc_tool_registry_t *reg, int *out
     for (int i = 0; i < reg->count; i++) {
         sc_tool_t *t = reg->tools[i];
         if (!sc_tool_registry_is_allowed(reg, t->name))
+            continue;
+        /* Apply per-channel filter if set */
+        if (channel_tools && channel_tool_count > 0 &&
+            !is_in_channel_list(t->name, channel_tools, channel_tool_count))
             continue;
         defs[n].name = sc_strdup(t->name);
         defs[n].description = sc_strdup(t->description);

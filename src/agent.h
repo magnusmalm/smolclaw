@@ -13,6 +13,14 @@
 
 typedef struct sc_mcp_bridge sc_mcp_bridge_t;
 
+/* Per-channel tool allowlist entry */
+#define SC_MAX_CHANNEL_TOOL_ENTRIES 8
+typedef struct {
+    char *channel;          /* channel name (e.g. "irc", "web") */
+    char **tools;           /* tool name list (NULL = all) */
+    int tool_count;
+} sc_channel_tools_t;
+
 typedef struct sc_agent {
     sc_bus_t *bus;
     sc_provider_t *provider;
@@ -49,6 +57,9 @@ typedef struct sc_agent {
     char **alias_names;
     char **alias_models;
     int alias_count;
+    /* Per-channel tool allowlists */
+    sc_channel_tools_t channel_tools[SC_MAX_CHANNEL_TOOL_ENTRIES];
+    int channel_tools_count;
     /* MCP bridge (external tool servers) */
     sc_mcp_bridge_t *mcp_bridge;
     /* Memory search index (owned, NULL when SC_ENABLE_MEMORY_SEARCH is off) */

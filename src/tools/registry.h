@@ -32,6 +32,14 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
 
 /* Convert to provider tool definitions. Caller owns array and contents. */
 sc_tool_definition_t *sc_tool_registry_to_defs(sc_tool_registry_t *reg, int *out_count);
+
+/* Like to_defs, but applies an additional channel-level filter on top of the
+ * registry's global allowlist. A tool must pass both to be included.
+ * If channel_tools is NULL or channel_tool_count is 0, behaves like to_defs. */
+sc_tool_definition_t *sc_tool_registry_to_defs_filtered(
+    sc_tool_registry_t *reg, int *out_count,
+    char **channel_tools, int channel_tool_count);
+
 void sc_tool_definitions_free(sc_tool_definition_t *defs, int count);
 
 /* Get tool summaries for system prompt. Caller owns result. */

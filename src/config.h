@@ -19,6 +19,8 @@ typedef struct {
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_telegram_config_t;
 
 /* Discord channel config */
@@ -29,6 +31,8 @@ typedef struct {
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_discord_config_t;
 
 /* IRC channel config */
@@ -46,6 +50,8 @@ typedef struct {
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_irc_config_t;
 
 /* Slack channel config */
@@ -56,6 +62,8 @@ typedef struct {
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_slack_config_t;
 
 /* X (Twitter) channel config */
@@ -72,6 +80,8 @@ typedef struct {
     int poll_interval_sec;     /* default: 60 */
     int enable_dms;            /* default: 0 (DMs require Pro tier) */
     int read_only;             /* default: 1 — poll only, block all outbound */
+    char **tools;              /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_x_config_t;
 
 /* Web channel config */
@@ -86,6 +96,8 @@ typedef struct {
     char *dm_policy;
     char **allow_from;
     int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
 } sc_web_config_t;
 
 /* Web tools config */

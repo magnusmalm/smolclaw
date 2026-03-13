@@ -136,11 +136,19 @@ static char *sc_resolve_file_ref(const char *value, const char *workspace)
                     "agent tools can read it, exposing the secret to the LLM",
                     path);
     }
-    char *smolclaw_dir = sc_expand_home("~/.smolclaw/");
+    char *smolclaw_dir = sc_get_home_dir();
     if (smolclaw_dir) {
-        if (strncmp(path, smolclaw_dir, strlen(smolclaw_dir)) == 0) {
-            SC_LOG_WARN(LOG_TAG, "secret file is inside ~/.smolclaw/ (%s) — "
-                        "agent reads memory/sessions from here", path);
+        size_t dir_len = strlen(smolclaw_dir);
+        /* Append trailing slash for prefix check */
+        char *dir_slash = malloc(dir_len + 2);
+        if (dir_slash) {
+            sprintf(dir_slash, "%s/", smolclaw_dir);
+            if (strncmp(path, dir_slash, strlen(dir_slash)) == 0) {
+                SC_LOG_WARN(LOG_TAG, "secret file is inside %s (%s) — "
+                            "agent reads memory/sessions from here",
+                            smolclaw_dir, path);
+            }
+            free(dir_slash);
         }
         free(smolclaw_dir);
     }
@@ -648,8 +656,15 @@ sc_config_t *sc_config_default(void)
     sc_config_t *cfg = calloc(1, sizeof(*cfg));
     if (!cfg) return NULL;
 
-    /* Agent defaults */
-    cfg->workspace            = sc_strdup(SC_DEFAULT_WORKSPACE);
+    /* Agent defaults — use SMOLCLAW_HOME/workspace if set, else default */
+    const char *home_override = getenv("SMOLCLAW_HOME");
+    if (home_override && home_override[0]) {
+        char ws[PATH_MAX];
+        snprintf(ws, sizeof(ws), "%s/workspace", home_override);
+        cfg->workspace = sc_strdup(ws);
+    } else {
+        cfg->workspace = sc_strdup(SC_DEFAULT_WORKSPACE);
+    }
     cfg->restrict_to_workspace = 1;
     cfg->provider             = sc_strdup("");
     cfg->model                = sc_strdup(SC_DEFAULT_MODEL);
@@ -858,6 +873,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->telegram.dm_policy, tg, "dm_policy");
         cfg->telegram.allow_from = sc_json_parse_string_list(
             sc_json_get_array(tg, "allow_from"), &cfg->telegram.allow_from_count);
+        cfg->telegram.tools = sc_json_parse_string_list(
+            sc_json_get_array(tg, "tools"), &cfg->telegram.tool_count);
     }
 
     const cJSON *dc = sc_json_get_object(channels, "discord");
@@ -869,6 +886,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->discord.dm_policy, dc, "dm_policy");
         cfg->discord.allow_from = sc_json_parse_string_list(
             sc_json_get_array(dc, "allow_from"), &cfg->discord.allow_from_count);
+        cfg->discord.tools = sc_json_parse_string_list(
+            sc_json_get_array(dc, "tools"), &cfg->discord.tool_count);
     }
 
     const cJSON *irc = sc_json_get_object(channels, "irc");
@@ -886,6 +905,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
             sc_json_get_array(irc, "join_channels"), &cfg->irc.join_channel_count);
         cfg->irc.allow_from = sc_json_parse_string_list(
             sc_json_get_array(irc, "allow_from"), &cfg->irc.allow_from_count);
+        cfg->irc.tools = sc_json_parse_string_list(
+            sc_json_get_array(irc, "tools"), &cfg->irc.tool_count);
     }
 
     const cJSON *slack = sc_json_get_object(channels, "slack");
@@ -896,6 +917,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->slack.dm_policy, slack, "dm_policy");
         cfg->slack.allow_from = sc_json_parse_string_list(
             sc_json_get_array(slack, "allow_from"), &cfg->slack.allow_from_count);
+        cfg->slack.tools = sc_json_parse_string_list(
+            sc_json_get_array(slack, "tools"), &cfg->slack.tool_count);
     }
 
     const cJSON *webcfg = sc_json_get_object(channels, "web");
@@ -910,6 +933,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->web.dm_policy, webcfg, "dm_policy");
         cfg->web.allow_from = sc_json_parse_string_list(
             sc_json_get_array(webcfg, "allow_from"), &cfg->web.allow_from_count);
+        cfg->web.tools = sc_json_parse_string_list(
+            sc_json_get_array(webcfg, "tools"), &cfg->web.tool_count);
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -926,6 +951,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
         override_str_field(&cfg->x.dm_policy, xcfg, "dm_policy");
         cfg->x.allow_from = sc_json_parse_string_list(
             sc_json_get_array(xcfg, "allow_from"), &cfg->x.allow_from_count);
+        cfg->x.tools = sc_json_parse_string_list(
+            sc_json_get_array(xcfg, "tools"), &cfg->x.tool_count);
     }
 }
 
@@ -1453,7 +1480,14 @@ char *sc_config_workspace_path(const sc_config_t *cfg)
 
 char *sc_config_get_path(void)
 {
-    return sc_expand_home("~/.smolclaw/config.json");
+    char *home = sc_get_home_dir();
+    if (!home) return NULL;
+    size_t len = strlen(home);
+    char *path = malloc(len + sizeof("/config.json"));
+    if (!path) { free(home); return NULL; }
+    sprintf(path, "%s/config.json", home);
+    free(home);
+    return path;
 }
 
 void sc_config_free(sc_config_t *cfg)

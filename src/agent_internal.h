@@ -63,16 +63,21 @@ typedef struct {
     /* Per-turn tool result cache for read-only tools */
     sc_cache_entry_t tool_cache[SC_TOOL_CACHE_MAX];
     int tool_cache_count;
+
+    /* LLM failure tracking — populated when all providers fail */
+    char *failure_reason;  /* malloc'd, freed by caller */
 } sc_turn_ctx_t;
 
 /* ---------- agent_turn.c ---------- */
 
-/* Run the LLM iteration loop (tool calls + fallbacks). Returns final content. */
+/* Run the LLM iteration loop (tool calls + fallbacks). Returns final content.
+ * If out_failure_reason is non-NULL and the LLM fails, a human-readable
+ * error string is returned (caller must free). */
 char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            const char *model, sc_llm_message_t *messages,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
-                           int *out_iterations);
+                           int *out_iterations, char **out_failure_reason);
 
 /* ---------- agent_session.c ---------- */
 
