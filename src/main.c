@@ -376,7 +376,15 @@ static void cmd_pairing(int argc, char **argv)
     const char *action = argv[2];
     const char *channel = argv[3];
 
-    char *store_dir = sc_expand_home("~/.smolclaw/pairing");
+    char *home = sc_get_home_dir();
+    if (!home) {
+        fprintf(stderr, "Error: could not determine smolclaw home directory\n");
+        return;
+    }
+    char *store_dir = malloc(strlen(home) + sizeof("/pairing"));
+    if (!store_dir) { free(home); return; }
+    sprintf(store_dir, "%s/pairing", home);
+    free(home);
     sc_pairing_store_t *ps = sc_pairing_store_new(channel, store_dir);
     free(store_dir);
 
@@ -1064,10 +1072,21 @@ static void doctor_check_provider(const sc_config_t *cfg, int *pass, int *fail)
     else if (strcmp(provider, "ollama") == 0) api_key = "not_required";
     else if (strcmp(provider, "vllm") == 0) api_key = cfg->vllm.api_key;
 
-    if (api_key && api_key[0])
-        DOC_PASS(pass, "API key: %s (set)", provider);
-    else
+    if (api_key && api_key[0]) {
+        if (strncmp(api_key, "vault://", 8) == 0) {
+#if SC_ENABLE_VAULT
+            DOC_FAIL(fail, "API key: %s — vault ref '%s' unresolved "
+                     "(check vault password and vault key)", provider, api_key + 8);
+#else
+            DOC_FAIL(fail, "API key: %s — vault:// ref but vault feature disabled "
+                     "(rebuild with SC_ENABLE_VAULT=ON or use literal key)", provider);
+#endif
+        } else {
+            DOC_PASS(pass, "API key: %s (set)", provider);
+        }
+    } else {
         DOC_FAIL(fail, "API key: %s (not set)", provider);
+    }
 }
 
 /* Check channel configs */

@@ -28,7 +28,7 @@
 
 static char *get_smolclaw_dir(void)
 {
-    return sc_expand_home("~/.smolclaw");
+    return sc_get_home_dir();
 }
 
 static char *get_backup_root(void)

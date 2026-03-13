@@ -527,7 +527,14 @@ int sc_vault_exists(const char *path)
 
 char *sc_vault_get_path(void)
 {
-    return sc_expand_home("~/.smolclaw/vault.enc");
+    char *home = sc_get_home_dir();
+    if (!home) return NULL;
+    size_t len = strlen(home);
+    char *path = malloc(len + sizeof("/vault.enc"));
+    if (!path) { free(home); return NULL; }
+    sprintf(path, "%s/vault.enc", home);
+    free(home);
+    return path;
 }
 
 char *sc_vault_prompt_password(const char *prompt)

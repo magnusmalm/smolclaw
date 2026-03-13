@@ -16,6 +16,10 @@ char *sc_trim(const char *s);
 /* Expand ~ to home directory. Returns newly allocated string. */
 char *sc_expand_home(const char *path);
 
+/* Get smolclaw home directory. Checks SMOLCLAW_HOME env var first,
+ * falls back to ~/.smolclaw. Returns newly allocated string. */
+char *sc_get_home_dir(void);
+
 /* Validate that path is within workspace if restrict is true.
  * Resolves relative paths against workspace.
  * Returns newly allocated absolute path, or NULL on error. */

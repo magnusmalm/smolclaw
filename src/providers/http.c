@@ -303,7 +303,7 @@ static sc_llm_response_t *parse_response(const char *body)
     const char *content = sc_json_get_string(message, "content", NULL);
     if (!content || !content[0])
         content = sc_json_get_string(message, "reasoning_content", NULL);
-    resp->content = sc_strdup(content);
+    resp->content = sc_strdup(content ? content : "");
 
     /* Finish reason */
     const char *fr = sc_json_get_string(choice0, "finish_reason", "stop");

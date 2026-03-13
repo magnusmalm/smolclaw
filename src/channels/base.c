@@ -33,7 +33,14 @@ void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
     /* DM policy + pairing store */
     ch->dm_policy = sc_dm_policy_from_str(dm_policy);
     if (ch->dm_policy == SC_DM_POLICY_PAIRING) {
-        char *dir = sc_expand_home("~/.smolclaw/pairing");
+        char *home = sc_get_home_dir();
+        char *dir = NULL;
+        if (home) {
+            size_t hlen = strlen(home);
+            dir = malloc(hlen + sizeof("/pairing"));
+            if (dir) sprintf(dir, "%s/pairing", home);
+            free(home);
+        }
         ch->pairing_store = sc_pairing_store_new(channel_name, dir);
         free(dir);
     }

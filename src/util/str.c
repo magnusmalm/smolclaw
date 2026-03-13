@@ -107,6 +107,14 @@ char *sc_expand_home(const char *path)
     return out;
 }
 
+char *sc_get_home_dir(void)
+{
+    const char *override = getenv("SMOLCLAW_HOME");
+    if (override && override[0])
+        return sc_strdup(override);
+    return sc_expand_home("~/.smolclaw");
+}
+
 char *sc_validate_path(const char *path, const char *workspace, int restrict_to_workspace)
 {
     if (!path || !workspace)
