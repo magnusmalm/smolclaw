@@ -398,8 +398,8 @@ static sc_llm_response_t *call_llm_with_fallback(
     cJSON_AddNumberToObject(options, "max_tokens", agent->context_window);
     cJSON_AddNumberToObject(options, "temperature", agent->temperature);
 
-    SC_LOG_INFO("agent", "Calling LLM (iteration %d, %d messages)...",
-                iteration, msgs_len);
+    SC_LOG_INFO("agent", "Calling LLM %s via %s (iteration %d, %d messages)...",
+                model, provider->name, iteration, msgs_len);
     struct timespec llm_t0, llm_t1;
     clock_gettime(CLOCK_MONOTONIC, &llm_t0);
 
@@ -413,8 +413,8 @@ static sc_llm_response_t *call_llm_with_fallback(
                        + (llm_t1.tv_nsec - llm_t0.tv_nsec) / 1e9;
 
     if (is_valid_response(resp)) {
-        SC_LOG_INFO("agent", "LLM responded in %.1fs (iteration %d)",
-                    llm_elapsed, iteration);
+        SC_LOG_INFO("agent", "LLM %s responded in %.1fs (iteration %d)",
+                    model, llm_elapsed, iteration);
         char audit_buf[256];
         snprintf(audit_buf, sizeof(audit_buf),
                  "model=%s prompt=%d completion=%d total=%d",
@@ -427,12 +427,14 @@ static sc_llm_response_t *call_llm_with_fallback(
         return resp;
     }
 
-    SC_LOG_WARN("agent", "Primary LLM call failed after %.1fs at iteration %d (HTTP %d)",
-                llm_elapsed, iteration, resp ? resp->http_status : 0);
+    int primary_http = resp ? resp->http_status : 0;
+    SC_LOG_WARN("agent", "Primary LLM %s (%s) failed after %.1fs at iteration %d (HTTP %d)",
+                model, provider->name, llm_elapsed, iteration, primary_http);
     sc_audit_log_ext("llm", model, 1, (long)(llm_elapsed * 1000),
                      tc->channel, tc->chat_id, "llm_fail");
     if (resp) { sc_llm_response_free(resp); resp = NULL; }
 
+    int fallback_http[8] = {0};
     for (int f = 0; f < agent->fallback_count; f++) {
         SC_LOG_INFO("agent", "Calling fallback LLM '%s'...",
                     agent->fallback_models[f]);
@@ -467,12 +469,32 @@ static sc_llm_response_t *call_llm_with_fallback(
             tc->completion_tokens += resp->usage.completion_tokens;
             return resp;
         }
+        if (f < 8) fallback_http[f] = resp ? resp->http_status : 0;
         if (resp) { sc_llm_response_free(resp); resp = NULL; }
     }
 
     SC_LOG_ERROR("agent", "All LLM providers failed at iteration %d", iteration);
     sc_audit_log_ext("llm", "all_providers_failed", 1, 0,
                      tc->channel, tc->chat_id, "llm_fail");
+
+    /* Build failure reason for user-facing message */
+    {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "LLM error: %s returned HTTP %d", model, primary_http);
+        for (int f = 0; f < agent->fallback_count && f < 8; f++)
+            sc_strbuf_appendf(&sb, ", fallback '%s' HTTP %d",
+                              agent->fallback_models[f], fallback_http[f]);
+        sc_strbuf_append(&sb, ".");
+        int all_401 = (primary_http == 401);
+        for (int f = 0; f < agent->fallback_count && f < 8 && all_401; f++)
+            if (fallback_http[f] != 401) all_401 = 0;
+        if (all_401)
+            sc_strbuf_append(&sb, " Check API key configuration.");
+        free(tc->failure_reason);
+        tc->failure_reason = sc_strbuf_finish(&sb);
+    }
+
     return NULL;
 }
 
@@ -625,7 +647,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            const char *model, sc_llm_message_t *messages,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
-                           int *out_iterations)
+                           int *out_iterations, char **out_failure_reason)
 {
     sc_audit_set_model(model);
 
@@ -664,8 +686,20 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     /* Intent threading: extract the user's original question */
     tc.user_intent = extract_user_intent(tc.msgs, tc.msgs_len);
 
+    /* Look up per-channel tool allowlist */
+    char **ch_tools = NULL;
+    int ch_tool_count = 0;
+    for (int i = 0; i < agent->channel_tools_count; i++) {
+        if (channel && strcmp(agent->channel_tools[i].channel, channel) == 0) {
+            ch_tools = agent->channel_tools[i].tools;
+            ch_tool_count = agent->channel_tools[i].tool_count;
+            break;
+        }
+    }
+
     int tool_count = 0;
-    sc_tool_definition_t *tool_defs = sc_tool_registry_to_defs(agent->tools, &tool_count);
+    sc_tool_definition_t *tool_defs = sc_tool_registry_to_defs_filtered(
+        agent->tools, &tool_count, ch_tools, ch_tool_count);
 
     while (iteration < agent->max_iterations) {
         iteration++;
@@ -673,8 +707,8 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         SC_LOG_DEBUG("agent", "LLM iteration %d/%d (messages=%d, tools=%d)",
                      iteration, agent->max_iterations, tc.msgs_len, tool_count);
 
-        emit_progress(agent, &tc, "[%d/%d] Calling LLM (%d messages)...",
-                      iteration, agent->max_iterations, tc.msgs_len);
+        emit_progress(agent, &tc, "[%d/%d] Calling %s (%d messages)...",
+                      iteration, agent->max_iterations, model, tc.msgs_len);
 
         sc_llm_response_t *resp = call_llm_with_fallback(
             agent, provider, model, tc.msgs, tc.msgs_len,
@@ -744,5 +778,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     sc_tool_definitions_free(tool_defs, tool_count);
 
     *out_iterations = iteration;
+    if (out_failure_reason)
+        *out_failure_reason = tc.failure_reason;
+    else
+        free(tc.failure_reason);
     return final_content;
 }

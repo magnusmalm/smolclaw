@@ -84,12 +84,14 @@ static void resolve_from_entry(const sc_config_t *cfg, const provider_entry_t *e
 }
 
 /* Resolve credentials for an explicit provider name.
- * Returns 1 if resolved, 0 otherwise. */
+ * Returns 1 if resolved, 0 otherwise.
+ * If matched_label is non-NULL, sets it to the canonical provider name. */
 static int resolve_by_provider_name(const sc_config_t *cfg,
                                     const char *provider_name,
                                     const char **api_key, const char **api_base,
                                     const char **proxy, int *use_claude,
-                                    int *allow_no_key)
+                                    int *allow_no_key,
+                                    const char **matched_label)
 {
     if (!provider_name || provider_name[0] == '\0') return 0;
 
@@ -98,6 +100,8 @@ static int resolve_by_provider_name(const sc_config_t *cfg,
             if (strcasecmp(provider_name, provider_table[i].names[j]) == 0) {
                 resolve_from_entry(cfg, &provider_table[i], api_key, api_base,
                                     proxy, use_claude, allow_no_key);
+                if (matched_label)
+                    *matched_label = provider_table[i].names[0];
                 return 1;
             }
         }
@@ -106,11 +110,13 @@ static int resolve_by_provider_name(const sc_config_t *cfg,
 }
 
 /* Resolve credentials by detecting provider from model name.
- * Returns 1 if resolved, 0 otherwise. */
+ * Returns 1 if resolved, 0 otherwise.
+ * If matched_label is non-NULL, sets it to the canonical provider name. */
 static int resolve_by_model_name(const sc_config_t *cfg, const char *model,
                                  const char **api_key, const char **api_base,
                                  const char **proxy, int *use_claude,
-                                 int *allow_no_key)
+                                 int *allow_no_key,
+                                 const char **matched_label)
 {
     if (!model || model[0] == '\0') return 0;
 
@@ -137,6 +143,8 @@ static int resolve_by_model_name(const sc_config_t *cfg, const char *model,
         if (available) {
             resolve_from_entry(cfg, e, api_key, api_base, proxy,
                                 use_claude, allow_no_key);
+            if (matched_label)
+                *matched_label = e->names[0];
             return 1;
         }
         break; /* Matched but not configured — fall through to openrouter */
@@ -145,7 +153,7 @@ static int resolve_by_model_name(const sc_config_t *cfg, const char *model,
     /* Last resort: try openrouter if available */
     if (cfg->openrouter.api_key && cfg->openrouter.api_key[0] != '\0') {
         resolve_by_provider_name(cfg, "openrouter", api_key, api_base, proxy,
-                                  use_claude, allow_no_key);
+                                  use_claude, allow_no_key, matched_label);
         SC_LOG_INFO(LOG_TAG, "Falling back to OpenRouter for model '%s'", model);
         return 1;
     }
@@ -159,7 +167,8 @@ static sc_provider_t *create_provider_instance(const char *api_key,
                                                const char *proxy,
                                                int use_claude,
                                                const char *model,
-                                               int allow_no_key)
+                                               int allow_no_key,
+                                               const char *provider_label)
 {
     if (!allow_no_key && (!api_key || api_key[0] == '\0')) {
         SC_LOG_ERROR(LOG_TAG, "No API key configured for model '%s'",
@@ -172,15 +181,21 @@ static sc_provider_t *create_provider_instance(const char *api_key,
         return NULL;
     }
 
+    sc_provider_t *p;
     if (use_claude) {
         SC_LOG_INFO(LOG_TAG, "Using Claude (Anthropic) provider for model '%s'",
                     model ? model : "(default)");
-        return sc_provider_claude_new(api_key, api_base);
+        p = sc_provider_claude_new(api_key, api_base);
+    } else {
+        SC_LOG_INFO(LOG_TAG, "Using HTTP (OpenAI-compat) provider for model '%s' (base=%s)",
+                    model ? model : "(default)", api_base);
+        p = sc_provider_http_new(api_key, api_base, proxy);
     }
 
-    SC_LOG_INFO(LOG_TAG, "Using HTTP (OpenAI-compat) provider for model '%s' (base=%s)",
-                model ? model : "(default)", api_base);
-    return sc_provider_http_new(api_key, api_base, proxy);
+    if (p && provider_label)
+        p->name = provider_label;
+
+    return p;
 }
 
 const char *sc_model_strip_prefix(const char *model)
@@ -216,12 +231,13 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
     const char *proxy = NULL;
     int use_claude = 0;
     int allow_no_key = 0;
+    const char *label = NULL;
 
     /* 1. Explicit provider name from config */
     if (provider_name && provider_name[0] != '\0') {
         if (!resolve_by_provider_name(cfg, provider_name,
                                       &api_key, &api_base, &proxy, &use_claude,
-                                      &allow_no_key)) {
+                                      &allow_no_key, &label)) {
             SC_LOG_WARN(LOG_TAG, "Unknown provider name '%s', trying as HTTP",
                         provider_name);
         }
@@ -239,7 +255,7 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
                 prefix[prefix_len] = '\0';
                 resolve_by_provider_name(cfg, prefix,
                                          &api_key, &api_base, &proxy, &use_claude,
-                                         &allow_no_key);
+                                         &allow_no_key, &label);
                 free(prefix);
             }
         }
@@ -248,10 +264,10 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
     /* 3. Fallback: detect from model name */
     if (!api_key && !api_base) {
         resolve_by_model_name(cfg, model, &api_key, &api_base, &proxy, &use_claude,
-                              &allow_no_key);
+                              &allow_no_key, &label);
     }
 
-    /* 3. Validate and create */
+    /* 4. Validate and create */
     if (!allow_no_key && (!api_key || api_key[0] == '\0')) {
         SC_LOG_ERROR(LOG_TAG, "No API key configured (provider=%s, model=%s)",
                      provider_name ? provider_name : "(auto)",
@@ -267,7 +283,7 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
     }
 
     return create_provider_instance(api_key, api_base, proxy, use_claude, model,
-                                    allow_no_key);
+                                    allow_no_key, label);
 }
 
 sc_provider_t *sc_provider_create_for_model(const sc_config_t *cfg, const char *model)
@@ -282,6 +298,7 @@ sc_provider_t *sc_provider_create_for_model(const sc_config_t *cfg, const char *
     const char *proxy = NULL;
     int use_claude = 0;
     int allow_no_key = 0;
+    const char *label = NULL;
 
     /* Check for "provider/model" prefix syntax (e.g. "groq/llama-3.3-70b") */
     const char *slash = strchr(model, '/');
@@ -293,7 +310,7 @@ sc_provider_t *sc_provider_create_for_model(const sc_config_t *cfg, const char *
             prefix[prefix_len] = '\0';
             resolve_by_provider_name(cfg, prefix,
                                      &api_key, &api_base, &proxy, &use_claude,
-                                     &allow_no_key);
+                                     &allow_no_key, &label);
             free(prefix);
         }
     }
@@ -301,9 +318,9 @@ sc_provider_t *sc_provider_create_for_model(const sc_config_t *cfg, const char *
     /* Fall back to model-name detection */
     if (!api_key && !api_base) {
         resolve_by_model_name(cfg, model, &api_key, &api_base, &proxy, &use_claude,
-                              &allow_no_key);
+                              &allow_no_key, &label);
     }
 
     return create_provider_instance(api_key, api_base, proxy, use_claude, model,
-                                    allow_no_key);
+                                    allow_no_key, label);
 }
