@@ -148,7 +148,10 @@ Config lives at `~/.smolclaw/config.json`. Every field can be overridden via env
   "agents": {
     "defaults": {
       "model": "claude-sonnet-4-5-20250929",
-      "provider": "anthropic"
+      "provider": "anthropic",
+      "max_tokens": 8192,
+      "context_window": 8192,
+      "temperature": 0.7
     }
   },
   "providers": {
@@ -163,6 +166,30 @@ Config lives at `~/.smolclaw/config.json`. Every field can be overridden via env
   }
 }
 ```
+
+- `max_tokens` — maximum output tokens per LLM response
+- `context_window` — provider-level context window size (e.g. Ollama `num_ctx`). Set to 0 or omit to use the provider's default. Useful for controlling VRAM usage with local models.
+
+### Per-channel tool allowlists
+
+Each channel can specify which tools the LLM sees, reducing prompt token overhead:
+
+```json
+{
+  "channels": {
+    "irc": {
+      "enabled": true,
+      "tools": ["web_search", "memory_read", "memory_write", "exec"]
+    },
+    "web": {
+      "enabled": true,
+      "tools": ["web_search", "web_fetch", "file_read", "file_write", "exec", "git"]
+    }
+  }
+}
+```
+
+When `tools` is omitted or empty, all registered tools are available (the default). This is particularly useful for local models where each tool definition adds ~150 prompt tokens.
 
 ### Encrypted vault
 
