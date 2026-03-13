@@ -397,6 +397,8 @@ static sc_llm_response_t *call_llm_with_fallback(
     cJSON *options = cJSON_CreateObject();
     cJSON_AddNumberToObject(options, "max_tokens", agent->context_window);
     cJSON_AddNumberToObject(options, "temperature", agent->temperature);
+    if (agent->provider_ctx_window > 0)
+        cJSON_AddNumberToObject(options, "num_ctx", agent->provider_ctx_window);
 
     SC_LOG_INFO("agent", "Calling LLM %s via %s (iteration %d, %d messages)...",
                 model, provider->name, iteration, msgs_len);

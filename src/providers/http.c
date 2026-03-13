@@ -382,6 +382,14 @@ static cJSON *build_chat_body(const char *model,
         double temp = sc_json_get_double(options, "temperature", -1.0);
         if (temp >= 0.0)
             cJSON_AddNumberToObject(body, "temperature", temp);
+
+        /* Provider-specific context window (e.g. Ollama num_ctx).
+         * Non-Ollama providers will ignore unknown fields. */
+        int num_ctx = sc_json_get_int(options, "num_ctx", 0);
+        if (num_ctx > 0) {
+            cJSON *opts = cJSON_AddObjectToObject(body, "options");
+            cJSON_AddNumberToObject(opts, "num_ctx", num_ctx);
+        }
     }
 
     return body;

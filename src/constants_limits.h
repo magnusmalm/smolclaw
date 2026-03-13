@@ -5,6 +5,7 @@
 #define SC_DEFAULT_WORKSPACE    "~/.smolclaw/workspace"
 #define SC_DEFAULT_MODEL        "claude-sonnet-4-5-20250929"
 #define SC_DEFAULT_MAX_TOKENS   8192
+#define SC_DEFAULT_CONTEXT_WINDOW 0  /* 0 = use provider default */
 #define SC_DEFAULT_TEMPERATURE  0.7
 #define SC_DEFAULT_MAX_ITERATIONS 20
 #define SC_DEFAULT_HEARTBEAT_INTERVAL 30 /* minutes */

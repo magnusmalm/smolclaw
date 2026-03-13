@@ -27,6 +27,7 @@ typedef struct sc_agent {
     char *workspace;
     char *model;
     int context_window;
+    int provider_ctx_window;   /* provider-level context window (e.g. Ollama num_ctx), 0 = default */
     double temperature;
     int max_iterations;
     int session_summary_threshold;

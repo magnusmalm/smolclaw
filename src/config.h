@@ -154,6 +154,7 @@ typedef struct {
     char **fallback_models;
     int fallback_model_count;
     int max_tokens;
+    int context_window;        /* provider context window (e.g. Ollama num_ctx), 0 = default */
     double temperature;
     int max_tool_iterations;
     int session_summary_threshold;

@@ -582,6 +582,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->workspace = workspace;
     agent->model = sc_strdup(sc_model_strip_prefix(cfg->model));
     agent->context_window = cfg->max_tokens;
+    agent->provider_ctx_window = cfg->context_window;
     agent->temperature = cfg->temperature;
     agent->max_iterations = cfg->max_tool_iterations;
     agent->session_summary_threshold = cfg->session_summary_threshold;
@@ -771,6 +772,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
     agent->context_window = cfg->max_tokens;
+    agent->provider_ctx_window = cfg->context_window;
 
     if (cfg->allowed_tools && cfg->allowed_tool_count > 0) {
         sc_tool_registry_set_allowed(agent->tools, cfg->allowed_tools,

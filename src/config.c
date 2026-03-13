@@ -459,6 +459,7 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_str(&cfg->provider,   "SMOLCLAW_AGENTS_DEFAULTS_PROVIDER");
     env_override_str(&cfg->model,      "SMOLCLAW_AGENTS_DEFAULTS_MODEL");
     env_override_int(&cfg->max_tokens, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOKENS");
+    env_override_int(&cfg->context_window, "SMOLCLAW_AGENTS_DEFAULTS_CONTEXT_WINDOW");
     env_override_double(&cfg->temperature, "SMOLCLAW_AGENTS_DEFAULTS_TEMPERATURE");
     env_override_int(&cfg->max_tool_iterations, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS");
     env_override_bool(&cfg->restrict_to_workspace, "SMOLCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE");
@@ -669,6 +670,7 @@ sc_config_t *sc_config_default(void)
     cfg->provider             = sc_strdup("");
     cfg->model                = sc_strdup(SC_DEFAULT_MODEL);
     cfg->max_tokens           = SC_DEFAULT_MAX_TOKENS;
+    cfg->context_window       = SC_DEFAULT_CONTEXT_WINDOW;
     cfg->temperature          = SC_DEFAULT_TEMPERATURE;
     cfg->max_tool_iterations  = SC_DEFAULT_MAX_ITERATIONS;
     cfg->session_summary_threshold = SC_SESSION_SUMMARY_THRESHOLD;
@@ -796,6 +798,7 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->restrict_to_workspace = sc_json_get_bool(defaults, "restrict_to_workspace",
                                                    cfg->restrict_to_workspace);
     cfg->max_tokens          = sc_json_get_int(defaults, "max_tokens", cfg->max_tokens);
+    cfg->context_window      = sc_json_get_int(defaults, "context_window", cfg->context_window);
     cfg->temperature         = sc_json_get_double(defaults, "temperature", cfg->temperature);
     cfg->max_tool_iterations = sc_json_get_int(defaults, "max_tool_iterations",
                                                 cfg->max_tool_iterations);
@@ -1221,6 +1224,8 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
         }
     }
     cJSON_AddNumberToObject(defaults, "max_tokens", cfg->max_tokens);
+    if (cfg->context_window > 0)
+        cJSON_AddNumberToObject(defaults, "context_window", cfg->context_window);
     cJSON_AddNumberToObject(defaults, "temperature", cfg->temperature);
     cJSON_AddNumberToObject(defaults, "max_tool_iterations", cfg->max_tool_iterations);
     cJSON_AddNumberToObject(defaults, "session_summary_threshold", cfg->session_summary_threshold);
