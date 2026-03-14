@@ -27,6 +27,7 @@
 #include "audit.h"
 #include "providers/factory.h"
 #include "util/str.h"
+#include "util/curl_common.h"
 
 #if SC_ENABLE_CRON
 #include "cron/service.h"
@@ -179,7 +180,8 @@ static void print_help(void)
     printf("  pairing     Manage channel pairing requests\n");
     printf("  cost        View token usage and costs\n");
     printf("  doctor      Validate configuration and dependencies\n");
-    printf("              --config <path>  Validate a specific config file\n");
+    printf("  selftest    Run doctor checks + LLM round-trip, exit 0/1\n");
+    printf("              --config <path>  Use a specific config file\n");
 #if SC_ENABLE_VAULT
     printf("  vault       Manage encrypted secret vault\n");
 #endif
@@ -1089,6 +1091,124 @@ static void doctor_check_provider(const sc_config_t *cfg, int *pass, int *fail)
     }
 }
 
+/* Check SMOLCLAW_HOME / ~/.smolclaw directory */
+static void doctor_check_home(int *pass, int *fail)
+{
+    char *home = sc_get_home_dir();
+    if (!home) {
+        DOC_FAIL(fail, "Home directory — could not determine path");
+        return;
+    }
+
+    struct stat st;
+    if (stat(home, &st) != 0) {
+        DOC_FAIL(fail, "Home directory (%s) — does not exist", home);
+        free(home);
+        return;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        DOC_FAIL(fail, "Home directory (%s) — not a directory", home);
+        free(home);
+        return;
+    }
+
+    int perms = st.st_mode & 0777;
+    if ((perms & 0077) != 0)
+        DOC_FAIL(fail, "Home directory (%s) — permissions %04o (should be 0700)",
+                 home, perms);
+    else
+        DOC_PASS(pass, "Home directory (%s, %04o)", home, perms);
+
+    const char *env = getenv("SMOLCLAW_HOME");
+    if (env && env[0])
+        DOC_PASS(pass, "  SMOLCLAW_HOME=%s", env);
+
+    free(home);
+}
+
+/* Check provider API connectivity (TCP connect only, no HTTP request) */
+static void doctor_check_connectivity(const sc_config_t *cfg, int *pass, int *fail)
+{
+    const char *provider = cfg->provider;
+    if (!provider || !provider[0]) provider = "anthropic";
+
+    /* Get base URL from config or provider defaults */
+    const char *base_url = NULL;
+    sc_provider_config_t *pcfg = NULL;
+
+    if (strcmp(provider, "anthropic") == 0) pcfg = (sc_provider_config_t *)&cfg->anthropic;
+    else if (strcmp(provider, "openai") == 0) pcfg = (sc_provider_config_t *)&cfg->openai;
+    else if (strcmp(provider, "openrouter") == 0) pcfg = (sc_provider_config_t *)&cfg->openrouter;
+    else if (strcmp(provider, "groq") == 0) pcfg = (sc_provider_config_t *)&cfg->groq;
+    else if (strcmp(provider, "gemini") == 0) pcfg = (sc_provider_config_t *)&cfg->gemini;
+    else if (strcmp(provider, "deepseek") == 0) pcfg = (sc_provider_config_t *)&cfg->deepseek;
+    else if (strcmp(provider, "xai") == 0) pcfg = (sc_provider_config_t *)&cfg->xai;
+    else if (strcmp(provider, "zhipu") == 0) pcfg = (sc_provider_config_t *)&cfg->zhipu;
+    else if (strcmp(provider, "ollama") == 0) pcfg = (sc_provider_config_t *)&cfg->ollama;
+    else if (strcmp(provider, "vllm") == 0) pcfg = (sc_provider_config_t *)&cfg->vllm;
+
+    if (pcfg && pcfg->api_base && pcfg->api_base[0])
+        base_url = pcfg->api_base;
+
+    /* Fall back to known defaults */
+    if (!base_url) {
+        if (strcmp(provider, "anthropic") == 0) base_url = "https://api.anthropic.com";
+        else if (strcmp(provider, "openai") == 0) base_url = "https://api.openai.com";
+        else if (strcmp(provider, "openrouter") == 0) base_url = "https://openrouter.ai";
+        else if (strcmp(provider, "groq") == 0) base_url = "https://api.groq.com";
+        else if (strcmp(provider, "gemini") == 0) base_url = "https://generativelanguage.googleapis.com";
+        else if (strcmp(provider, "deepseek") == 0) base_url = "https://api.deepseek.com";
+        else if (strcmp(provider, "xai") == 0) base_url = "https://api.x.ai";
+        else if (strcmp(provider, "zhipu") == 0) base_url = "https://open.bigmodel.cn";
+        else if (strcmp(provider, "ollama") == 0) base_url = "http://localhost:11434";
+    }
+
+    if (!base_url) {
+        DOC_FAIL(fail, "Connectivity: %s — no base URL known", provider);
+        return;
+    }
+
+    CURL *curl = sc_curl_init();
+    if (!curl) {
+        DOC_FAIL(fail, "Connectivity: %s — curl init failed", provider);
+        return;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, base_url);
+    curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res == CURLE_OK)
+        DOC_PASS(pass, "Connectivity: %s (%s) — reachable", provider, base_url);
+    else
+        DOC_FAIL(fail, "Connectivity: %s (%s) — %s",
+                 provider, base_url, curl_easy_strerror(res));
+}
+
+/* Check fallback model configuration */
+static void doctor_check_fallbacks(const sc_config_t *cfg, int *pass, int *fail)
+{
+    if (cfg->fallback_model_count > 0) {
+        sc_strbuf_t sb;
+        sc_strbuf_init(&sb);
+        sc_strbuf_appendf(&sb, "Fallback models: %d configured (", cfg->fallback_model_count);
+        for (int i = 0; i < cfg->fallback_model_count; i++) {
+            if (i > 0) sc_strbuf_append(&sb, ", ");
+            sc_strbuf_append(&sb, cfg->fallback_models[i]);
+        }
+        sc_strbuf_append(&sb, ")");
+        char *msg = sc_strbuf_finish(&sb);
+        DOC_PASS(pass, "%s", msg);
+        free(msg);
+    } else {
+        DOC_FAIL(fail, "Fallback models: none configured — single point of failure");
+    }
+}
+
 /* Check channel configs */
 static void doctor_check_channels(const sc_config_t *cfg, int *pass, int *fail)
 {
@@ -1208,11 +1328,12 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
 }
 #endif
 
-static int cmd_doctor(int argc, char **argv)
+/* Run all doctor checks. Returns loaded config (caller must free) or NULL.
+ * Populates *out_pass and *out_fail with check counts. */
+static sc_config_t *run_doctor_checks(int argc, char **argv,
+                                       int *out_pass, int *out_fail)
 {
     int pass = 0, fail = 0;
-
-    printf("%s doctor\n", SC_NAME);
 
     /* Parse --config <path> flag */
     char *config_path = NULL;
@@ -1228,8 +1349,8 @@ static int cmd_doctor(int argc, char **argv)
     /* 1. Config file */
     if (!config_path) {
         DOC_FAIL(&fail, "Could not determine config path");
-        printf("\n  %d passed, %d failed\n", pass, fail);
-        return 1;
+        *out_pass = pass; *out_fail = fail;
+        return NULL;
     }
 
     sc_config_t *cfg = sc_config_load(config_path);
@@ -1238,31 +1359,41 @@ static int cmd_doctor(int argc, char **argv)
     } else {
         DOC_FAIL(&fail, "Config file (%s) — not found or invalid", config_path);
         free(config_path);
-        printf("\n  %d passed, %d failed\n", pass, fail);
-        return 1;
+        *out_pass = pass; *out_fail = fail;
+        return NULL;
     }
+    free(config_path);
 
-    /* 2. Workspace */
+    /* 2. Home directory */
+    doctor_check_home(&pass, &fail);
+
+    /* 3. Workspace */
     doctor_check_workspace(cfg, &pass, &fail);
 
-    /* 3. Model */
+    /* 4. Model */
     if (cfg->model && cfg->model[0])
         DOC_PASS(&pass, "Model: %s", cfg->model);
     else
         DOC_FAIL(&fail, "Model — not configured");
 
-    /* 4. Provider API key */
+    /* 5. Provider API key */
     doctor_check_provider(cfg, &pass, &fail);
 
-    /* 5. Channel configs */
+    /* 6. Fallback models */
+    doctor_check_fallbacks(cfg, &pass, &fail);
+
+    /* 7. Provider connectivity */
+    doctor_check_connectivity(cfg, &pass, &fail);
+
+    /* 8. Channel configs */
     doctor_check_channels(cfg, &pass, &fail);
 
-    /* 6. Vault */
+    /* 9. Vault */
 #if SC_ENABLE_VAULT
     doctor_check_vault(cfg, &pass, &fail);
 #endif
 
-    /* 7. Updater */
+    /* 10. Updater */
 #if SC_ENABLE_UPDATER
     if (cfg->updater.enabled) {
         if (cfg->updater.manifest_url && cfg->updater.manifest_url[0])
@@ -1285,16 +1416,88 @@ static int cmd_doctor(int argc, char **argv)
     }
 #endif
 
-    /* 8. System info */
+    /* 11. System info */
     DOC_PASS(&pass, "libcurl %s", curl_version());
 #if SC_ENABLE_VAULT || SC_ENABLE_DISCORD || SC_ENABLE_IRC || SC_ENABLE_UPDATER
     DOC_PASS(&pass, "OpenSSL linked");
 #endif
 
-    printf("\n  %d passed, %d failed\n", pass, fail);
+    *out_pass = pass;
+    *out_fail = fail;
+    return cfg;
+}
 
+static int cmd_doctor(int argc, char **argv)
+{
+    int pass = 0, fail = 0;
+    printf("%s doctor\n", SC_NAME);
+
+    sc_config_t *cfg = run_doctor_checks(argc, argv, &pass, &fail);
+    printf("\n  %d passed, %d failed\n", pass, fail);
     sc_config_free(cfg);
-    free(config_path);
+    return fail > 0 ? 1 : 0;
+}
+
+static int cmd_selftest(int argc, char **argv)
+{
+    int pass = 0, fail = 0;
+    printf("%s selftest\n\n", SC_NAME);
+
+    printf("--- Doctor checks ---\n");
+    sc_config_t *cfg = run_doctor_checks(argc, argv, &pass, &fail);
+    if (!cfg) {
+        printf("\n  %d passed, %d failed\n", pass, fail);
+        printf("\nSelftest FAILED (config not loadable)\n");
+        return 1;
+    }
+
+    /* LLM round-trip test */
+    printf("\n--- LLM round-trip ---\n");
+    sc_provider_t *provider = sc_provider_create(cfg);
+    if (!provider) {
+        DOC_FAIL(&fail, "LLM: could not create provider");
+        printf("\n  %d passed, %d failed\n", pass, fail);
+        printf("\nSelftest FAILED\n");
+        sc_config_free(cfg);
+        return 1;
+    }
+
+    const char *model = cfg->model;
+    if (!model || !model[0]) model = provider->get_default_model(provider);
+
+    /* Build a minimal single-message conversation */
+    sc_llm_message_t msgs[1];
+    msgs[0].role = "user";
+    msgs[0].content = "Reply with exactly: OK";
+    msgs[0].tool_calls = NULL;
+    msgs[0].tool_call_count = 0;
+    msgs[0].tool_call_id = NULL;
+
+    cJSON *options = cJSON_CreateObject();
+    cJSON_AddNumberToObject(options, "max_tokens", 16);
+    cJSON_AddNumberToObject(options, "temperature", 0.0);
+
+    sc_llm_response_t *resp = provider->chat(
+        provider, msgs, 1, NULL, 0, model, options);
+    cJSON_Delete(options);
+
+    if (!resp) {
+        DOC_FAIL(&fail, "LLM: provider returned NULL (no response)");
+    } else if (resp->http_status != 200) {
+        DOC_FAIL(&fail, "LLM: HTTP %d from %s", resp->http_status, model);
+    } else if (!resp->content || !resp->content[0]) {
+        DOC_FAIL(&fail, "LLM: empty response from %s", model);
+    } else {
+        DOC_PASS(&pass, "LLM: %s responded (HTTP 200, %d tokens)",
+                 model, resp->usage.completion_tokens);
+    }
+
+    if (resp) sc_llm_response_free(resp);
+    if (provider->destroy) provider->destroy(provider);
+    sc_config_free(cfg);
+
+    printf("\n  %d passed, %d failed\n", pass, fail);
+    printf("\nSelftest %s\n", fail > 0 ? "FAILED" : "PASSED");
     return fail > 0 ? 1 : 0;
 }
 
@@ -1660,6 +1863,8 @@ int main(int argc, char **argv)
         return cmd_backup(argc, argv);
     } else if (strcmp(command, "doctor") == 0) {
         return cmd_doctor(argc, argv);
+    } else if (strcmp(command, "selftest") == 0) {
+        return cmd_selftest(argc, argv);
 #if SC_ENABLE_VAULT
     } else if (strcmp(command, "vault") == 0) {
         cmd_vault(argc, argv);

@@ -180,7 +180,7 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
 
     ret->content = sc_strdup(src->content);
     ret->finish_reason = sc_strdup(src->finish_reason);
-    ret->http_status = 200;
+    ret->http_status = src->http_status ? src->http_status : 200;
 
     if (src->tool_call_count > 0 && src->tool_calls) {
         ret->tool_calls = calloc((size_t)src->tool_call_count, sizeof(sc_tool_call_t));
@@ -834,6 +834,153 @@ static void test_rate_limiter_slot_eviction(void)
     destroy_test_agent(&ctx);
 }
 
+/* ======================================================================
+ * LLM failure reason propagation tests
+ * ====================================================================== */
+
+static void test_failure_reason_primary_only(void)
+{
+    /* Primary returns 401, no fallbacks → message should include HTTP 401 */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = NULL,
+        .finish_reason = NULL,
+        .http_status = 401,
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "test-fail-401");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "401") != NULL,
+           "Failure message should contain HTTP status 401");
+    ASSERT(strstr(response, "test-model") != NULL,
+           "Failure message should contain model name");
+    ASSERT(strstr(response, "Check API key") != NULL,
+           "Single 401 should suggest checking API key");
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_failure_reason_with_fallbacks(void)
+{
+    /* Primary 500, fallback 403 → message should list both */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    /* Set up a fallback provider that also fails (use 403 — non-transient) */
+    mock_provider_data_t fb_mpd = {0};
+    sc_provider_t fb_provider = {0};
+    fb_provider.name = "fallback-mock";
+    fb_provider.chat = mock_chat;
+    fb_provider.get_default_model = mock_get_model;
+    fb_provider.data = &fb_mpd;
+
+    fb_mpd.responses[0] = (sc_llm_response_t){
+        .content = NULL,
+        .finish_reason = NULL,
+        .http_status = 403,
+    };
+    fb_mpd.response_count = 1;
+
+    sc_provider_t *fb_ptrs[1] = { &fb_provider };
+    char *fb_models[1] = { "fallback-model" };
+    ctx.agent->fallback_providers = fb_ptrs;
+    ctx.agent->fallback_models = fb_models;
+    ctx.agent->fallback_count = 1;
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = NULL,
+        .finish_reason = NULL,
+        .http_status = 500,
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "test-fail-fb");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "500") != NULL,
+           "Should contain primary HTTP 500");
+    ASSERT(strstr(response, "403") != NULL,
+           "Should contain fallback HTTP 403");
+    ASSERT(strstr(response, "fallback-model") != NULL,
+           "Should contain fallback model name");
+    /* Mixed status codes → should NOT suggest API key check */
+    ASSERT(strstr(response, "Check API key") == NULL,
+           "Mixed errors should not suggest API key check");
+
+    /* Clean up fallback pointers before destroy */
+    ctx.agent->fallback_providers = NULL;
+    ctx.agent->fallback_models = NULL;
+    ctx.agent->fallback_count = 0;
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_failure_reason_all_401(void)
+{
+    /* Primary 401, fallback 401 → should suggest API key check */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    mock_provider_data_t fb_mpd = {0};
+    sc_provider_t fb_provider = {0};
+    fb_provider.name = "fallback-mock";
+    fb_provider.chat = mock_chat;
+    fb_provider.get_default_model = mock_get_model;
+    fb_provider.data = &fb_mpd;
+
+    fb_mpd.responses[0] = (sc_llm_response_t){
+        .content = NULL,
+        .finish_reason = NULL,
+        .http_status = 401,
+    };
+    fb_mpd.response_count = 1;
+
+    sc_provider_t *fb_ptrs[1] = { &fb_provider };
+    char *fb_models[1] = { "fb-model" };
+    ctx.agent->fallback_providers = fb_ptrs;
+    ctx.agent->fallback_models = fb_models;
+    ctx.agent->fallback_count = 1;
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = NULL,
+        .finish_reason = NULL,
+        .http_status = 401,
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "test-all-401");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "401") != NULL,
+           "Should contain HTTP 401");
+    ASSERT(strstr(response, "Check API key") != NULL,
+           "All 401s should suggest checking API key");
+
+    ctx.agent->fallback_providers = NULL;
+    ctx.agent->fallback_models = NULL;
+    ctx.agent->fallback_count = 0;
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_failure_reason_null_provider(void)
+{
+    /* Provider returns NULL (no response at all) → HTTP 0 in message */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    /* No responses → mock returns NULL */
+    ctx.mpd->response_count = 0;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "test-null");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "HTTP 0") != NULL || strstr(response, "LLM error") != NULL,
+           "Should contain error info for NULL response");
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -854,6 +1001,10 @@ int main(void)
     RUN_TEST(test_agent_hourly_rate_limit);
     RUN_TEST(test_rate_limiter_key_collision);
     RUN_TEST(test_rate_limiter_slot_eviction);
+    RUN_TEST(test_failure_reason_primary_only);
+    RUN_TEST(test_failure_reason_with_fallbacks);
+    RUN_TEST(test_failure_reason_all_401);
+    RUN_TEST(test_failure_reason_null_provider);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

@@ -74,6 +74,11 @@ static mcp_test_t mcp_test_start(sc_tool_registry_t *reg)
     pipe(in_pipe);
     pipe(out_pipe);
 
+    /* Flush stdout before fork — child inherits the FILE* buffer, and
+     * any pending data (e.g. from RUN_TEST's printf) would be written
+     * to the child's stdout pipe, corrupting the JSON stream. */
+    fflush(stdout);
+
     pid_t pid = fork();
     if (pid == 0) {
         /* Child: wire pipes and run server */

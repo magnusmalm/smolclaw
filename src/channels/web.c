@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include <time.h>
+
 #include <event2/event.h>
 #include <event2/http.h>
 #include <event2/buffer.h>
@@ -77,6 +79,9 @@ typedef struct {
     /* Pipe for thread-safe response delivery */
     int response_pipe[2];
     struct event *pipe_event;
+
+    /* Uptime tracking */
+    time_t start_time;
 
 #if SC_HAVE_EVENT_OPENSSL
     SSL_CTX *ssl_ctx;
@@ -393,9 +398,25 @@ static void handle_message(struct evhttp_request *req, void *arg)
 /* Handle GET /api/health */
 static void handle_health(struct evhttp_request *req, void *arg)
 {
-    (void)arg;
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    time_t now = time(NULL);
+    long uptime_secs = (long)(now - wd->start_time);
+
+    cJSON *j = cJSON_CreateObject();
+    cJSON_AddStringToObject(j, "status", "ok");
+    cJSON_AddStringToObject(j, "version", SC_VERSION);
+    cJSON_AddNumberToObject(j, "uptime_secs", uptime_secs);
+    cJSON_AddNumberToObject(j, "pending_requests", wd->pending_count);
+
+    char *str = cJSON_PrintUnformatted(j);
+    cJSON_Delete(j);
+
     struct evbuffer *buf = evbuffer_new();
-    evbuffer_add_printf(buf, "{\"status\":\"ok\"}");
+    evbuffer_add(buf, str, strlen(str));
+    free(str);
+
     evhttp_add_header(evhttp_request_get_output_headers(req),
                        "Content-Type", "application/json");
     evhttp_send_reply(req, 200, "OK", buf);
@@ -603,6 +624,7 @@ static int web_start(sc_channel_t *self)
 
     self->running = 1;
     wd->thread_started = 1;
+    wd->start_time = time(NULL);
 
     int ret = pthread_create(&wd->thread, NULL, web_thread_fn, self);
     if (ret != 0) {
