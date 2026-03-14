@@ -14,6 +14,7 @@
 
 #include "cJSON.h"
 #include "sc_features.h"
+#include "util/json_helpers.h"
 #include "constants.h"
 #include "audit.h"
 #include "logger.h"
@@ -386,6 +387,91 @@ static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
     return tool_msg;
 }
 
+/* ---------- Text-based tool call extraction ---------- */
+
+/*
+ * Some models (e.g. qwen via Ollama) return tool calls as text content
+ * instead of structured tool_calls. Detect <tool_call>JSON</tool_call>
+ * patterns or bare {"name":"...","arguments":{...}} JSON in the response
+ * content and convert them to proper tool calls.
+ */
+static void extract_text_tool_calls(sc_llm_response_t *resp)
+{
+    if (!resp || resp->tool_call_count > 0 || !resp->content)
+        return;
+
+    const char *text = resp->content;
+
+    /* Try <tool_call>...</tool_call> first */
+    const char *start = strstr(text, "<tool_call>");
+    const char *end = start ? strstr(start, "</tool_call>") : NULL;
+
+    const char *json_start = NULL;
+    const char *json_end = NULL;
+
+    if (start && end) {
+        json_start = start + 11; /* strlen("<tool_call>") */
+        json_end = end;
+    } else {
+        /* Try bare JSON: find opening { followed by "name" key */
+        for (const char *p = text; *p; p++) {
+            if (*p != '{') continue;
+            /* Check if "name" appears within the next 20 chars (past whitespace) */
+            const char *q = p + 1;
+            while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r') q++;
+            if (strncmp(q, "\"name\"", 6) != 0) continue;
+            json_start = p;
+            /* Find matching closing brace */
+            int depth = 0;
+            for (const char *c = p; *c; c++) {
+                if (*c == '{') depth++;
+                else if (*c == '}') { depth--; if (depth == 0) { json_end = c + 1; break; } }
+            }
+            break;
+        }
+    }
+
+    if (!json_start || !json_end || json_end <= json_start)
+        return;
+
+    /* Parse the JSON */
+    size_t len = (size_t)(json_end - json_start);
+    char *json_str = malloc(len + 1);
+    if (!json_str) return;
+    memcpy(json_str, json_start, len);
+    json_str[len] = '\0';
+
+    cJSON *obj = cJSON_Parse(json_str);
+    free(json_str);
+    if (!obj) return;
+
+    const char *name = sc_json_get_string(obj, "name", NULL);
+    cJSON *args = cJSON_GetObjectItem(obj, "arguments");
+    if (!name || !args) {
+        cJSON_Delete(obj);
+        return;
+    }
+
+    /* Build a synthetic tool call */
+    resp->tool_calls = calloc(1, sizeof(sc_tool_call_t));
+    if (!resp->tool_calls) {
+        cJSON_Delete(obj);
+        return;
+    }
+
+    /* Generate a call ID */
+    char id_buf[32];
+    snprintf(id_buf, sizeof(id_buf), "text_%lx", (unsigned long)time(NULL));
+
+    resp->tool_calls[0].id = sc_strdup(id_buf);
+    resp->tool_calls[0].name = sc_strdup(name);
+    resp->tool_calls[0].arguments = cJSON_Duplicate(args, 1);
+    resp->tool_call_count = 1;
+
+    SC_LOG_INFO("agent", "Extracted tool call '%s' from text response", name);
+    cJSON_Delete(obj);
+}
+
 /* ---------- LLM call with fallback ---------- */
 
 static sc_llm_response_t *call_llm_with_fallback(
@@ -717,6 +803,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             tool_defs, tool_count, &tc, iteration);
 
         if (!resp) break;
+
+        /* Some models return tool calls as text — extract them */
+        extract_text_tool_calls(resp);
 
         if (resp->tool_call_count == 0) {
             final_content = sc_strdup(resp->content);

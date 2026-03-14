@@ -265,6 +265,12 @@ static int has_vault_refs(const sc_config_t *cfg)
         if (fields[i] && strncmp(fields[i], "vault://", 8) == 0)
             return 1;
     }
+    /* Check delegation target bearer tokens */
+    for (int i = 0; i < cfg->delegation.target_count; i++) {
+        const char *v = cfg->delegation.targets[i].bearer_token;
+        if (v && strncmp(v, "vault://", 8) == 0)
+            return 1;
+    }
     /* Check MCP server env values */
     for (int s = 0; s < cfg->mcp.server_count; s++) {
         for (int e = 0; e < cfg->mcp.servers[s].env_count; e++) {
@@ -361,6 +367,10 @@ static void resolve_vault_refs(sc_config_t *cfg)
     resolve_vault_field(&cfg->x.access_token, vault);
     resolve_vault_field(&cfg->x.access_token_secret, vault);
     resolve_vault_field(&cfg->web_tools.brave_api_key, vault);
+
+    /* Resolve vault:// references in delegation targets */
+    for (int i = 0; i < cfg->delegation.target_count; i++)
+        resolve_vault_field(&cfg->delegation.targets[i].bearer_token, vault);
 
     /* Resolve vault:// references in MCP server env values */
     for (int s = 0; s < cfg->mcp.server_count; s++) {

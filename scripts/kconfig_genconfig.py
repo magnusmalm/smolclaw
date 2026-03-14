@@ -21,6 +21,7 @@ FEATURE_SYMS = [
     "SC_ENABLE_STREAMING",
     "SC_ENABLE_CRON",
     "SC_ENABLE_SPAWN",
+    "SC_ENABLE_DELEGATE",
     "SC_ENABLE_HEARTBEAT",
     "SC_ENABLE_BACKGROUND",
     "SC_ENABLE_MCP",
@@ -32,6 +33,8 @@ FEATURE_SYMS = [
     "SC_ENABLE_ANALYTICS",
     "SC_ENABLE_X",
     "SC_ENABLE_X_TOOLS",
+    "SC_ENABLE_MCP_SERVER",
+    "SC_ENABLE_CODE_GRAPH",
     # Security and infrastructure (auto-selected, not user-facing)
     "SC_STRICT_SECURITY",
     "NEED_OPENSSL",
