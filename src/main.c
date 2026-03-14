@@ -436,6 +436,14 @@ static void cmd_onboard(void)
         return;
     }
 
+    /* Ensure home directory exists with secure permissions */
+    char *home = sc_get_home_dir();
+    if (home) {
+        mkdir(home, 0700);
+        chmod(home, 0700);
+        free(home);
+    }
+
     if (sc_config_save(config_path, cfg) != 0) {
         fprintf(stderr, "Error: could not save config to %s\n", config_path);
         sc_config_free(cfg);
@@ -446,7 +454,7 @@ static void cmd_onboard(void)
     /* Extract workspace templates */
     char *workspace = sc_config_workspace_path(cfg);
     if (workspace) {
-        mkdir(workspace, 0755);
+        mkdir(workspace, 0700);
         sc_workspace_extract(workspace);
         free(workspace);
     }
@@ -1747,6 +1755,19 @@ static void cmd_gateway(int argc, char **argv)
         fprintf(stderr, "Fatal: could not load config\n");
         free(config_path);
         return;
+    }
+
+    /* Tighten home directory permissions if too open */
+    {
+        char *home = sc_get_home_dir();
+        if (home) {
+            struct stat hst;
+            if (stat(home, &hst) == 0 && (hst.st_mode & 0077) != 0) {
+                if (chmod(home, 0700) == 0)
+                    SC_LOG_INFO("gateway", "Tightened %s permissions to 0700", home);
+            }
+            free(home);
+        }
     }
 
     /* Open persistent log file if configured */
