@@ -350,21 +350,21 @@ char *sc_backup_create(const char *name, int config_only, int include_sessions)
 
     if (!config_only) {
         /* Workspace */
-        char ws_src[PATH_MAX], ws_dst[PATH_MAX];
+        char ws_src[PATH_MAX + 16], ws_dst[PATH_MAX + 16];
         snprintf(ws_src, sizeof(ws_src), "%s/workspace", base);
         snprintf(ws_dst, sizeof(ws_dst), "%s/workspace", backup_dir);
         if (copy_dir(ws_src, ws_dst, files, "workspace") != 0)
             fprintf(stderr, "backup: warning: workspace not found\n");
 
         /* State */
-        char st_src[PATH_MAX], st_dst[PATH_MAX];
+        char st_src[PATH_MAX + 16], st_dst[PATH_MAX + 16];
         snprintf(st_src, sizeof(st_src), "%s/state", base);
         snprintf(st_dst, sizeof(st_dst), "%s/state", backup_dir);
         copy_dir(st_src, st_dst, files, "state");
 
         /* Sessions (optional) */
         if (include_sessions) {
-            char se_src[PATH_MAX], se_dst[PATH_MAX];
+            char se_src[PATH_MAX + 16], se_dst[PATH_MAX + 16];
             snprintf(se_src, sizeof(se_src), "%s/sessions", base);
             snprintf(se_dst, sizeof(se_dst), "%s/sessions", backup_dir);
             copy_dir(se_src, se_dst, files, "sessions");
@@ -438,7 +438,7 @@ int sc_backup_verify(const char *name)
         const char *expected = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "sha256"));
         if (!path || !expected) { failed++; continue; }
 
-        char fpath[PATH_MAX];
+        char fpath[PATH_MAX + PATH_MAX];
         snprintf(fpath, sizeof(fpath), "%s/%s", backup_dir, path);
 
         char *actual = sc_sha256_file(fpath);
@@ -555,7 +555,7 @@ int sc_backup_restore(const char *name, int dry_run)
             continue;
         }
 
-        char src[PATH_MAX], dst[PATH_MAX];
+        char src[PATH_MAX + PATH_MAX], dst[PATH_MAX + PATH_MAX];
         snprintf(src, sizeof(src), "%s/%s", backup_dir, rel_path);
         snprintf(dst, sizeof(dst), "%s/%s", base, rel_path);
 
@@ -566,7 +566,7 @@ int sc_backup_restore(const char *name, int dry_run)
         }
 
         /* Ensure parent directory exists */
-        char tmp[PATH_MAX];
+        char tmp[sizeof(dst)];
         snprintf(tmp, sizeof(tmp), "%s", dst);
         char *slash = strrchr(tmp, '/');
         if (slash) {

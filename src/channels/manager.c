@@ -60,7 +60,9 @@ static int quarantine_check(const char *name, const char *dm_policy,
 #endif
 
 /* Add a channel to the manager array, set up rate limiter and DM policy warning.
- * Returns 0 on success, -1 on failure (channel is destroyed on failure). */
+ * Returns 0 on success, -1 on failure (channel is destroyed on failure).
+ * Only used when at least one channel feature is enabled. */
+__attribute__((unused))
 static int manager_add_channel(sc_channel_manager_t *mgr, sc_channel_t *ch,
                                 const char *dm_policy, int rate_limit)
 {
@@ -92,7 +94,7 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
     mgr->channels = NULL;
     mgr->count = 0;
 
-    int rl = cfg->rate_limit_per_minute;
+    int rl __attribute__((unused)) = cfg->rate_limit_per_minute;
 
 #if SC_ENABLE_TELEGRAM
     if (cfg->telegram.enabled && cfg->telegram.token && cfg->telegram.token[0]) {
