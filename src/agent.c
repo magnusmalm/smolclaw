@@ -840,6 +840,116 @@ static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg)
                           msg->content, 0);
 }
 
+/*
+ * Unwrap raw "message" tool call JSON from LLM final content.
+ * Small models sometimes emit {"name":"message","arguments":{"text":"..."}}
+ * or wrap it in markdown code fences instead of plain text.
+ * Returns extracted text (caller frees) or NULL if not a message tool call.
+ */
+static char *
+unwrap_message_tool_call(const char *content)
+{
+    if (!content)
+        return NULL;
+
+    const char *json_start = content;
+
+    /* Strip leading whitespace */
+    while (*json_start == ' ' || *json_start == '\t' ||
+           *json_start == '\n' || *json_start == '\r')
+        json_start++;
+
+    /* Strip markdown code fence: ```json ... ``` */
+    if (strncmp(json_start, "```", 3) == 0) {
+        const char *p = json_start + 3;
+        /* Skip optional language tag */
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+        json_start = p;
+
+        /* Find closing fence */
+        const char *end = strstr(json_start, "```");
+        if (!end)
+            return NULL;
+        /* Ensure nothing substantial after closing fence */
+        const char *after = end + 3;
+        while (*after == ' ' || *after == '\t' ||
+               *after == '\n' || *after == '\r')
+            after++;
+        if (*after != '\0')
+            return NULL; /* text after fence — not a pure tool call */
+
+        /* Make a null-terminated copy of the fenced content */
+        size_t len = (size_t)(end - json_start);
+        char *tmp = malloc(len + 1);
+        if (!tmp) return NULL;
+        memcpy(tmp, json_start, len);
+        tmp[len] = '\0';
+
+        cJSON *obj = cJSON_Parse(tmp);
+        free(tmp);
+        if (!obj) return NULL;
+
+        const char *name = NULL;
+        cJSON *n = cJSON_GetObjectItem(obj, "name");
+        if (n && cJSON_IsString(n)) name = n->valuestring;
+        if (!name || strcmp(name, "message") != 0) {
+            cJSON_Delete(obj);
+            return NULL;
+        }
+        cJSON *args = cJSON_GetObjectItem(obj, "arguments");
+        cJSON *text = args ? cJSON_GetObjectItem(args, "text") : NULL;
+        if (!text) text = args ? cJSON_GetObjectItem(args, "content") : NULL;
+        char *result = NULL;
+        if (text && cJSON_IsString(text) && text->valuestring[0])
+            result = sc_strdup(text->valuestring);
+        cJSON_Delete(obj);
+        return result;
+    }
+
+    /* Try bare JSON */
+    if (*json_start != '{')
+        return NULL;
+
+    cJSON *obj = cJSON_Parse(json_start);
+    if (!obj)
+        return NULL;
+
+    /* Ensure nothing after the JSON object */
+    const char *after_json = json_start;
+    int depth = 0;
+    for (const char *c = json_start; *c; c++) {
+        if (*c == '{') depth++;
+        else if (*c == '}') {
+            depth--;
+            if (depth == 0) { after_json = c + 1; break; }
+        }
+    }
+    while (*after_json == ' ' || *after_json == '\t' ||
+           *after_json == '\n' || *after_json == '\r')
+        after_json++;
+    if (*after_json != '\0') {
+        cJSON_Delete(obj);
+        return NULL; /* text after JSON — not a pure tool call */
+    }
+
+    const char *name = NULL;
+    cJSON *n = cJSON_GetObjectItem(obj, "name");
+    if (n && cJSON_IsString(n)) name = n->valuestring;
+    if (!name || strcmp(name, "message") != 0) {
+        cJSON_Delete(obj);
+        return NULL;
+    }
+    cJSON *args = cJSON_GetObjectItem(obj, "arguments");
+    cJSON *text = args ? cJSON_GetObjectItem(args, "text") : NULL;
+    if (!text) text = args ? cJSON_GetObjectItem(args, "content") : NULL;
+    char *result = NULL;
+    if (text && cJSON_IsString(text) && text->valuestring[0])
+        result = sc_strdup(text->valuestring);
+    cJSON_Delete(obj);
+    return result;
+}
+
 static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
                             const char *user_message, int no_history)
@@ -910,6 +1020,16 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                                                 &iterations, &failure_reason);
 
     sc_llm_message_array_free(messages, msg_count);
+
+    /* Unwrap raw message tool call JSON from small models */
+    if (final_content) {
+        char *unwrapped = unwrap_message_tool_call(final_content);
+        if (unwrapped) {
+            SC_LOG_DEBUG("agent", "Unwrapped message tool call from final content");
+            free(final_content);
+            final_content = unwrapped;
+        }
+    }
 
     /* Handle empty response — use failure reason if available */
     if (!final_content || final_content[0] == '\0') {
