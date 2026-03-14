@@ -1347,7 +1347,7 @@ static void gateway_process_message(sc_agent_t *agent,
 static void gateway_outbound_handler(sc_outbound_msg_t *msg, void *ctx)
 {
     sc_channel_manager_t *ch_mgr = ctx;
-    sc_channel_manager_send(ch_mgr, msg->channel, msg->chat_id, msg->content);
+    sc_channel_manager_dispatch(ch_mgr, msg);
 }
 
 /* Gateway auto-approves — deny patterns and allowlist are the guards */

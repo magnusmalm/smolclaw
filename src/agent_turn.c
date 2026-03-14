@@ -46,6 +46,7 @@ static void emit_progress(sc_agent_t *agent, const sc_turn_ctx_t *tc,
 
     sc_outbound_msg_t *msg = sc_outbound_msg_new(tc->channel, tc->chat_id, buf);
     if (msg) {
+        msg->is_progress = 1;
         sc_bus_publish_outbound(agent->bus, msg);
         sc_bus_flush_outbound(agent->bus);
     }
@@ -395,7 +396,8 @@ static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
  * patterns or bare {"name":"...","arguments":{...}} JSON in the response
  * content and convert them to proper tool calls.
  */
-static void extract_text_tool_calls(sc_llm_response_t *resp)
+static void extract_text_tool_calls(sc_llm_response_t *resp,
+                                     sc_tool_definition_t *tools, int tool_count)
 {
     if (!resp || resp->tool_call_count > 0 || !resp->content)
         return;
@@ -450,6 +452,22 @@ static void extract_text_tool_calls(sc_llm_response_t *resp)
     if (!name || !args) {
         cJSON_Delete(obj);
         return;
+    }
+
+    /* Validate: only extract calls for tools that were presented to the LLM */
+    if (tools && tool_count > 0) {
+        int found = 0;
+        for (int i = 0; i < tool_count; i++) {
+            if (tools[i].name && strcmp(tools[i].name, name) == 0) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            SC_LOG_DEBUG("agent", "Ignoring text tool call '%s' (not in presented tools)", name);
+            cJSON_Delete(obj);
+            return;
+        }
     }
 
     /* Build a synthetic tool call */
@@ -805,7 +823,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         if (!resp) break;
 
         /* Some models return tool calls as text — extract them */
-        extract_text_tool_calls(resp);
+        extract_text_tool_calls(resp, tool_defs, tool_count);
 
         if (resp->tool_call_count == 0) {
             final_content = sc_strdup(resp->content);

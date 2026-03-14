@@ -18,6 +18,7 @@ typedef struct {
     char *channel;
     char *chat_id;
     char *content;
+    int is_progress;   /* 1 = verbose progress update, not final response */
 } sc_outbound_msg_t;
 
 /* Message handler callback */

@@ -377,6 +377,21 @@ int sc_channel_manager_send(sc_channel_manager_t *mgr, const char *channel,
     return ch->send(ch, &msg);
 }
 
+int sc_channel_manager_dispatch(sc_channel_manager_t *mgr,
+                                 sc_outbound_msg_t *msg)
+{
+    if (!mgr || !msg || !msg->channel) return -1;
+    if (sc_is_internal_channel(msg->channel)) return 0;
+
+    sc_channel_t *ch = sc_channel_manager_get(mgr, msg->channel);
+    if (!ch) {
+        SC_LOG_WARN("channels", "Unknown channel for outbound: %s", msg->channel);
+        return -1;
+    }
+    if (!ch->send) return -1;
+    return ch->send(ch, msg);
+}
+
 int sc_channel_manager_send_typing(sc_channel_manager_t *mgr,
                                    const char *channel, const char *chat_id)
 {

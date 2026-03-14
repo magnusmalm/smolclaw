@@ -21,6 +21,8 @@ void sc_channel_manager_stop_all(sc_channel_manager_t *mgr);
 sc_channel_t *sc_channel_manager_get(sc_channel_manager_t *mgr, const char *name);
 int sc_channel_manager_send(sc_channel_manager_t *mgr, const char *channel,
                             const char *chat_id, const char *content);
+int sc_channel_manager_dispatch(sc_channel_manager_t *mgr,
+                                 sc_outbound_msg_t *msg);
 int sc_channel_manager_send_typing(sc_channel_manager_t *mgr,
                                    const char *channel, const char *chat_id);
 

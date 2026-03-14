@@ -476,6 +476,10 @@ static int web_send(sc_channel_t *self, sc_outbound_msg_t *msg)
     web_data_t *wd = self->data;
     if (!msg || !msg->chat_id || !msg->content) return -1;
 
+    /* Skip verbose progress messages — hold the request for the final response */
+    if (msg->is_progress)
+        return 0;
+
     web_response_t resp;
     memset(&resp, 0, sizeof(resp));
     snprintf(resp.request_id, sizeof(resp.request_id), "%s", msg->chat_id);
