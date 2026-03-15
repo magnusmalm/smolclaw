@@ -19,11 +19,12 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
 | **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
-| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, X read tools, memory read/write/log/search, message, cron, spawn, background processes (up to 23 built-in) |
+| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, X read tools, memory read/write/log/search, context search, code graph, message, cron, spawn, delegate (remote agent), background processes (up to 23 built-in) |
 | **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
 | **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense      |
 | **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators                                                               |
-| **Services**    | Cron scheduling, heartbeat, subagent spawning, self-update, analytics                                                                                                      |
+| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote agent delegation via REST API, per-agent isolated workspaces via `SMOLCLAW_HOME`                                      |
+| **Services**    | Cron scheduling, heartbeat, self-update, analytics                                                                                                                          |
 
 ## Quickstart
 
@@ -141,7 +142,7 @@ User ─── Channel ──┘         │
 
 ## Configuration
 
-Config lives at `~/.smolclaw/config.json`. Every field can be overridden via environment variables with `SMOLCLAW_` prefix.
+Config lives at `~/.smolclaw/config.json`. Override the config directory with `SMOLCLAW_HOME` (e.g., `SMOLCLAW_HOME=/tmp/my-agent` looks for `/tmp/my-agent/config.json`). Every field can be overridden via environment variables with `SMOLCLAW_` prefix.
 
 ```json
 {
@@ -207,6 +208,39 @@ Non-interactive mode (for scripted provisioning over SSH):
 echo "mypassword" | smolclaw vault init --password-stdin
 echo "sk-secret-key" | SMOLCLAW_VAULT_PASSWORD=mypassword smolclaw vault set anthropic_api_key --value-stdin
 ```
+
+### Multi-agent deployment
+
+smolclaw supports multi-agent setups where each agent has its own config, workspace, vault, and sessions. This is managed by setting `SMOLCLAW_HOME` per agent:
+
+```bash
+# Each agent gets its own home directory
+SMOLCLAW_HOME=~/.smolclaw/agents/coder smolclaw gateway
+SMOLCLAW_HOME=~/.smolclaw/agents/researcher smolclaw gateway
+```
+
+For fleet deployment, [smolswarm](https://github.com/magnusmalm/smolswarm) manages multi-agent provisioning with systemd template units (`smolclaw-agent@<name>.service`), per-agent vault provisioning, and a dispatcher agent that routes tasks to workers via the `delegate` tool.
+
+#### Delegation
+
+The `delegate` tool sends tasks to remote agents via their Web REST API:
+
+```json
+{
+  "delegation": {
+    "targets": [
+      {
+        "name": "researcher",
+        "url": "http://10.100.0.3:8082/api/message",
+        "bearer_token": "vault://researcher_token",
+        "timeout_secs": 120
+      }
+    ]
+  }
+}
+```
+
+Build with `SC_ENABLE_DELEGATE=ON`. The agent can then use the `delegate` tool to send tasks to any configured target and receive the response.
 
 ### X (Twitter)
 
