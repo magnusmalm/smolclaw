@@ -369,6 +369,7 @@ static void resolve_vault_refs(sc_config_t *cfg)
     resolve_vault_field(&cfg->x.access_token, vault);
     resolve_vault_field(&cfg->x.access_token_secret, vault);
     resolve_vault_field(&cfg->web_tools.brave_api_key, vault);
+    resolve_vault_field(&cfg->gitea.token, vault);
 
     /* Resolve vault:// references in delegation targets */
     for (int i = 0; i < cfg->delegation.target_count; i++)
