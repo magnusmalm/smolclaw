@@ -240,6 +240,7 @@ static void resolve_secret_refs(sc_config_t *cfg)
 
     /* Tool API keys */
     resolve_secret_field(&cfg->web_tools.brave_api_key, ws);
+    resolve_secret_field(&cfg->gitea.token, ws);
 
     free(ws);
 }
@@ -258,6 +259,7 @@ static int has_vault_refs(const sc_config_t *cfg)
         cfg->irc.password, cfg->slack.bot_token,
         cfg->slack.app_token, cfg->web.bearer_token,
         cfg->web_tools.brave_api_key,
+        cfg->gitea.token,
         cfg->x.consumer_key, cfg->x.consumer_secret,
         cfg->x.access_token, cfg->x.access_token_secret,
     };
@@ -626,6 +628,14 @@ static void env_override_providers(sc_config_t *cfg)
     env_override_str(&cfg->xai.api_base,        "SMOLCLAW_PROVIDERS_XAI_API_BASE");
 }
 
+/* Apply env overrides for gitea */
+static void env_override_gitea(sc_config_t *cfg)
+{
+    env_override_str(&cfg->gitea.url,         "SMOLCLAW_GITEA_URL");
+    env_override_str(&cfg->gitea.token,       "SMOLCLAW_GITEA_TOKEN");
+    env_override_str(&cfg->gitea.default_org, "SMOLCLAW_GITEA_DEFAULT_ORG");
+}
+
 /* Apply env overrides for web tools */
 static void env_override_web_tools(sc_config_t *cfg)
 {
@@ -647,6 +657,7 @@ static void apply_env_overrides(sc_config_t *cfg)
     env_override_providers(cfg);
     env_override_channels(cfg);
     env_override_web_tools(cfg);
+    env_override_gitea(cfg);
 
     /* Heartbeat */
     env_override_bool(&cfg->heartbeat.enabled,   "SMOLCLAW_HEARTBEAT_ENABLED");
@@ -1146,6 +1157,18 @@ sc_config_t *sc_config_load(const char *path)
             cfg->web_tools.duckduckgo_max_results = sc_json_get_int(ddg, "max_results",
                                                                      SC_MAX_SEARCH_RESULTS);
         }
+    }
+
+    /* gitea */
+    const cJSON *gitea = sc_json_get_object(root, "gitea");
+    if (gitea) {
+        free(cfg->gitea.url);
+        cfg->gitea.url   = sc_strdup(sc_json_get_string(gitea, "url", NULL));
+        free(cfg->gitea.token);
+        cfg->gitea.token = sc_strdup(sc_json_get_string(gitea, "token", NULL));
+        free(cfg->gitea.default_org);
+        cfg->gitea.default_org = sc_strdup(
+            sc_json_get_string(gitea, "default_org", NULL));
     }
 
     /* heartbeat */
@@ -1648,6 +1671,10 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->web_tools.brave_api_key);
     free(cfg->web_tools.brave_base_url);
     free(cfg->web_tools.searxng_base_url);
+
+    free(cfg->gitea.url);
+    free(cfg->gitea.token);
+    free(cfg->gitea.default_org);
 
     /* MCP */
     for (int i = 0; i < cfg->mcp.server_count; i++) {

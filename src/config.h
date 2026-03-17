@@ -248,6 +248,13 @@ typedef struct {
     /* Tools */
     sc_web_tools_config_t web_tools;
 
+    /* Gitea */
+    struct {
+        char *url;          /* Base URL, e.g. "http://192.168.1.118:3000" */
+        char *token;        /* API token (vault:// supported) */
+        char *default_org;  /* Default org for repo creation */
+    } gitea;
+
     /* Heartbeat */
     sc_heartbeat_config_t heartbeat;
 

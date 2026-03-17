@@ -68,6 +68,13 @@ config SC_ENABLE_GIT
 	  Enable the git tool for safe git operations.
 	  Uses a subcommand allowlist and fork+execvp (no shell).
 
+config SC_ENABLE_GITEA
+	bool "Gitea API tool (repos, issues, PRs)"
+	default n
+	help
+	  Enable the gitea tool for creating repos, issues, and PRs
+	  via the Gitea REST API. Requires API credentials in config.
+
 config SC_ENABLE_WEB_TOOLS
 	bool "Web search and fetch tools"
 	default y

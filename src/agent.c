@@ -49,6 +49,9 @@
 #if SC_ENABLE_GIT
 #include "tools/git.h"
 #endif
+#if SC_ENABLE_GITEA
+#include "tools/gitea.h"
+#endif
 #if SC_ENABLE_CODE_GRAPH
 #include "tools/code_graph.h"
 #endif
@@ -235,6 +238,15 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
     sc_tool_registry_register(reg,
                                sc_tool_code_graph_new(workspace));
 #endif
+
+    /* Gitea tool */
+#if SC_ENABLE_GITEA
+    if (cfg->gitea.url && cfg->gitea.token)
+        sc_tool_registry_register(reg,
+                                   sc_tool_gitea_new(cfg->gitea.url,
+                                                      cfg->gitea.token,
+                                                      cfg->gitea.default_org));
+#endif
 }
 
 /* Register all default tools into the agent's registry.
@@ -393,6 +405,15 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
 #if SC_ENABLE_CODE_GRAPH
     sc_tool_registry_register(agent->tools,
                                sc_tool_code_graph_new(workspace));
+#endif
+
+    /* Gitea tool */
+#if SC_ENABLE_GITEA
+    if (cfg->gitea.url && cfg->gitea.token)
+        sc_tool_registry_register(agent->tools,
+                                   sc_tool_gitea_new(cfg->gitea.url,
+                                                      cfg->gitea.token,
+                                                      cfg->gitea.default_org));
 #endif
 
     /* Spawn tool (agent-specific: needs agent pointer) */
