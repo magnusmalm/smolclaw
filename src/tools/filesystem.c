@@ -245,7 +245,13 @@ static char *fs_validate_path(const fs_tool_data_t *d, const char *path,
 
     char *resolved = sc_validate_path(path, d->workspace, d->restrict_to_workspace);
     if (!resolved) {
-        *err_msg = "access denied: path outside workspace";
+        static _Thread_local char ws_err[512];
+        snprintf(ws_err, sizeof(ws_err),
+                 "Access denied: '%s' is outside the workspace. "
+                 "Use workspace-relative paths like 'hello.py' or 'projects/myrepo/file.py'. "
+                 "Workspace root: %s",
+                 path, d->workspace);
+        *err_msg = ws_err;
         return NULL;
     }
 
