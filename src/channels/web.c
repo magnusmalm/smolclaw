@@ -42,7 +42,7 @@
 #include "util/sha256.h"
 
 #define WEB_TAG "web"
-#define WEB_REQUEST_TIMEOUT 120  /* seconds */
+#define WEB_REQUEST_TIMEOUT 600  /* seconds — must cover multi-step delegation chains */
 #define WEB_MAX_PENDING     100
 
 /* Pending request entry */
