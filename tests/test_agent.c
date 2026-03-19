@@ -21,6 +21,7 @@
 #include "tools/spawn.h"
 #endif
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -162,6 +163,9 @@ typedef struct {
     int call_index;
     int chat_call_count;
     char *last_system_prompt;  /* Captured from most recent chat() call */
+    /* Full message capture for integration tests */
+    sc_llm_message_t *last_msgs;  /* Deep copy of last msgs array */
+    int last_msg_count;
 } mock_provider_data_t;
 
 static sc_llm_response_t *mock_chat(sc_provider_t *self,
@@ -178,6 +182,18 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
         && msgs[0].content) {
         data->last_system_prompt = sc_strdup(msgs[0].content);
     }
+    /* Capture full message array for integration tests */
+    if (data->last_msgs) {
+        for (int i = 0; i < data->last_msg_count; i++)
+            sc_llm_message_free_fields(&data->last_msgs[i]);
+        free(data->last_msgs);
+    }
+    data->last_msgs = calloc((size_t)msg_count, sizeof(sc_llm_message_t));
+    data->last_msg_count = msg_count;
+    if (data->last_msgs) {
+        for (int i = 0; i < msg_count; i++)
+            data->last_msgs[i] = sc_llm_message_clone(&msgs[i]);
+    }
     if (data->call_index >= data->response_count) return NULL;
 
     sc_llm_response_t *src = &data->responses[data->call_index++];
@@ -187,6 +203,7 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
     if (!ret) return NULL;
 
     ret->content = sc_strdup(src->content);
+    ret->thinking = sc_strdup(src->thinking);
     ret->finish_reason = sc_strdup(src->finish_reason);
     ret->http_status = src->http_status ? src->http_status : 200;
 
@@ -318,6 +335,11 @@ static void destroy_test_agent(test_agent_ctx_t *ctx)
     free(ctx->agent->model);
     free(ctx->agent);
     free(ctx->mpd->last_system_prompt);
+    if (ctx->mpd->last_msgs) {
+        for (int i = 0; i < ctx->mpd->last_msg_count; i++)
+            sc_llm_message_free_fields(&ctx->mpd->last_msgs[i]);
+        free(ctx->mpd->last_msgs);
+    }
     free(ctx->mpd);
     free(ctx->provider);
     cleanup_dir(ctx->tmpdir);
@@ -1135,6 +1157,493 @@ static void test_no_transforms(void)
     destroy_test_agent(&ctx);
 }
 
+/* ======================================================================
+ * Integration tests for pi-mono-inspired features
+ * ====================================================================== */
+
+/* Thread-safe execution log for parallel ordering tests */
+static pthread_mutex_t exec_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char exec_log[32][64];
+static int exec_log_count;
+
+static void exec_log_reset(void)
+{
+    pthread_mutex_lock(&exec_log_mutex);
+    exec_log_count = 0;
+    pthread_mutex_unlock(&exec_log_mutex);
+}
+
+static void exec_log_append(const char *entry)
+{
+    pthread_mutex_lock(&exec_log_mutex);
+    if (exec_log_count < 32) {
+        snprintf(exec_log[exec_log_count], sizeof(exec_log[0]), "%s", entry);
+        exec_log_count++;
+    }
+    pthread_mutex_unlock(&exec_log_mutex);
+}
+
+/* Mock tool that logs its execution (thread-safe) */
+static sc_tool_result_t *logging_tool_exec(sc_tool_t *self, cJSON *args, void *ctx)
+{
+    (void)ctx;
+    char entry[64];
+    const char *q = NULL;
+    cJSON *qj = cJSON_GetObjectItem(args, "query");
+    if (qj) q = cJSON_GetStringValue(qj);
+    snprintf(entry, sizeof(entry), "%s:%s", self->name, q ? q : "?");
+    exec_log_append(entry);
+
+    /* Simulate I/O delay for parallel testing */
+    usleep(10000); /* 10ms */
+
+    char result[128];
+    snprintf(result, sizeof(result), "result from %s(%s)", self->name, q ? q : "?");
+    return sc_tool_result_new(result);
+}
+
+/* Register a named mock tool (read_file or exec) */
+static void register_logging_tool(sc_agent_t *agent, const char *name, int needs_confirm)
+{
+    sc_tool_t *tool = calloc(1, sizeof(*tool));
+    tool->name = name;
+    tool->description = "logging mock tool";
+    tool->parameters = mock_tool_params;
+    tool->execute = logging_tool_exec;
+    tool->destroy = mock_tool_destroy;
+    tool->needs_confirm = needs_confirm;
+    sc_tool_registry_register(agent->tools, tool);
+}
+
+/* --- Test 1: Parallel execution of multiple read_file calls --- */
+
+static void test_integ_parallel_read_only(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+
+    exec_log_reset();
+
+    /* LLM returns 3 read_file calls at once */
+    cJSON *args[3];
+    sc_tool_call_t calls[3];
+    for (int i = 0; i < 3; i++) {
+        args[i] = cJSON_CreateObject();
+        char q[16];
+        snprintf(q, sizeof(q), "file%d", i);
+        cJSON_AddStringToObject(args[i], "query", q);
+        calls[i] = (sc_tool_call_t){
+            .id = i == 0 ? "c0" : i == 1 ? "c1" : "c2",
+            .name = "read_file",
+            .arguments = args[i],
+        };
+    }
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 3, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Read all 3 files.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Read files", "test-par");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Read all 3 files.");
+
+    /* All 3 tools executed */
+    ASSERT_INT_EQ(exec_log_count, 3);
+
+    /* Results should be in source order in the session history */
+    int count = 0;
+    sc_session_get_history(ctx.agent->sessions, "test-par", &count);
+    /* user + assistant(3 calls) + 3 tool results + final assistant = 6 */
+    ASSERT(count >= 6, "Should have at least 6 messages in session");
+
+    free(response);
+    for (int i = 0; i < 3; i++) cJSON_Delete(args[i]);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 2: Mixed parallel (read_file) + sequential (exec) --- */
+
+static int mock_confirm_yes(const char *tool, const char *args, void *ctx)
+{
+    (void)tool; (void)args; (void)ctx;
+    return 1; /* approve */
+}
+
+static void test_integ_mixed_parallel_sequential(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+    register_logging_tool(ctx.agent, "exec", 1); /* needs confirm */
+    sc_tool_registry_set_confirm(ctx.agent->tools, mock_confirm_yes, NULL);
+
+    exec_log_reset();
+
+    /* LLM returns: read_file, read_file, exec */
+    cJSON *a0 = cJSON_CreateObject();
+    cJSON_AddStringToObject(a0, "query", "f1");
+    cJSON *a1 = cJSON_CreateObject();
+    cJSON_AddStringToObject(a1, "query", "f2");
+    cJSON *a2 = cJSON_CreateObject();
+    cJSON_AddStringToObject(a2, "query", "cmd1");
+
+    sc_tool_call_t calls[3] = {
+        { .id = "r1", .name = "read_file", .arguments = a0 },
+        { .id = "r2", .name = "read_file", .arguments = a1 },
+        { .id = "e1", .name = "exec",      .arguments = a2 },
+    };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 3, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Done.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Do stuff", "test-mix");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Done.");
+    ASSERT_INT_EQ(exec_log_count, 3);
+
+    /* exec must execute AFTER read_files (sequential for side-effect tools).
+     * Check that exec:cmd1 is the last entry in the log. */
+    ASSERT(strstr(exec_log[exec_log_count - 1], "exec:cmd1") != NULL,
+           "exec should run after read_file tools");
+
+    free(response);
+    cJSON_Delete(a0);
+    cJSON_Delete(a1);
+    cJSON_Delete(a2);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 3: Schema validation blocks bad args through agent loop --- */
+
+static void test_integ_schema_validation(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+
+    exec_log_reset();
+
+    /* LLM returns tool call with integer arg instead of string */
+    cJSON *bad_args = cJSON_CreateObject();
+    cJSON_AddNumberToObject(bad_args, "query", 42); /* should be string */
+
+    sc_tool_call_t calls[1] = {
+        { .id = "bad1", .name = "read_file", .arguments = bad_args },
+    };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    /* After validation error, LLM gets error and responds with text */
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Sorry, I made an error.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Read", "test-schema");
+    ASSERT_NOT_NULL(response);
+
+    /* Tool should NOT have executed (schema blocked it) */
+    ASSERT_INT_EQ(exec_log_count, 0);
+
+    /* The second LLM call should have received a tool result with validation error */
+    ASSERT(ctx.mpd->last_msg_count > 2, "LLM should receive error in context");
+
+    free(response);
+    cJSON_Delete(bad_args);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 4: Thinking block capture, persistence, and cross-provider replay --- */
+
+static void test_integ_thinking_blocks(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    /* Response with thinking field set */
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "The answer is 42.",
+        .thinking = "Let me reason about this step by step...",
+        .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "What is the meaning?",
+                                              "test-think");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "The answer is 42.");
+
+    /* Verify thinking is in session history */
+    int count = 0;
+    sc_llm_message_t *hist = sc_session_get_history(ctx.agent->sessions,
+                                                     "test-think", &count);
+    ASSERT(count >= 2, "Should have user + assistant");
+
+    /* Find the assistant message with thinking */
+    int found_thinking = 0;
+    for (int i = 0; i < count; i++) {
+        if (hist[i].thinking && strstr(hist[i].thinking, "step by step")) {
+            found_thinking = 1;
+            break;
+        }
+    }
+    ASSERT(found_thinking, "Thinking block should be in session history");
+
+    /* Now send a follow-up. The mock LLM should see the previous thinking
+     * in the messages it receives (as content for non-Anthropic providers,
+     * or preserved as thinking field). */
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Follow-up response.",
+        .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+    ctx.mpd->call_index = 1;
+
+    char *response2 = sc_agent_process_direct(ctx.agent, "Tell me more",
+                                               "test-think");
+    ASSERT_NOT_NULL(response2);
+
+    /* Verify the LLM received the thinking in the replayed context.
+     * The mock provider captures all messages — check that assistant msg
+     * has thinking set. */
+    int found_in_context = 0;
+    for (int i = 0; i < ctx.mpd->last_msg_count; i++) {
+        if (ctx.mpd->last_msgs[i].thinking &&
+            strstr(ctx.mpd->last_msgs[i].thinking, "step by step")) {
+            found_in_context = 1;
+            break;
+        }
+    }
+    ASSERT(found_in_context, "Thinking should be replayed to LLM in follow-up");
+
+    free(response);
+    free(response2);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 5: Pre-hook blocks tool through full agent loop --- */
+
+static int integ_block_read_file(const char *tool_name, const cJSON *args,
+                                  const char *channel, const char *chat_id,
+                                  void *userdata)
+{
+    (void)args; (void)channel; (void)chat_id;
+    int *called = (int *)userdata;
+    *called = 1;
+    return strcmp(tool_name, "read_file") == 0 ? 1 : 0;
+}
+
+static void test_integ_pre_hook_blocks(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+
+    int hook_called = 0;
+    sc_tool_registry_add_pre_hook(ctx.agent->tools, "blocker",
+                                   integ_block_read_file, &hook_called);
+
+    exec_log_reset();
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "query", "secret");
+    sc_tool_call_t calls[1] = {
+        { .id = "h1", .name = "read_file", .arguments = args },
+    };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Tool was blocked.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Read secret", "test-hook");
+    ASSERT_NOT_NULL(response);
+    ASSERT_INT_EQ(hook_called, 1);
+    ASSERT_INT_EQ(exec_log_count, 0); /* tool never executed */
+
+    /* The LLM should have received an error tool result */
+    int has_blocked_msg = 0;
+    for (int i = 0; i < ctx.mpd->last_msg_count; i++) {
+        if (ctx.mpd->last_msgs[i].role &&
+            strcmp(ctx.mpd->last_msgs[i].role, "tool") == 0 &&
+            ctx.mpd->last_msgs[i].content &&
+            strstr(ctx.mpd->last_msgs[i].content, "blocked")) {
+            has_blocked_msg = 1;
+            break;
+        }
+    }
+    ASSERT(has_blocked_msg, "LLM should see blocked error in tool result");
+
+    free(response);
+    cJSON_Delete(args);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 6: Post-hook modifies result through full agent loop --- */
+
+static int integ_post_redact(const char *tool_name, sc_tool_result_t *result,
+                              const char *channel, const char *chat_id,
+                              void *userdata)
+{
+    (void)tool_name; (void)channel; (void)chat_id; (void)userdata;
+    if (result && result->for_llm) {
+        free(result->for_llm);
+        result->for_llm = sc_strdup("[POST-HOOK REDACTED]");
+    }
+    return 0;
+}
+
+static void test_integ_post_hook_modifies(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+
+    sc_tool_registry_add_post_hook(ctx.agent->tools, "redactor",
+                                    integ_post_redact, NULL);
+
+    exec_log_reset();
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "query", "data");
+    sc_tool_call_t calls[1] = {
+        { .id = "p1", .name = "read_file", .arguments = args },
+    };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Got redacted data.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Read data", "test-post");
+    ASSERT_NOT_NULL(response);
+    ASSERT_INT_EQ(exec_log_count, 1); /* tool executed */
+
+    /* The LLM should have received the post-hook-modified result */
+    int has_redacted = 0;
+    for (int i = 0; i < ctx.mpd->last_msg_count; i++) {
+        if (ctx.mpd->last_msgs[i].content &&
+            strstr(ctx.mpd->last_msgs[i].content, "POST-HOOK REDACTED")) {
+            has_redacted = 1;
+            break;
+        }
+    }
+    ASSERT(has_redacted, "LLM should see post-hook modified content");
+
+    free(response);
+    cJSON_Delete(args);
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 7: Session branching through agent loop --- */
+
+static void test_integ_session_branching(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    /* Turn 1 */
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "Answer A.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *r1 = sc_agent_process_direct(ctx.agent, "Question", "test-branch");
+    ASSERT_NOT_NULL(r1);
+    free(r1);
+
+    /* Session has: user(0) -> assistant(1) = 2 messages */
+    int count = 0;
+    sc_session_get_history(ctx.agent->sessions, "test-branch", &count);
+    ASSERT_INT_EQ(count, 2);
+
+    /* Branch from node 0 (the user message) — fork before the answer */
+    int rc = sc_session_branch(ctx.agent->sessions, "test-branch", 0);
+    ASSERT_INT_EQ(rc, 0);
+
+    /* Turn 2 on the new branch */
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Answer B.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+    ctx.mpd->call_index = 1;
+
+    char *r2 = sc_agent_process_direct(ctx.agent, "Same question, different branch",
+                                        "test-branch");
+    ASSERT_NOT_NULL(r2);
+    ASSERT_STR_EQ(r2, "Answer B.");
+    free(r2);
+
+    /* Active branch should now be: user(0) -> user(2) -> assistant(3) = 3 msgs */
+    sc_llm_message_t *hist = sc_session_get_history(ctx.agent->sessions,
+                                                     "test-branch", &count);
+    ASSERT_INT_EQ(count, 3);
+    ASSERT_STR_EQ(hist[0].content, "Question");
+    ASSERT_STR_EQ(hist[2].content, "Answer B.");
+
+    /* Two branches exist */
+    ASSERT_INT_EQ(sc_session_branch_count(ctx.agent->sessions, "test-branch"), 2);
+
+    /* Switch back to original branch */
+    sc_session_branch(ctx.agent->sessions, "test-branch", 1);
+    hist = sc_session_get_history(ctx.agent->sessions, "test-branch", &count);
+    ASSERT_INT_EQ(count, 2);
+    ASSERT_STR_EQ(hist[1].content, "Answer A.");
+
+    destroy_test_agent(&ctx);
+}
+
+/* --- Test 8: Context transform visible during tool loop iterations --- */
+
+static void test_integ_transform_with_tools(void)
+{
+    test_agent_ctx_t ctx = create_test_agent(100);
+    register_logging_tool(ctx.agent, "read_file", 0);
+
+    /* Register transform that injects a marker */
+    sc_agent_add_transform(ctx.agent, "marker",
+                            test_transform_append, (void *)"[CONTEXT_MARKER]");
+
+    exec_log_reset();
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "query", "test");
+    sc_tool_call_t calls[1] = {
+        { .id = "t1", .name = "read_file", .arguments = args },
+    };
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .tool_calls = calls, .tool_call_count = 1, .finish_reason = "tool_use",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Done with marker.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Go", "test-xf-tool");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Done with marker.");
+
+    /* The system prompt should have contained the marker from the transform */
+    ASSERT_NOT_NULL(ctx.mpd->last_system_prompt);
+    ASSERT(strstr(ctx.mpd->last_system_prompt, "[CONTEXT_MARKER]") != NULL,
+           "Context transform marker should be visible to LLM during tool loop");
+
+    free(response);
+    cJSON_Delete(args);
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -1163,6 +1672,15 @@ int main(void)
     RUN_TEST(test_context_transform_chain_order);
     RUN_TEST(test_context_transform_stop_chain);
     RUN_TEST(test_no_transforms);
+    /* Integration tests for pi-mono features */
+    RUN_TEST(test_integ_parallel_read_only);
+    RUN_TEST(test_integ_mixed_parallel_sequential);
+    RUN_TEST(test_integ_schema_validation);
+    RUN_TEST(test_integ_thinking_blocks);
+    RUN_TEST(test_integ_pre_hook_blocks);
+    RUN_TEST(test_integ_post_hook_modifies);
+    RUN_TEST(test_integ_session_branching);
+    RUN_TEST(test_integ_transform_with_tools);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

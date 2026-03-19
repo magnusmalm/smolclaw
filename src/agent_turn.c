@@ -1143,8 +1143,10 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            const char *model, sc_llm_message_t *messages,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
-                           int *out_iterations, char **out_failure_reason)
+                           int *out_iterations, char **out_failure_reason,
+                           char **out_thinking)
 {
+    if (out_thinking) *out_thinking = NULL;
     sc_audit_set_model(model);
 
     int iteration = 0;
@@ -1217,6 +1219,8 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
         if (resp->tool_call_count == 0) {
             final_content = sc_strdup(resp->content);
+            if (out_thinking && resp->thinking)
+                *out_thinking = sc_strdup(resp->thinking);
             SC_LOG_INFO("agent", "LLM response without tool calls (iteration %d)", iteration);
             sc_llm_response_free(resp);
             break;

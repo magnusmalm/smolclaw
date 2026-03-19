@@ -1082,10 +1082,12 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     /* Run LLM iteration loop */
     int iterations = 0;
     char *failure_reason = NULL;
+    char *final_thinking = NULL;
     char *final_content = sc_run_llm_iteration(agent, use_provider, use_model,
                                                 messages, msg_count,
                                                 session_key, channel, chat_id,
-                                                &iterations, &failure_reason);
+                                                &iterations, &failure_reason,
+                                                &final_thinking);
 
     sc_llm_message_array_free(messages, msg_count);
 
@@ -1119,8 +1121,18 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         final_content = redacted_final;
     }
 
-    /* Save final assistant message */
-    sc_session_add_message(agent->sessions, session_key, "assistant", final_content);
+    /* Save final assistant message (with thinking if present) */
+    if (final_thinking) {
+        sc_llm_message_t msg = {0};
+        msg.role = "assistant";
+        msg.content = final_content;
+        msg.thinking = final_thinking;
+        sc_session_add_full_message(agent->sessions, session_key, &msg);
+        /* Don't free msg fields — they're borrowed, freed below */
+    } else {
+        sc_session_add_message(agent->sessions, session_key, "assistant", final_content);
+    }
+    free(final_thinking);
     sc_session_save(agent->sessions, session_key);
 
     if (!no_history)

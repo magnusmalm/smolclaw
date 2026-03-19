@@ -94,12 +94,15 @@ typedef struct {
 
 /* Run the LLM iteration loop (tool calls + fallbacks). Returns final content.
  * If out_failure_reason is non-NULL and the LLM fails, a human-readable
- * error string is returned (caller must free). */
+ * error string is returned (caller must free).
+ * If out_thinking is non-NULL, the final response's thinking text is returned
+ * (caller must free). NULL if no thinking. */
 char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            const char *model, sc_llm_message_t *messages,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
-                           int *out_iterations, char **out_failure_reason);
+                           int *out_iterations, char **out_failure_reason,
+                           char **out_thinking);
 
 /* ---------- agent_session.c ---------- */
 
