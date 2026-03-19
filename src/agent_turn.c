@@ -356,6 +356,89 @@ static int track_tool_name_error(sc_turn_ctx_t *tc, const char *tool_name)
     return 1;
 }
 
+/* ---------- Checkpoint & rewind ---------- */
+
+static void checkpoint_free(sc_checkpoint_t *cp)
+{
+    if (!cp->msgs) return;
+    for (int i = 0; i < cp->msgs_len; i++)
+        sc_llm_message_free_fields(&cp->msgs[i]);
+    free(cp->msgs);
+    cp->msgs = NULL;
+    cp->msgs_len = 0;
+}
+
+static void checkpoint_save(sc_turn_ctx_t *tc, int iteration)
+{
+    int slot = tc->checkpoint_slot % SC_MAX_CHECKPOINTS;
+    checkpoint_free(&tc->checkpoints[slot]);
+
+    sc_checkpoint_t *cp = &tc->checkpoints[slot];
+    cp->msgs = calloc((size_t)tc->msgs_len, sizeof(sc_llm_message_t));
+    if (!cp->msgs) return;
+
+    for (int i = 0; i < tc->msgs_len; i++)
+        cp->msgs[i] = sc_llm_message_clone(&tc->msgs[i]);
+    cp->msgs_len = tc->msgs_len;
+    cp->iteration = iteration;
+    cp->total_tool_calls = tc->total_tool_calls;
+
+    tc->checkpoint_slot++;
+    if (tc->checkpoint_count < SC_MAX_CHECKPOINTS)
+        tc->checkpoint_count++;
+}
+
+/*
+ * Rewind to the most recent checkpoint.
+ * Frees current msgs, restores from checkpoint, resets error counters.
+ * Returns 1 on success, 0 if no checkpoint available or rewind limit hit.
+ */
+static int checkpoint_rewind(sc_turn_ctx_t *tc)
+{
+    if (tc->checkpoint_count == 0 || tc->rewind_count >= 2)
+        return 0;
+
+    /* Find most recent checkpoint */
+    int slot = (tc->checkpoint_slot - 1 + SC_MAX_CHECKPOINTS) % SC_MAX_CHECKPOINTS;
+    sc_checkpoint_t *cp = &tc->checkpoints[slot];
+    if (!cp->msgs) return 0;
+
+    SC_LOG_INFO("agent", "Rewinding to checkpoint (iteration %d, %d msgs)",
+                cp->iteration, cp->msgs_len);
+
+    /* Free current message array */
+    for (int i = 0; i < tc->msgs_len; i++)
+        sc_llm_message_free_fields(&tc->msgs[i]);
+
+    /* Restore from checkpoint */
+    if (tc->msgs_cap < cp->msgs_len) {
+        sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
+            (size_t)(cp->msgs_len + 16) * sizeof(sc_llm_message_t));
+        if (!new_msgs) return 0;
+        tc->msgs = new_msgs;
+        tc->msgs_cap = cp->msgs_len + 16;
+    }
+
+    for (int i = 0; i < cp->msgs_len; i++)
+        tc->msgs[i] = sc_llm_message_clone(&cp->msgs[i]);
+    tc->msgs_len = cp->msgs_len;
+    tc->total_tool_calls = cp->total_tool_calls;
+
+    /* Reset error counters */
+    tc->tool_error_count = 0;
+    tc->tool_name_count = 0;
+    tc->recent_count = 0;
+    tc->rewind_count++;
+
+    return 1;
+}
+
+static void checkpoints_free_all(sc_turn_ctx_t *tc)
+{
+    for (int i = 0; i < SC_MAX_CHECKPOINTS; i++)
+        checkpoint_free(&tc->checkpoints[i]);
+}
+
 /* ---------- Tool output wrapping ---------- */
 
 static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
@@ -740,14 +823,42 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
             }
 
             if (tc->tool_error_count == 3) {
-                /* Inject a strong hint at 3 errors */
-                SC_LOG_WARN("agent", "3 tool errors — injecting guidance hint");
+                /* Rewind to checkpoint if available */
+                if (checkpoint_rewind(tc)) {
+                    SC_LOG_WARN("agent", "3 tool errors — rewinding to checkpoint (rewind %d/2)",
+                                tc->rewind_count);
+                    sc_audit_log_ext("agent", "checkpoint_rewind", 0, 0,
+                                     tc->channel, tc->chat_id, "rewind");
+
+                    /* Inject hint into rewound context */
+                    sc_llm_message_t rw_msg = sc_msg_user(
+                        "Your previous approach failed after 3 tool errors. "
+                        "The conversation has been rewound to the last successful "
+                        "state. Try a completely different approach.");
+                    if (tc->msgs_len + 1 <= tc->msgs_cap ||
+                        (tc->msgs = sc_safe_realloc(tc->msgs,
+                            (size_t)(tc->msgs_cap + 16) * sizeof(sc_llm_message_t)),
+                         tc->msgs && (tc->msgs_cap += 16))) {
+                        tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&rw_msg);
+                    }
+                    sc_llm_message_free_fields(&rw_msg);
+                    sc_tool_result_free(result);
+
+                    /* Break out of tool loop — the main iteration loop
+                     * will call the LLM again with the rewound context */
+                    return 0;
+                }
+                SC_LOG_WARN("agent", "3 tool errors, no checkpoint available");
             }
         } else {
             emit_progress(agent, tc, "  <- %s ok", call->name);
         }
 
         sc_llm_message_t tool_msg = wrap_tool_output(call, result, tc);
+
+        /* Checkpoint after successful tool execution */
+        if (!result || !result->is_error)
+            checkpoint_save(tc, iteration);
 
         if (tc->msgs_len + 1 > tc->msgs_cap) {
             int new_cap = tc->msgs_cap + 16;
@@ -942,17 +1053,24 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             sc_audit_log_ext("agent", "model_escalation", 0, 0,
                              tc.channel, tc.chat_id, "escalation");
 
-            /* Reset error counts for the retry */
-            tc.tool_error_count = 0;
-            tc.tool_name_count = 0;
-            tc.recent_count = 0;
             free(final_content);
             final_content = NULL;
 
-            /* Inject escalation hint into conversation */
+            /* Rewind to checkpoint for a clean context, then escalate */
+            if (checkpoint_rewind(&tc)) {
+                SC_LOG_INFO("agent", "Rewound to checkpoint before model escalation");
+            } else {
+                /* No checkpoint — just reset counters */
+                tc.tool_error_count = 0;
+                tc.tool_name_count = 0;
+                tc.recent_count = 0;
+            }
+
+            /* Inject escalation hint into (possibly rewound) context */
             sc_llm_message_t esc_msg = sc_msg_user(
                 "The previous approach failed repeatedly. You are now "
-                "running on a more capable model. Please re-read the "
+                "running on a more capable model. The conversation has "
+                "been rewound to a clean state. Please re-read the "
                 "original request and try again with a correct approach.");
             if (tc.msgs_len + 1 <= tc.msgs_cap ||
                 (tc.msgs = sc_safe_realloc(tc.msgs,
@@ -977,6 +1095,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         sc_llm_message_free_fields(&tc.msgs[i]);
     }
     free(tc.msgs);
+    checkpoints_free_all(&tc);
     for (int i = 0; i < tc.tool_cache_count; i++)
         free(tc.tool_cache[i].result_for_llm);
     sc_tool_definitions_free(tool_defs, tool_count);

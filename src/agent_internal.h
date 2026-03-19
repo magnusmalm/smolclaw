@@ -34,6 +34,16 @@ typedef struct {
 typedef struct { uint32_t hash; int count; } sc_recent_call_t;
 typedef struct { uint32_t key; char *result_for_llm; } sc_cache_entry_t;
 
+/* Checkpoint for rewind recovery */
+#define SC_MAX_CHECKPOINTS 2
+
+typedef struct {
+    sc_llm_message_t *msgs;
+    int msgs_len;
+    int iteration;
+    int total_tool_calls;
+} sc_checkpoint_t;
+
 /* Per-turn mutable state shared across LLM iteration helpers */
 typedef struct {
     const char *session_key;
@@ -69,6 +79,12 @@ typedef struct {
     /* Per-turn tool result cache for read-only tools */
     sc_cache_entry_t tool_cache[SC_TOOL_CACHE_MAX];
     int tool_cache_count;
+
+    /* Checkpoint & rewind */
+    sc_checkpoint_t checkpoints[SC_MAX_CHECKPOINTS];
+    int checkpoint_slot;    /* next slot to write (ring buffer) */
+    int checkpoint_count;   /* how many valid checkpoints we have */
+    int rewind_count;       /* how many rewinds this turn (max 2) */
 
     /* LLM failure tracking — populated when all providers fail */
     char *failure_reason;  /* malloc'd, freed by caller */
