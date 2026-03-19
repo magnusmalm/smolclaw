@@ -155,13 +155,30 @@ static int cmd_backup(int argc, char **argv)
 }
 
 #if SC_ENABLE_STREAMING
-/* Streaming callback: print text deltas to stdout as they arrive */
-static void stream_print_cb(const char *delta, void *ctx)
+/* Streaming callback: handle fine-grained events during LLM response */
+static void stream_print_cb(const sc_stream_event_t *event, void *ctx)
 {
     (void)ctx;
-    if (delta) {
-        fputs(delta, stdout);
-        fflush(stdout);
+    if (!event) return;
+    switch (event->type) {
+    case SC_STREAM_TEXT:
+        if (event->data) {
+            fputs(event->data, stdout);
+            fflush(stdout);
+        }
+        break;
+    case SC_STREAM_TOOL_START:
+        if (event->tool_name) {
+            fprintf(stderr, "\n[calling %s...]\n", event->tool_name);
+            fflush(stderr);
+        }
+        break;
+    case SC_STREAM_THINKING_START:
+        fprintf(stderr, "\n[thinking...]\n");
+        fflush(stderr);
+        break;
+    default:
+        break; /* Other events ignored in CLI mode */
     }
 }
 #endif

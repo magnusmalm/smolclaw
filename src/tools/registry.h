@@ -4,6 +4,37 @@
 #include "tools/types.h"
 #include "providers/types.h"
 
+/*
+ * Tool execution hooks — called before/after every tool execution.
+ *
+ * Pre-tool hook: called after validation, before execute().
+ *   Return 0 to proceed, non-zero to block (returns error result to LLM).
+ *   Args are read-only (do not modify).
+ *
+ * Post-tool hook: called after execute(), before result enters context.
+ *   The result pointer may be modified in-place (e.g., redact content,
+ *   change is_error flag, append to for_user).
+ *   Return value is ignored (reserved for future use).
+ */
+typedef int (*sc_pre_tool_fn)(const char *tool_name, const cJSON *args,
+                               const char *channel, const char *chat_id,
+                               void *userdata);
+typedef int (*sc_post_tool_fn)(const char *tool_name, sc_tool_result_t *result,
+                                const char *channel, const char *chat_id,
+                                void *userdata);
+
+typedef struct {
+    sc_pre_tool_fn fn;
+    void *userdata;
+    const char *name;  /* for logging (borrowed) */
+} sc_pre_tool_hook_t;
+
+typedef struct {
+    sc_post_tool_fn fn;
+    void *userdata;
+    const char *name;  /* for logging (borrowed) */
+} sc_post_tool_hook_t;
+
 typedef struct sc_tool_registry {
     sc_tool_t **tools;
     int count;
@@ -12,6 +43,13 @@ typedef struct sc_tool_registry {
     void *confirm_ctx;
     char **allowed_tools;   /* NULL = all allowed */
     int allowed_count;
+    /* Pre/post tool hook chains */
+    sc_pre_tool_hook_t *pre_hooks;
+    int pre_hook_count;
+    int pre_hook_cap;
+    sc_post_tool_hook_t *post_hooks;
+    int post_hook_count;
+    int post_hook_cap;
 } sc_tool_registry_t;
 
 /* Create/destroy */
@@ -58,5 +96,15 @@ void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
 
 /* Check if a tool is allowed by the allowlist */
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name);
+
+/* Register pre-tool hook (called before execute, return non-zero to block).
+ * name is borrowed (not copied). */
+void sc_tool_registry_add_pre_hook(sc_tool_registry_t *reg, const char *name,
+                                    sc_pre_tool_fn fn, void *userdata);
+
+/* Register post-tool hook (called after execute, can modify result).
+ * name is borrowed (not copied). */
+void sc_tool_registry_add_post_hook(sc_tool_registry_t *reg, const char *name,
+                                     sc_post_tool_fn fn, void *userdata);
 
 #endif /* SC_TOOL_REGISTRY_H */

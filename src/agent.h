@@ -77,6 +77,10 @@ typedef struct sc_agent {
     pthread_t summarize_thread;
     atomic_int summarize_thread_active;
     void *summarize_pending_args;  /* sc_summarize_args_t *, written by thread */
+    /* Context transform chain (invoked between context build and LLM call) */
+    sc_context_transform_t *transforms;
+    int transform_count;
+    int transform_cap;
 } sc_agent_t;
 
 /* Create agent loop */
@@ -112,6 +116,12 @@ void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx);
 
 /* Wait for any pending async summarization to complete */
 void sc_agent_wait_summarize(sc_agent_t *agent);
+
+/* Register a context transform hook.
+ * Transforms are invoked in registration order between context building
+ * and the LLM call. name is borrowed (not copied). */
+void sc_agent_add_transform(sc_agent_t *agent, const char *name,
+                             sc_context_transform_fn fn, void *userdata);
 
 /* Hot-reload safe config fields (limits, allowlist, rate limits) */
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);

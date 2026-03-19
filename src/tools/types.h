@@ -7,13 +7,38 @@
 /* Forward declaration */
 typedef struct sc_tool sc_tool_t;
 
-/* Tool result */
+/*
+ * Tool result — multiplexed output model.
+ *
+ * Each tool result carries separate payloads for the LLM and the user,
+ * enabling five distinct delivery modes via the constructors below:
+ *
+ *   sc_tool_result_new(llm)      — for_llm sent to LLM context; user sees
+ *                                  progress summary (default).
+ *   sc_tool_result_user(content) — for_llm AND for_user set to content;
+ *                                  user sees the content directly.
+ *   sc_tool_result_silent(llm)   — for_llm sent to LLM context; nothing
+ *                                  shown to user (silent=1). Use for
+ *                                  bookkeeping tools (indexing, caching).
+ *   sc_tool_result_async(llm)    — for_llm sent to LLM; agent does not
+ *                                  wait for completion. Use for background
+ *                                  processes (async=1).
+ *   sc_tool_result_error(msg)    — for_llm carries the error; is_error=1
+ *                                  triggers retry/escalation logic in the
+ *                                  agent turn loop.
+ *
+ * The agent turn loop (agent_turn.c) checks these fields to decide:
+ *   - What goes into the LLM message history   (for_llm, always)
+ *   - What gets published to the user channel   (for_user, unless silent)
+ *   - Whether to count toward the error budget  (is_error)
+ *   - Whether to checkpoint after this result   (not is_error, not async)
+ */
 typedef struct {
     char *for_llm;   /* Content sent to LLM for context */
     char *for_user;  /* Content sent directly to user (NULL = none) */
-    int silent;      /* If true, suppress user message */
-    int is_error;    /* Error flag */
-    int async;       /* Async operation flag */
+    int silent;      /* If true, suppress user message entirely */
+    int is_error;    /* Error flag — feeds error budget & escalation */
+    int async;       /* Async operation — agent doesn't wait for completion */
 } sc_tool_result_t;
 
 /* Tool vtable */

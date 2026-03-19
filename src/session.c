@@ -9,42 +9,69 @@
 #include <time.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <stdio.h>
+#include <errno.h>
 
 #define LOG_TAG "session"
-#define INITIAL_MSG_CAP  16
-#define INITIAL_SESS_CAP 8
+#define INITIAL_NODE_CAP  16
+#define INITIAL_SESS_CAP  8
+
+/* ---------- Tree node ---------- */
+
+typedef struct {
+    int id;              /* unique within session, 0-based sequential */
+    int parent_id;       /* -1 for root */
+    sc_llm_message_t msg;
+    long timestamp;
+} sc_session_node_t;
+
+/* ---------- Session ---------- */
 
 struct sc_session {
     char *key;
-    sc_llm_message_t *messages;
-    int message_count;
-    int message_cap;
     char *summary;
-    long created;  /* unix timestamp */
+    long created;
     long updated;
+
+    /* Tree storage (all nodes, indexed by id) */
+    sc_session_node_t *nodes;
+    int node_count;
+    int node_cap;
+
+    /* Active branch state */
+    int active_leaf;     /* node id of current leaf, -1 if empty */
+
+    /* Cached linear branch (root → active_leaf path) */
+    sc_llm_message_t *branch;   /* cloned messages, owned */
+    int branch_count;
+    int branch_dirty;           /* 1 = needs rebuild */
 };
+
+/* ---------- Session manager ---------- */
 
 struct sc_session_manager {
     sc_session_t **sessions;
     int count;
     int cap;
     char *storage_dir;
-    sc_session_t *last_session;  /* cache for repeated lookups */
+    sc_session_t *last_session;
 };
 
-/* ---- Internal helpers ---- */
+/* ---------- Internal helpers ---------- */
 
 static sc_session_t *session_create(const char *key)
 {
     sc_session_t *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
 
-    s->key         = sc_strdup(key);
-    s->messages    = calloc(INITIAL_MSG_CAP, sizeof(sc_llm_message_t));
-    if (!s->messages) { free(s->key); free(s); return NULL; }
-    s->message_cap = INITIAL_MSG_CAP;
-    s->created     = (long)time(NULL);
-    s->updated     = s->created;
+    s->key = sc_strdup(key);
+    s->nodes = calloc(INITIAL_NODE_CAP, sizeof(sc_session_node_t));
+    if (!s->nodes) { free(s->key); free(s); return NULL; }
+    s->node_cap = INITIAL_NODE_CAP;
+    s->active_leaf = -1;
+    s->branch_dirty = 1;
+    s->created = (long)time(NULL);
+    s->updated = s->created;
 
     return s;
 }
@@ -53,29 +80,69 @@ static void session_free(sc_session_t *s)
 {
     if (!s) return;
     free(s->key);
-    for (int i = 0; i < s->message_count; i++) {
-        sc_llm_message_free_fields(&s->messages[i]);
-    }
-    free(s->messages);
     free(s->summary);
+    for (int i = 0; i < s->node_count; i++)
+        sc_llm_message_free_fields(&s->nodes[i].msg);
+    free(s->nodes);
+    /* Free cached branch */
+    for (int i = 0; i < s->branch_count; i++)
+        sc_llm_message_free_fields(&s->branch[i]);
+    free(s->branch);
     free(s);
 }
 
-static int session_ensure_cap(sc_session_t *s)
+static int session_ensure_node_cap(sc_session_t *s)
 {
-    if (s->message_count < s->message_cap) return 0;
-    int new_cap = s->message_cap * 2;
-    sc_llm_message_t *new_msgs = sc_safe_realloc(s->messages,
-                                          (size_t)new_cap * sizeof(sc_llm_message_t));
-    if (!new_msgs) return -1;
-    s->messages    = new_msgs;
-    s->message_cap = new_cap;
+    if (s->node_count < s->node_cap) return 0;
+    int new_cap = s->node_cap * 2;
+    sc_session_node_t *new_nodes = sc_safe_realloc(s->nodes,
+        (size_t)new_cap * sizeof(sc_session_node_t));
+    if (!new_nodes) return -1;
+    s->nodes = new_nodes;
+    s->node_cap = new_cap;
     return 0;
+}
+
+/* Rebuild the cached branch (path from root to active_leaf) */
+static void rebuild_branch(sc_session_t *s)
+{
+    /* Free old cache */
+    for (int i = 0; i < s->branch_count; i++)
+        sc_llm_message_free_fields(&s->branch[i]);
+    free(s->branch);
+    s->branch = NULL;
+    s->branch_count = 0;
+
+    if (s->active_leaf < 0 || s->node_count == 0) {
+        s->branch_dirty = 0;
+        return;
+    }
+
+    /* Walk from active_leaf to root, collecting node indices */
+    int path[4096]; /* max depth */
+    int depth = 0;
+    int cur = s->active_leaf;
+    while (cur >= 0 && cur < s->node_count && depth < 4096) {
+        path[depth++] = cur;
+        cur = s->nodes[cur].parent_id;
+    }
+
+    /* Reverse into root→leaf order and clone messages */
+    s->branch = calloc((size_t)depth, sizeof(sc_llm_message_t));
+    if (!s->branch) {
+        s->branch_dirty = 0;
+        return;
+    }
+    s->branch_count = depth;
+    for (int i = 0; i < depth; i++) {
+        s->branch[i] = sc_llm_message_clone(&s->nodes[path[depth - 1 - i]].msg);
+    }
+
+    s->branch_dirty = 0;
 }
 
 static sc_session_t *find_session(sc_session_manager_t *sm, const char *key)
 {
-    /* Fast path: check cached last session */
     if (sm->last_session && strcmp(sm->last_session->key, key) == 0)
         return sm->last_session;
 
@@ -93,25 +160,31 @@ static int manager_add_session(sc_session_manager_t *sm, sc_session_t *s)
     if (sm->count >= sm->cap) {
         int new_cap = sm->cap * 2;
         sc_session_t **new_arr = sc_safe_realloc(sm->sessions,
-                                          (size_t)new_cap * sizeof(sc_session_t *));
+            (size_t)new_cap * sizeof(sc_session_t *));
         if (!new_arr) return -1;
         sm->sessions = new_arr;
-        sm->cap      = new_cap;
+        sm->cap = new_cap;
     }
     sm->sessions[sm->count++] = s;
     return 0;
 }
 
-/* ---- Serialization helpers ---- */
+/* ---------- Serialization: JSONL tree ---------- */
 
-static cJSON *message_to_json(const sc_llm_message_t *msg)
+static cJSON *node_to_json(const sc_session_node_t *node)
 {
     cJSON *obj = cJSON_CreateObject();
     if (!obj) return NULL;
 
+    cJSON_AddStringToObject(obj, "type", "message");
+    cJSON_AddNumberToObject(obj, "id", node->id);
+    cJSON_AddNumberToObject(obj, "parent_id", node->parent_id);
+    cJSON_AddNumberToObject(obj, "timestamp", (double)node->timestamp);
+
+    const sc_llm_message_t *msg = &node->msg;
     if (msg->role)    cJSON_AddStringToObject(obj, "role", msg->role);
     if (msg->content) cJSON_AddStringToObject(obj, "content", msg->content);
-
+    if (msg->thinking) cJSON_AddStringToObject(obj, "thinking", msg->thinking);
     if (msg->tool_call_id)
         cJSON_AddStringToObject(obj, "tool_call_id", msg->tool_call_id);
 
@@ -125,7 +198,7 @@ static cJSON *message_to_json(const sc_llm_message_t *msg)
                 cJSON_AddStringToObject(tc, "name", msg->tool_calls[i].name);
             if (msg->tool_calls[i].arguments)
                 cJSON_AddItemToObject(tc, "arguments",
-                                      cJSON_Duplicate(msg->tool_calls[i].arguments, 1));
+                    cJSON_Duplicate(msg->tool_calls[i].arguments, 1));
             cJSON_AddItemToArray(calls, tc);
         }
     }
@@ -133,25 +206,28 @@ static cJSON *message_to_json(const sc_llm_message_t *msg)
     return obj;
 }
 
-static sc_llm_message_t message_from_json(const cJSON *obj)
+static sc_session_node_t node_from_json(const cJSON *obj)
 {
-    sc_llm_message_t msg = {0};
+    sc_session_node_t node = {0};
+    node.id = sc_json_get_int(obj, "id", 0);
+    node.parent_id = sc_json_get_int(obj, "parent_id", -1);
+    node.timestamp = (long)sc_json_get_double(obj, "timestamp", 0);
 
-    msg.role    = sc_strdup(sc_json_get_string(obj, "role", NULL));
-    msg.content = sc_strdup(sc_json_get_string(obj, "content", NULL));
-    msg.tool_call_id = sc_strdup(sc_json_get_string(obj, "tool_call_id", NULL));
+    node.msg.role = sc_strdup(sc_json_get_string(obj, "role", NULL));
+    node.msg.content = sc_strdup(sc_json_get_string(obj, "content", NULL));
+    node.msg.thinking = sc_strdup(sc_json_get_string(obj, "thinking", NULL));
+    node.msg.tool_call_id = sc_strdup(sc_json_get_string(obj, "tool_call_id", NULL));
 
     const cJSON *calls = sc_json_get_array(obj, "tool_calls");
     if (calls) {
         int n = cJSON_GetArraySize(calls);
         if (n > 0) {
-            msg.tool_calls = calloc((size_t)n, sizeof(sc_tool_call_t));
-            if (msg.tool_calls) {
-                msg.tool_call_count = 0;
+            node.msg.tool_calls = calloc((size_t)n, sizeof(sc_tool_call_t));
+            if (node.msg.tool_calls) {
                 const cJSON *tc;
                 cJSON_ArrayForEach(tc, calls) {
-                    sc_tool_call_t *c = &msg.tool_calls[msg.tool_call_count++];
-                    c->id   = sc_strdup(sc_json_get_string(tc, "id", NULL));
+                    sc_tool_call_t *c = &node.msg.tool_calls[node.msg.tool_call_count++];
+                    c->id = sc_strdup(sc_json_get_string(tc, "id", NULL));
                     c->name = sc_strdup(sc_json_get_string(tc, "name", NULL));
                     const cJSON *args = cJSON_GetObjectItem(tc, "arguments");
                     c->arguments = args ? cJSON_Duplicate(args, 1) : NULL;
@@ -160,29 +236,100 @@ static sc_llm_message_t message_from_json(const cJSON *obj)
         }
     }
 
-    return msg;
+    return node;
 }
 
-static cJSON *session_to_json(const sc_session_t *s)
+/* Write session as JSONL: header line + one line per node */
+static int session_write_jsonl(const sc_session_t *s, const char *path)
 {
-    cJSON *root = cJSON_CreateObject();
-    if (!root) return NULL;
-
-    cJSON_AddStringToObject(root, "key", s->key);
-    if (s->summary)
-        cJSON_AddStringToObject(root, "summary", s->summary);
-    cJSON_AddNumberToObject(root, "created", (double)s->created);
-    cJSON_AddNumberToObject(root, "updated", (double)s->updated);
-
-    cJSON *msgs = cJSON_AddArrayToObject(root, "messages");
-    for (int i = 0; i < s->message_count; i++) {
-        cJSON_AddItemToArray(msgs, message_to_json(&s->messages[i]));
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        SC_LOG_ERROR(LOG_TAG, "Failed to open %s for writing: %s", path, strerror(errno));
+        return -1;
     }
 
-    return root;
+    /* Header line: metadata */
+    cJSON *hdr = cJSON_CreateObject();
+    cJSON_AddStringToObject(hdr, "type", "header");
+    cJSON_AddStringToObject(hdr, "key", s->key);
+    if (s->summary) cJSON_AddStringToObject(hdr, "summary", s->summary);
+    cJSON_AddNumberToObject(hdr, "created", (double)s->created);
+    cJSON_AddNumberToObject(hdr, "updated", (double)s->updated);
+    cJSON_AddNumberToObject(hdr, "active_leaf", s->active_leaf);
+    char *line = cJSON_PrintUnformatted(hdr);
+    cJSON_Delete(hdr);
+    if (line) { fprintf(f, "%s\n", line); free(line); }
+
+    /* One line per node */
+    for (int i = 0; i < s->node_count; i++) {
+        cJSON *nj = node_to_json(&s->nodes[i]);
+        if (nj) {
+            line = cJSON_PrintUnformatted(nj);
+            cJSON_Delete(nj);
+            if (line) { fprintf(f, "%s\n", line); free(line); }
+        }
+    }
+
+    fclose(f);
+    return 0;
 }
 
-static sc_session_t *session_from_json(const cJSON *root)
+/* Read session from JSONL file */
+static sc_session_t *session_read_jsonl(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+
+    sc_session_t *s = NULL;
+    char buf[65536];
+
+    while (fgets(buf, sizeof(buf), f)) {
+        /* Strip trailing newline */
+        size_t len = strlen(buf);
+        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r'))
+            buf[--len] = '\0';
+        if (len == 0) continue;
+
+        cJSON *obj = cJSON_Parse(buf);
+        if (!obj) continue;
+
+        const char *type = sc_json_get_string(obj, "type", "");
+
+        if (strcmp(type, "header") == 0) {
+            const char *key = sc_json_get_string(obj, "key", NULL);
+            if (!key) { cJSON_Delete(obj); continue; }
+            s = session_create(key);
+            if (!s) { cJSON_Delete(obj); break; }
+            free(s->summary);
+            s->summary = sc_strdup(sc_json_get_string(obj, "summary", NULL));
+            s->created = (long)sc_json_get_double(obj, "created", (double)s->created);
+            s->updated = (long)sc_json_get_double(obj, "updated", (double)s->updated);
+            s->active_leaf = sc_json_get_int(obj, "active_leaf", -1);
+        } else if (strcmp(type, "message") == 0 && s) {
+            if (session_ensure_node_cap(s) == 0) {
+                s->nodes[s->node_count++] = node_from_json(obj);
+            }
+        }
+
+        cJSON_Delete(obj);
+    }
+
+    fclose(f);
+
+    if (s) {
+        /* Validate active_leaf */
+        if (s->active_leaf < 0 || s->active_leaf >= s->node_count) {
+            /* Default to last node */
+            s->active_leaf = s->node_count > 0 ? s->node_count - 1 : -1;
+        }
+        s->branch_dirty = 1;
+    }
+
+    return s;
+}
+
+/* Migrate legacy JSON session to tree format */
+static sc_session_t *session_from_legacy_json(const cJSON *root)
 {
     const char *key = sc_json_get_string(root, "key", NULL);
     if (!key) return NULL;
@@ -197,17 +344,49 @@ static sc_session_t *session_from_json(const cJSON *root)
 
     const cJSON *msgs = sc_json_get_array(root, "messages");
     if (msgs) {
+        int id = 0;
         const cJSON *item;
         cJSON_ArrayForEach(item, msgs) {
-            if (session_ensure_cap(s) != 0) break;
-            s->messages[s->message_count++] = message_from_json(item);
+            if (session_ensure_node_cap(s) != 0) break;
+            sc_session_node_t *node = &s->nodes[s->node_count++];
+            node->id = id;
+            node->parent_id = id > 0 ? id - 1 : -1;
+            node->timestamp = s->updated;
+
+            /* Parse message fields inline (same as old message_from_json) */
+            node->msg.role = sc_strdup(sc_json_get_string(item, "role", NULL));
+            node->msg.content = sc_strdup(sc_json_get_string(item, "content", NULL));
+            node->msg.thinking = sc_strdup(sc_json_get_string(item, "thinking", NULL));
+            node->msg.tool_call_id = sc_strdup(sc_json_get_string(item, "tool_call_id", NULL));
+
+            const cJSON *calls = sc_json_get_array(item, "tool_calls");
+            if (calls) {
+                int n = cJSON_GetArraySize(calls);
+                if (n > 0) {
+                    node->msg.tool_calls = calloc((size_t)n, sizeof(sc_tool_call_t));
+                    if (node->msg.tool_calls) {
+                        const cJSON *tc;
+                        cJSON_ArrayForEach(tc, calls) {
+                            sc_tool_call_t *c = &node->msg.tool_calls[node->msg.tool_call_count++];
+                            c->id = sc_strdup(sc_json_get_string(tc, "id", NULL));
+                            c->name = sc_strdup(sc_json_get_string(tc, "name", NULL));
+                            const cJSON *args = cJSON_GetObjectItem(tc, "arguments");
+                            c->arguments = args ? cJSON_Duplicate(args, 1) : NULL;
+                        }
+                    }
+                }
+            }
+
+            id++;
         }
     }
 
+    s->active_leaf = s->node_count > 0 ? s->node_count - 1 : -1;
+    s->branch_dirty = 1;
     return s;
 }
 
-/* ---- Load sessions from directory ---- */
+/* ---------- Load sessions from directory ---------- */
 
 static void load_sessions(sc_session_manager_t *sm)
 {
@@ -217,22 +396,32 @@ static void load_sessions(sc_session_manager_t *sm)
     struct dirent *ent;
     while ((ent = readdir(dir)) != NULL) {
         size_t len = strlen(ent->d_name);
-        if (len < 6 || strcmp(ent->d_name + len - 5, ".json") != 0)
-            continue;
 
         sc_strbuf_t path;
         sc_strbuf_init(&path);
         sc_strbuf_appendf(&path, "%s/%s", sm->storage_dir, ent->d_name);
         char *fpath = sc_strbuf_finish(&path);
 
-        cJSON *root = sc_json_load_file(fpath);
-        free(fpath);
-        if (!root) continue;
+        sc_session_t *s = NULL;
 
-        sc_session_t *s = session_from_json(root);
-        cJSON_Delete(root);
+        if (len > 6 && strcmp(ent->d_name + len - 6, ".jsonl") == 0) {
+            /* New JSONL tree format */
+            s = session_read_jsonl(fpath);
+        } else if (len > 5 && strcmp(ent->d_name + len - 5, ".json") == 0) {
+            /* Legacy JSON format — migrate */
+            cJSON *root = sc_json_load_file(fpath);
+            if (root) {
+                s = session_from_legacy_json(root);
+                cJSON_Delete(root);
+                if (s) {
+                    SC_LOG_INFO(LOG_TAG, "Migrated legacy session: %s", s->key);
+                }
+            }
+        }
+
+        free(fpath);
+
         if (s) {
-            /* Only add if not already present */
             if (!find_session(sm, s->key)) {
                 manager_add_session(sm, s);
             } else {
@@ -244,19 +433,20 @@ static void load_sessions(sc_session_manager_t *sm)
     closedir(dir);
 }
 
-/* ---- Public API ---- */
+/* ---------- Public API ---------- */
+
+#define SC_MAX_SESSION_KEY_LEN 128
 
 sc_session_manager_t *sc_session_manager_new(const char *storage_dir)
 {
     sc_session_manager_t *sm = calloc(1, sizeof(*sm));
     if (!sm) return NULL;
 
-    sm->sessions    = calloc(INITIAL_SESS_CAP, sizeof(sc_session_t *));
-    sm->cap         = INITIAL_SESS_CAP;
+    sm->sessions = calloc(INITIAL_SESS_CAP, sizeof(sc_session_t *));
+    sm->cap = INITIAL_SESS_CAP;
     sm->storage_dir = sc_strdup(storage_dir);
 
     if (storage_dir) {
-        /* Ensure directory exists (owner-only access) */
         mkdir(sm->storage_dir, 0700);
         load_sessions(sm);
     }
@@ -269,15 +459,12 @@ sc_session_manager_t *sc_session_manager_new(const char *storage_dir)
 void sc_session_manager_free(sc_session_manager_t *sm)
 {
     if (!sm) return;
-    for (int i = 0; i < sm->count; i++) {
+    for (int i = 0; i < sm->count; i++)
         session_free(sm->sessions[i]);
-    }
     free(sm->sessions);
     free(sm->storage_dir);
     free(sm);
 }
-
-#define SC_MAX_SESSION_KEY_LEN 128
 
 sc_session_t *sc_session_get_or_create(sc_session_manager_t *sm, const char *key)
 {
@@ -299,25 +486,42 @@ sc_session_t *sc_session_get_or_create(sc_session_manager_t *sm, const char *key
     return s;
 }
 
+/* Append a node to the tree, parented to active_leaf */
+static int session_append_node(sc_session_t *s, const sc_llm_message_t *msg)
+{
+    if (session_ensure_node_cap(s) != 0) return -1;
+
+    sc_session_node_t *node = &s->nodes[s->node_count];
+    node->id = s->node_count;
+    node->parent_id = s->active_leaf;
+    node->timestamp = (long)time(NULL);
+    node->msg = sc_llm_message_clone(msg);
+
+    s->node_count++;
+    s->active_leaf = node->id;
+    s->branch_dirty = 1;
+    s->updated = node->timestamp;
+    return 0;
+}
+
 void sc_session_add_message(sc_session_manager_t *sm, const char *key,
                             const char *role, const char *content)
 {
     sc_session_t *s = sc_session_get_or_create(sm, key);
     if (!s) return;
 
-    if (session_ensure_cap(s) != 0) return;
-    sc_llm_message_t *msg = &s->messages[s->message_count++];
-    memset(msg, 0, sizeof(*msg));
-    msg->role = sc_strdup(role);
+    sc_llm_message_t msg = {0};
+    msg.role = (char *)role;     /* borrowed for append */
 
-    /* Redact secrets in assistant messages before persisting to disk */
     if (role && strcmp(role, "assistant") == 0 && content) {
         char *redacted = sc_redact_secrets(content);
-        msg->content = redacted ? redacted : sc_strdup(content);
+        msg.content = redacted ? redacted : sc_strdup(content);
+        session_append_node(s, &msg);
+        free(msg.content);
     } else {
-        msg->content = sc_strdup(content);
+        msg.content = (char *)content;
+        session_append_node(s, &msg);
     }
-    s->updated = (long)time(NULL);
 }
 
 void sc_session_add_full_message(sc_session_manager_t *sm, const char *key,
@@ -325,10 +529,7 @@ void sc_session_add_full_message(sc_session_manager_t *sm, const char *key,
 {
     sc_session_t *s = sc_session_get_or_create(sm, key);
     if (!s) return;
-
-    if (session_ensure_cap(s) != 0) return;
-    s->messages[s->message_count++] = sc_llm_message_clone(msg);
-    s->updated = (long)time(NULL);
+    session_append_node(s, msg);
 }
 
 sc_llm_message_t *sc_session_get_history(sc_session_manager_t *sm, const char *key,
@@ -340,8 +541,11 @@ sc_llm_message_t *sc_session_get_history(sc_session_manager_t *sm, const char *k
     sc_session_t *s = find_session(sm, key);
     if (!s) return NULL;
 
-    if (out_count) *out_count = s->message_count;
-    return s->messages;
+    if (s->branch_dirty)
+        rebuild_branch(s);
+
+    if (out_count) *out_count = s->branch_count;
+    return s->branch;
 }
 
 const char *sc_session_get_summary(sc_session_manager_t *sm, const char *key)
@@ -356,7 +560,6 @@ void sc_session_set_summary(sc_session_manager_t *sm, const char *key,
 {
     sc_session_t *s = sc_session_get_or_create(sm, key);
     if (!s) return;
-
     free(s->summary);
     s->summary = sc_strdup(summary);
     s->updated = (long)time(NULL);
@@ -370,23 +573,59 @@ void sc_session_truncate(sc_session_manager_t *sm, const char *key, int keep_las
     if (!s) return;
 
     if (keep_last <= 0) {
-        for (int i = 0; i < s->message_count; i++)
-            sc_llm_message_free_fields(&s->messages[i]);
-        s->message_count = 0;
+        /* Clear all nodes */
+        for (int i = 0; i < s->node_count; i++)
+            sc_llm_message_free_fields(&s->nodes[i].msg);
+        s->node_count = 0;
+        s->active_leaf = -1;
+        s->branch_dirty = 1;
         s->updated = (long)time(NULL);
         return;
     }
 
-    if (s->message_count <= keep_last) return;
+    /* Rebuild branch to know which nodes are on the active path */
+    if (s->branch_dirty)
+        rebuild_branch(s);
 
-    int to_remove = s->message_count - keep_last;
-    for (int i = 0; i < to_remove; i++) {
-        sc_llm_message_free_fields(&s->messages[i]);
+    if (s->branch_count <= keep_last) return;
+
+    /* We need to keep the last keep_last nodes on the active branch.
+     * Strategy: rebuild the tree with only those nodes. */
+    int path[4096];
+    int depth = 0;
+    int cur = s->active_leaf;
+    while (cur >= 0 && cur < s->node_count && depth < 4096) {
+        path[depth++] = cur;
+        cur = s->nodes[cur].parent_id;
     }
 
-    memmove(s->messages, s->messages + to_remove,
-            (size_t)keep_last * sizeof(sc_llm_message_t));
-    s->message_count = keep_last;
+    /* path is leaf→root. We want to keep the last keep_last (closest to leaf). */
+    int to_keep = keep_last < depth ? keep_last : depth;
+
+    /* Build new node array from the kept path */
+    sc_session_node_t *new_nodes = calloc((size_t)to_keep, sizeof(sc_session_node_t));
+    if (!new_nodes) return;
+
+    for (int i = 0; i < to_keep; i++) {
+        int src_idx = path[to_keep - 1 - i]; /* root-first order */
+        new_nodes[i].msg = s->nodes[src_idx].msg;
+        /* Zero out source so we don't double-free */
+        memset(&s->nodes[src_idx].msg, 0, sizeof(sc_llm_message_t));
+        new_nodes[i].id = i;
+        new_nodes[i].parent_id = i > 0 ? i - 1 : -1;
+        new_nodes[i].timestamp = s->nodes[src_idx].timestamp;
+    }
+
+    /* Free all old nodes (messages already zeroed for kept ones) */
+    for (int i = 0; i < s->node_count; i++)
+        sc_llm_message_free_fields(&s->nodes[i].msg);
+    free(s->nodes);
+
+    s->nodes = new_nodes;
+    s->node_count = to_keep;
+    s->node_cap = to_keep;
+    s->active_leaf = to_keep - 1;
+    s->branch_dirty = 1;
     s->updated = (long)time(NULL);
 }
 
@@ -402,18 +641,11 @@ int sc_session_save(sc_session_manager_t *sm, const char *key)
 
     sc_strbuf_t path;
     sc_strbuf_init(&path);
-    sc_strbuf_appendf(&path, "%s/%s.json", sm->storage_dir, safe_name);
+    sc_strbuf_appendf(&path, "%s/%s.jsonl", sm->storage_dir, safe_name);
     char *fpath = sc_strbuf_finish(&path);
     free(safe_name);
 
-    cJSON *json = session_to_json(s);
-    if (!json) {
-        free(fpath);
-        return -1;
-    }
-
-    int ret = sc_json_save_file(fpath, json);
-    cJSON_Delete(json);
+    int ret = session_write_jsonl(s, fpath);
     free(fpath);
 
     if (ret == 0) {
@@ -423,4 +655,51 @@ int sc_session_save(sc_session_manager_t *sm, const char *key)
     }
 
     return ret;
+}
+
+int sc_session_branch(sc_session_manager_t *sm, const char *key, int node_id)
+{
+    if (!sm || !key) return -1;
+
+    sc_session_t *s = find_session(sm, key);
+    if (!s) return -1;
+
+    if (node_id < 0 || node_id >= s->node_count) return -1;
+
+    s->active_leaf = node_id;
+    s->branch_dirty = 1;
+    s->updated = (long)time(NULL);
+
+    SC_LOG_INFO(LOG_TAG, "Session %s branched to node %d", key, node_id);
+    return 0;
+}
+
+int sc_session_branch_count(sc_session_manager_t *sm, const char *key)
+{
+    if (!sm || !key) return 0;
+
+    sc_session_t *s = find_session(sm, key);
+    if (!s || s->node_count == 0) return 0;
+
+    /* A leaf node is one that no other node has as parent_id */
+    int leaves = 0;
+    for (int i = 0; i < s->node_count; i++) {
+        int is_parent = 0;
+        for (int j = 0; j < s->node_count; j++) {
+            if (s->nodes[j].parent_id == s->nodes[i].id) {
+                is_parent = 1;
+                break;
+            }
+        }
+        if (!is_parent) leaves++;
+    }
+    return leaves;
+}
+
+int sc_session_active_leaf(sc_session_manager_t *sm, const char *key)
+{
+    if (!sm || !key) return -1;
+
+    sc_session_t *s = find_session(sm, key);
+    return s ? s->active_leaf : -1;
 }

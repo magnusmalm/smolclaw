@@ -208,6 +208,8 @@ static sc_llm_response_t *parse_response(const char *body)
     int tc_cap = 0;
     int tc_count = 0;
     sc_tool_call_t *tc_list = NULL;
+    sc_strbuf_t thinking_buf;
+    sc_strbuf_init(&thinking_buf);
 
     if (content_arr) {
         int n = cJSON_GetArraySize(content_arr);
@@ -218,6 +220,9 @@ static sc_llm_response_t *parse_response(const char *body)
             if (strcmp(type, "text") == 0) {
                 const char *text = sc_json_get_string(block, "text", "");
                 sc_strbuf_append(&text_buf, text);
+            } else if (strcmp(type, "thinking") == 0) {
+                const char *thinking = sc_json_get_string(block, "thinking", "");
+                sc_strbuf_append(&thinking_buf, thinking);
             } else if (strcmp(type, "tool_use") == 0) {
                 /* Grow tool_calls array if needed */
                 if (tc_count >= tc_cap) {
@@ -243,6 +248,11 @@ static sc_llm_response_t *parse_response(const char *body)
     }
 
     resp->content = sc_strbuf_finish(&text_buf);
+    resp->thinking = sc_strbuf_finish(&thinking_buf);
+    if (resp->thinking && resp->thinking[0] == '\0') {
+        free(resp->thinking);
+        resp->thinking = NULL;
+    }
     resp->tool_calls = tc_list;
     resp->tool_call_count = tc_count;
 
@@ -382,6 +392,7 @@ static sc_llm_response_t *claude_chat(sc_provider_t *self,
 
 typedef struct {
     sc_strbuf_t content;      /* Accumulated text content */
+    sc_strbuf_t thinking;     /* Accumulated thinking content */
     sc_tool_call_t *tool_calls;
     int tool_call_count;
     int tool_call_cap;
@@ -392,6 +403,7 @@ typedef struct {
     /* Track current tool input JSON accumulation */
     sc_strbuf_t tool_input_buf;
     int building_tool_input;
+    int building_thinking;    /* Currently inside a thinking block */
 } claude_stream_ctx_t;
 
 static void claude_stream_event(const char *data, void *ctx)
@@ -412,10 +424,24 @@ static void claude_stream_event(const char *data, void *ctx)
             if (strcmp(dtype, "text_delta") == 0) {
                 const char *text = sc_json_get_string(delta, "text", "");
                 sc_strbuf_append(&sc->content, text);
-                if (sc->user_cb) sc->user_cb(text, sc->user_ctx);
+                if (sc->user_cb) {
+                    sc_stream_event_t ev = { .type = SC_STREAM_TEXT, .data = text };
+                    sc->user_cb(&ev, sc->user_ctx);
+                }
             } else if (strcmp(dtype, "input_json_delta") == 0) {
                 const char *partial = sc_json_get_string(delta, "partial_json", "");
                 sc_strbuf_append(&sc->tool_input_buf, partial);
+                if (sc->user_cb) {
+                    sc_stream_event_t ev = { .type = SC_STREAM_TOOL_ARGS, .data = partial };
+                    sc->user_cb(&ev, sc->user_ctx);
+                }
+            } else if (strcmp(dtype, "thinking_delta") == 0) {
+                const char *thinking = sc_json_get_string(delta, "thinking", "");
+                sc_strbuf_append(&sc->thinking, thinking);
+                if (sc->user_cb) {
+                    sc_stream_event_t ev = { .type = SC_STREAM_THINKING, .data = thinking };
+                    sc->user_cb(&ev, sc->user_ctx);
+                }
             }
         }
     } else if (strcmp(type, "content_block_start") == 0) {
@@ -438,6 +464,20 @@ static void claude_stream_event(const char *data, void *ctx)
                 tc->arguments = NULL;
                 sc->building_tool_input = 1;
                 sc->tool_input_buf.len = 0;
+                if (sc->user_cb) {
+                    sc_stream_event_t ev = {
+                        .type = SC_STREAM_TOOL_START,
+                        .tool_name = tc->name,
+                        .tool_id = tc->id,
+                    };
+                    sc->user_cb(&ev, sc->user_ctx);
+                }
+            } else if (strcmp(cbtype, "thinking") == 0) {
+                sc->building_thinking = 1;
+                if (sc->user_cb) {
+                    sc_stream_event_t ev = { .type = SC_STREAM_THINKING_START };
+                    sc->user_cb(&ev, sc->user_ctx);
+                }
             }
         }
     } else if (strcmp(type, "content_block_stop") == 0) {
@@ -450,6 +490,16 @@ static void claude_stream_event(const char *data, void *ctx)
             free(json_str);
             sc_strbuf_init(&sc->tool_input_buf);
             sc->building_tool_input = 0;
+            if (sc->user_cb) {
+                sc_stream_event_t ev = { .type = SC_STREAM_TOOL_END };
+                sc->user_cb(&ev, sc->user_ctx);
+            }
+        } else if (sc->building_thinking) {
+            sc->building_thinking = 0;
+            if (sc->user_cb) {
+                sc_stream_event_t ev = { .type = SC_STREAM_THINKING_END };
+                sc->user_cb(&ev, sc->user_ctx);
+            }
         }
     } else if (strcmp(type, "message_delta") == 0) {
         cJSON *delta = sc_json_get_object(event, "delta");
@@ -593,6 +643,7 @@ static sc_llm_response_t *claude_chat_stream(sc_provider_t *self,
         SC_LOG_ERROR(LOG_TAG, "Streaming API failed (HTTP %ld): %.500s",
                      http_code, content ? content : "(empty)");
         free(content);
+        free(sc_strbuf_finish(&sc.thinking));
         free(sc.finish_reason);
         for (int i = 0; i < sc.tool_call_count; i++)
             sc_tool_call_free_fields(&sc.tool_calls[i]);
@@ -604,6 +655,11 @@ static sc_llm_response_t *claude_chat_stream(sc_provider_t *self,
     /* Build response */
     sc_llm_response_t *resp = calloc(1, sizeof(*resp));
     resp->content = sc_strbuf_finish(&sc.content);
+    resp->thinking = sc_strbuf_finish(&sc.thinking);
+    if (resp->thinking && resp->thinking[0] == '\0') {
+        free(resp->thinking);
+        resp->thinking = NULL;
+    }
     resp->tool_calls = sc.tool_calls;
     resp->tool_call_count = sc.tool_call_count;
     resp->finish_reason = sc.finish_reason;

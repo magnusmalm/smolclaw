@@ -323,6 +323,192 @@ static void test_session_key_length_limit(void)
     free(cmd);
 }
 
+static void test_session_thinking_persistence(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Save a session with a thinking field */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        sc_session_add_message(sm, "think-test", "user", "Explain quantum physics");
+
+        /* Add assistant message with thinking via full message API */
+        sc_llm_message_t msg = {0};
+        msg.role = sc_strdup("assistant");
+        msg.content = sc_strdup("Here is my explanation.");
+        msg.thinking = sc_strdup("Let me reason step by step about quantum physics...");
+        sc_session_add_full_message(sm, "think-test", &msg);
+        sc_llm_message_free_fields(&msg);
+
+        int ret = sc_session_save(sm, "think-test");
+        ASSERT_INT_EQ(ret, 0);
+        sc_session_manager_free(sm);
+    }
+
+    /* Load and verify thinking survives round-trip */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        int count = 0;
+        sc_llm_message_t *history = sc_session_get_history(sm, "think-test", &count);
+        ASSERT_INT_EQ(count, 2);
+        ASSERT_NOT_NULL(history);
+
+        /* First message: user, no thinking */
+        ASSERT_STR_EQ(history[0].role, "user");
+        ASSERT_NULL(history[0].thinking);
+
+        /* Second message: assistant with thinking */
+        ASSERT_STR_EQ(history[1].role, "assistant");
+        ASSERT_STR_EQ(history[1].content, "Here is my explanation.");
+        ASSERT_NOT_NULL(history[1].thinking);
+        ASSERT(strstr(history[1].thinking, "quantum physics") != NULL,
+               "Thinking should contain original text");
+
+        sc_session_manager_free(sm);
+    }
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
+static void test_session_branching(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+    ASSERT_NOT_NULL(sm);
+
+    /* Build a linear conversation: msg0 -> msg1 -> msg2 */
+    sc_session_add_message(sm, "branch-test", "user", "Question 1");
+    sc_session_add_message(sm, "branch-test", "assistant", "Answer 1");
+    sc_session_add_message(sm, "branch-test", "user", "Follow-up");
+
+    int count = 0;
+    sc_llm_message_t *hist = sc_session_get_history(sm, "branch-test", &count);
+    ASSERT_INT_EQ(count, 3);
+    ASSERT_STR_EQ(hist[2].content, "Follow-up");
+
+    /* Active leaf should be node 2 (0-indexed) */
+    ASSERT_INT_EQ(sc_session_active_leaf(sm, "branch-test"), 2);
+
+    /* Branch from node 1 (after "Answer 1") */
+    int rc = sc_session_branch(sm, "branch-test", 1);
+    ASSERT_INT_EQ(rc, 0);
+    ASSERT_INT_EQ(sc_session_active_leaf(sm, "branch-test"), 1);
+
+    /* History should now be msg0 -> msg1 (2 messages) */
+    hist = sc_session_get_history(sm, "branch-test", &count);
+    ASSERT_INT_EQ(count, 2);
+    ASSERT_STR_EQ(hist[0].content, "Question 1");
+    ASSERT_STR_EQ(hist[1].content, "Answer 1");
+
+    /* Append to the new branch: msg0 -> msg1 -> msg3 */
+    sc_session_add_message(sm, "branch-test", "user", "Different follow-up");
+
+    hist = sc_session_get_history(sm, "branch-test", &count);
+    ASSERT_INT_EQ(count, 3);
+    ASSERT_STR_EQ(hist[2].content, "Different follow-up");
+
+    /* Now we have two branches: 0->1->2 and 0->1->3 */
+    ASSERT_INT_EQ(sc_session_branch_count(sm, "branch-test"), 2);
+
+    /* Switch back to the original branch (node 2) */
+    rc = sc_session_branch(sm, "branch-test", 2);
+    ASSERT_INT_EQ(rc, 0);
+    hist = sc_session_get_history(sm, "branch-test", &count);
+    ASSERT_INT_EQ(count, 3);
+    ASSERT_STR_EQ(hist[2].content, "Follow-up");
+
+    /* Invalid branch target */
+    rc = sc_session_branch(sm, "branch-test", 99);
+    ASSERT_INT_EQ(rc, -1);
+
+    sc_session_manager_free(sm);
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
+static void test_session_jsonl_roundtrip(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Create a branched session, save, reload, verify */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        sc_session_add_message(sm, "jsonl-rt", "user", "Hello");
+        sc_session_add_message(sm, "jsonl-rt", "assistant", "Hi there");
+        sc_session_add_message(sm, "jsonl-rt", "user", "Branch A");
+
+        /* Branch from node 1, add alternative */
+        sc_session_branch(sm, "jsonl-rt", 1);
+        sc_session_add_message(sm, "jsonl-rt", "user", "Branch B");
+
+        ASSERT_INT_EQ(sc_session_branch_count(sm, "jsonl-rt"), 2);
+
+        sc_session_set_summary(sm, "jsonl-rt", "Test summary");
+        int ret = sc_session_save(sm, "jsonl-rt");
+        ASSERT_INT_EQ(ret, 0);
+
+        sc_session_manager_free(sm);
+    }
+
+    /* Reload and verify */
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+
+        /* Active leaf should be node 3 (Branch B) */
+        int leaf = sc_session_active_leaf(sm, "jsonl-rt");
+        ASSERT_INT_EQ(leaf, 3);
+
+        int count = 0;
+        sc_llm_message_t *hist = sc_session_get_history(sm, "jsonl-rt", &count);
+        ASSERT_INT_EQ(count, 3); /* Hello -> Hi there -> Branch B */
+        ASSERT_STR_EQ(hist[2].content, "Branch B");
+
+        /* Summary survived */
+        const char *summary = sc_session_get_summary(sm, "jsonl-rt");
+        ASSERT_NOT_NULL(summary);
+        ASSERT_STR_EQ(summary, "Test summary");
+
+        /* Branch count survived */
+        ASSERT_INT_EQ(sc_session_branch_count(sm, "jsonl-rt"), 2);
+
+        /* Switch to original branch */
+        sc_session_branch(sm, "jsonl-rt", 2);
+        hist = sc_session_get_history(sm, "jsonl-rt", &count);
+        ASSERT_INT_EQ(count, 3);
+        ASSERT_STR_EQ(hist[2].content, "Branch A");
+
+        sc_session_manager_free(sm);
+    }
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 int main(void)
 {
     printf("test_session\n");
@@ -335,6 +521,9 @@ int main(void)
     RUN_TEST(test_session_summary_survives_truncate);
     RUN_TEST(test_session_persistence_roundtrip);
     RUN_TEST(test_session_key_length_limit);
+    RUN_TEST(test_session_thinking_persistence);
+    RUN_TEST(test_session_branching);
+    RUN_TEST(test_session_jsonl_roundtrip);
 
     TEST_REPORT();
 }

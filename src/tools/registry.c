@@ -11,6 +11,7 @@
 
 #include "tools/registry.h"
 #include "tools/types.h"
+#include "tools/schema_validate.h"
 #include "providers/types.h"
 #include "audit.h"
 #include "util/str.h"
@@ -95,6 +96,8 @@ void sc_tool_registry_free(sc_tool_registry_t *reg)
     for (int i = 0; i < reg->allowed_count; i++)
         free(reg->allowed_tools[i]);
     free(reg->allowed_tools);
+    free(reg->pre_hooks);
+    free(reg->post_hooks);
     free(reg);
 }
 
@@ -104,6 +107,42 @@ void sc_tool_registry_set_confirm(sc_tool_registry_t *reg,
     if (!reg) return;
     reg->confirm_cb = cb;
     reg->confirm_ctx = ctx;
+}
+
+void sc_tool_registry_add_pre_hook(sc_tool_registry_t *reg, const char *name,
+                                    sc_pre_tool_fn fn, void *userdata)
+{
+    if (!reg || !fn) return;
+    if (reg->pre_hook_count >= reg->pre_hook_cap) {
+        int new_cap = reg->pre_hook_cap ? reg->pre_hook_cap * 2 : 4;
+        sc_pre_tool_hook_t *new_arr = realloc(reg->pre_hooks,
+            (size_t)new_cap * sizeof(sc_pre_tool_hook_t));
+        if (!new_arr) return;
+        reg->pre_hooks = new_arr;
+        reg->pre_hook_cap = new_cap;
+    }
+    sc_pre_tool_hook_t *h = &reg->pre_hooks[reg->pre_hook_count++];
+    h->fn = fn;
+    h->userdata = userdata;
+    h->name = name ? name : "unnamed";
+}
+
+void sc_tool_registry_add_post_hook(sc_tool_registry_t *reg, const char *name,
+                                     sc_post_tool_fn fn, void *userdata)
+{
+    if (!reg || !fn) return;
+    if (reg->post_hook_count >= reg->post_hook_cap) {
+        int new_cap = reg->post_hook_cap ? reg->post_hook_cap * 2 : 4;
+        sc_post_tool_hook_t *new_arr = realloc(reg->post_hooks,
+            (size_t)new_cap * sizeof(sc_post_tool_hook_t));
+        if (!new_arr) return;
+        reg->post_hooks = new_arr;
+        reg->post_hook_cap = new_cap;
+    }
+    sc_post_tool_hook_t *h = &reg->post_hooks[reg->post_hook_count++];
+    h->fn = fn;
+    h->userdata = userdata;
+    h->name = name ? name : "unnamed";
 }
 
 void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
@@ -210,6 +249,32 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
         free(args_preview);
     }
 
+    /* Validate arguments against tool's JSON Schema */
+    if (tool->parameters) {
+        cJSON *schema = tool->parameters(tool);
+        if (schema) {
+            sc_schema_result_t vr = sc_schema_validate(schema, args);
+            cJSON_Delete(schema);
+            if (!vr.valid) {
+                SC_LOG_WARN("tool", "Schema validation failed for %s: %s",
+                            name, vr.error);
+                return sc_tool_result_error(vr.error);
+            }
+        }
+    }
+
+    /* Pre-tool hooks: return non-zero to block execution */
+    for (int i = 0; i < reg->pre_hook_count; i++) {
+        int rc = reg->pre_hooks[i].fn(name, args, channel, chat_id,
+                                       reg->pre_hooks[i].userdata);
+        if (rc != 0) {
+            SC_LOG_INFO("tool", "Tool %s blocked by pre-hook '%s' (rc=%d)",
+                        name, reg->pre_hooks[i].name, rc);
+            sc_audit_log(name, "(blocked by pre-hook)", 1, 0);
+            return sc_tool_result_error("tool execution blocked by hook");
+        }
+    }
+
     /* Set context if supported */
     if (tool->set_context && channel && chat_id)
         tool->set_context(tool, channel, chat_id);
@@ -226,6 +291,12 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     if (!result) {
         SC_LOG_ERROR("tool", "Tool %s returned NULL result", name);
         return sc_tool_result_error("tool returned no result");
+    }
+
+    /* Post-tool hooks: can modify result in-place */
+    for (int i = 0; i < reg->post_hook_count; i++) {
+        reg->post_hooks[i].fn(name, result, channel, chat_id,
+                               reg->post_hooks[i].userdata);
     }
 
     if (result->is_error) {

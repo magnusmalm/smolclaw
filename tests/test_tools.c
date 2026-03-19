@@ -1792,6 +1792,187 @@ static void test_list_dir_gitignore_negation(void)
     system(cmd);
 }
 
+/* ========== Hook tests ========== */
+
+static int block_exec_hook(const char *tool_name, const cJSON *args,
+                            const char *channel, const char *chat_id,
+                            void *userdata)
+{
+    (void)args; (void)channel; (void)chat_id;
+    int *called = (int *)userdata;
+    *called = 1;
+    /* Block exec tool, allow everything else */
+    return (strcmp(tool_name, "exec") == 0) ? 1 : 0;
+}
+
+static int pass_through_hook(const char *tool_name, const cJSON *args,
+                              const char *channel, const char *chat_id,
+                              void *userdata)
+{
+    (void)tool_name; (void)args; (void)channel; (void)chat_id;
+    int *called = (int *)userdata;
+    *called = 1;
+    return 0;
+}
+
+static int post_hook_redact(const char *tool_name, sc_tool_result_t *result,
+                             const char *channel, const char *chat_id,
+                             void *userdata)
+{
+    (void)tool_name; (void)channel; (void)chat_id;
+    int *called = (int *)userdata;
+    *called = 1;
+    /* Replace for_llm content */
+    if (result && result->for_llm) {
+        free(result->for_llm);
+        result->for_llm = sc_strdup("[REDACTED]");
+    }
+    return 0;
+}
+
+static void test_pre_hook_blocks_tool(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_hooks_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg,
+        sc_tool_exec_new(tmpdir, 0, SC_MAX_OUTPUT_CHARS, SC_DEFAULT_EXEC_TIMEOUT));
+    sc_tool_registry_set_confirm(reg, test_confirm_allow, NULL);
+
+    int hook_called = 0;
+    sc_tool_registry_add_pre_hook(reg, "block_exec", block_exec_hook, &hook_called);
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "echo hello");
+
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "exec", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    ASSERT(strstr(r->for_llm, "blocked") != NULL, "Should mention blocked");
+    ASSERT_INT_EQ(hook_called, 1);
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    sc_tool_registry_free(reg);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_pre_hook_allows_tool(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_hooks_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg, sc_tool_read_file_new(tmpdir, 0));
+
+    int hook_called = 0;
+    sc_tool_registry_add_pre_hook(reg, "passthrough", pass_through_hook, &hook_called);
+
+    /* Create a file to read */
+    char fpath[256];
+    snprintf(fpath, sizeof(fpath), "%s/hooktest.txt", tmpdir);
+    FILE *f = fopen(fpath, "w");
+    fputs("hello hooks", f);
+    fclose(f);
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", "hooktest.txt");
+
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "read_file", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    ASSERT_INT_EQ(hook_called, 1);
+    ASSERT(strstr(r->for_llm, "hello hooks") != NULL, "Should contain file content");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    sc_tool_registry_free(reg);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_post_hook_modifies_result(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_hooks_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg, sc_tool_read_file_new(tmpdir, 0));
+
+    int hook_called = 0;
+    sc_tool_registry_add_post_hook(reg, "redact", post_hook_redact, &hook_called);
+
+    /* Create a file to read */
+    char fpath[256];
+    snprintf(fpath, sizeof(fpath), "%s/secret.txt", tmpdir);
+    FILE *f = fopen(fpath, "w");
+    fputs("sensitive data", f);
+    fclose(f);
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", "secret.txt");
+
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "read_file", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(hook_called, 1);
+    /* Post-hook should have replaced the content */
+    ASSERT_STR_EQ(r->for_llm, "[REDACTED]");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    sc_tool_registry_free(reg);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
+static void test_no_hooks(void)
+{
+    /* No hooks registered — normal behavior */
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_hooks_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg, sc_tool_read_file_new(tmpdir, 0));
+
+    char fpath[256];
+    snprintf(fpath, sizeof(fpath), "%s/normal.txt", tmpdir);
+    FILE *f = fopen(fpath, "w");
+    fputs("normal content", f);
+    fclose(f);
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "path", "normal.txt");
+
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "read_file", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    ASSERT(strstr(r->for_llm, "normal content") != NULL, "Should contain file content");
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    sc_tool_registry_free(reg);
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
+
 int main(void)
 {
     printf("test_tools\n");
@@ -1838,6 +2019,10 @@ int main(void)
     RUN_TEST(test_list_dir_show_all);
     RUN_TEST(test_list_dir_gitignore_file);
     RUN_TEST(test_list_dir_gitignore_negation);
+    RUN_TEST(test_pre_hook_blocks_tool);
+    RUN_TEST(test_pre_hook_allows_tool);
+    RUN_TEST(test_post_hook_modifies_result);
+    RUN_TEST(test_no_hooks);
 
     TEST_REPORT();
 }

@@ -161,6 +161,7 @@ typedef struct {
     int response_count;
     int call_index;
     int chat_call_count;
+    char *last_system_prompt;  /* Captured from most recent chat() call */
 } mock_provider_data_t;
 
 static sc_llm_response_t *mock_chat(sc_provider_t *self,
@@ -170,6 +171,13 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
 {
     mock_provider_data_t *data = self->data;
     data->chat_call_count++;
+    /* Capture system prompt for transform tests */
+    free(data->last_system_prompt);
+    data->last_system_prompt = NULL;
+    if (msg_count > 0 && msgs[0].role && strcmp(msgs[0].role, "system") == 0
+        && msgs[0].content) {
+        data->last_system_prompt = sc_strdup(msgs[0].content);
+    }
     if (data->call_index >= data->response_count) return NULL;
 
     sc_llm_response_t *src = &data->responses[data->call_index++];
@@ -305,9 +313,11 @@ static void destroy_test_agent(test_agent_ctx_t *ctx)
     sc_tool_registry_free(ctx->agent->tools);
     sc_context_builder_free(ctx->agent->context_builder);
     free(ctx->agent->hourly_slots);
+    free(ctx->agent->transforms);
     free(ctx->agent->workspace);
     free(ctx->agent->model);
     free(ctx->agent);
+    free(ctx->mpd->last_system_prompt);
     free(ctx->mpd);
     free(ctx->provider);
     cleanup_dir(ctx->tmpdir);
@@ -981,6 +991,150 @@ static void test_failure_reason_null_provider(void)
     destroy_test_agent(&ctx);
 }
 
+/* ======================================================================
+ * Context transform tests
+ * ====================================================================== */
+
+/* Test transform: appends a marker to the system prompt */
+static int test_transform_append(sc_context_snap_t *snap, void *userdata)
+{
+    const char *marker = (const char *)userdata;
+    if (*snap->msg_count > 0 && (*snap->msgs)[0].role &&
+        strcmp((*snap->msgs)[0].role, "system") == 0) {
+        /* Append marker to system prompt */
+        size_t old_len = strlen((*snap->msgs)[0].content);
+        size_t marker_len = strlen(marker);
+        char *new_content = realloc((*snap->msgs)[0].content,
+                                     old_len + marker_len + 2);
+        if (new_content) {
+            new_content[old_len] = '\n';
+            memcpy(new_content + old_len + 1, marker, marker_len + 1);
+            (*snap->msgs)[0].content = new_content;
+        }
+    }
+    return 0;
+}
+
+/* Test transform: returns non-zero to stop chain */
+static int test_transform_stop(sc_context_snap_t *snap, void *userdata)
+{
+    (void)snap;
+    int *called = (int *)userdata;
+    *called = 1;
+    return 1; /* stop */
+}
+
+/* Test transform: should NOT be called if a previous transform stopped */
+static int test_transform_unreachable(sc_context_snap_t *snap, void *userdata)
+{
+    (void)snap;
+    int *called = (int *)userdata;
+    *called = 1;
+    return 0;
+}
+
+static void test_context_transform_appends(void)
+{
+    /* Register a transform that appends "[INJECTED]" to the system prompt.
+     * Verify the LLM receives the modified prompt. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    sc_agent_add_transform(ctx.agent, "test_inject",
+                            test_transform_append, (void *)"[INJECTED]");
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "Response.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "test-xform");
+    ASSERT_NOT_NULL(response);
+    ASSERT_NOT_NULL(ctx.mpd->last_system_prompt);
+    ASSERT(strstr(ctx.mpd->last_system_prompt, "[INJECTED]") != NULL,
+           "System prompt should contain injected marker");
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_context_transform_chain_order(void)
+{
+    /* Register two transforms. Both should run, in order. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    sc_agent_add_transform(ctx.agent, "first",
+                            test_transform_append, (void *)"[FIRST]");
+    sc_agent_add_transform(ctx.agent, "second",
+                            test_transform_append, (void *)"[SECOND]");
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "OK.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hi", "test-chain");
+    ASSERT_NOT_NULL(response);
+    ASSERT_NOT_NULL(ctx.mpd->last_system_prompt);
+
+    /* Both markers present */
+    ASSERT(strstr(ctx.mpd->last_system_prompt, "[FIRST]") != NULL,
+           "Should contain [FIRST]");
+    ASSERT(strstr(ctx.mpd->last_system_prompt, "[SECOND]") != NULL,
+           "Should contain [SECOND]");
+
+    /* [FIRST] should appear before [SECOND] */
+    const char *first_pos = strstr(ctx.mpd->last_system_prompt, "[FIRST]");
+    const char *second_pos = strstr(ctx.mpd->last_system_prompt, "[SECOND]");
+    ASSERT(first_pos < second_pos, "[FIRST] should appear before [SECOND]");
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_context_transform_stop_chain(void)
+{
+    /* First transform returns non-zero → second should not be called. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    int stop_called = 0, unreachable_called = 0;
+
+    sc_agent_add_transform(ctx.agent, "stopper",
+                            test_transform_stop, &stop_called);
+    sc_agent_add_transform(ctx.agent, "unreachable",
+                            test_transform_unreachable, &unreachable_called);
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "Done.", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Test", "test-stop");
+    ASSERT_NOT_NULL(response);
+    ASSERT_INT_EQ(stop_called, 1);
+    ASSERT_INT_EQ(unreachable_called, 0);
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+static void test_no_transforms(void)
+{
+    /* No transforms registered — baseline behavior unchanged. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "Hello!", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hi", "test-noxform");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Hello!");
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -1005,6 +1159,10 @@ int main(void)
     RUN_TEST(test_failure_reason_with_fallbacks);
     RUN_TEST(test_failure_reason_all_401);
     RUN_TEST(test_failure_reason_null_provider);
+    RUN_TEST(test_context_transform_appends);
+    RUN_TEST(test_context_transform_chain_order);
+    RUN_TEST(test_context_transform_stop_chain);
+    RUN_TEST(test_no_transforms);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

@@ -20,6 +20,7 @@ typedef struct {
     sc_tool_call_t *tool_calls;  /* Array of tool calls (assistant msgs) */
     int tool_call_count;
     char *tool_call_id;   /* For tool result messages */
+    char *thinking;       /* Extended thinking text (NULL if none) */
 } sc_llm_message_t;
 
 /* Usage info */
@@ -35,6 +36,7 @@ typedef struct {
     sc_tool_call_t *tool_calls;
     int tool_call_count;
     char *finish_reason;
+    char *thinking;        /* Extended thinking text (NULL if none) */
     sc_usage_info_t usage;
     int http_status;       /* 0 = curl error, >0 = HTTP status code */
     int retry_after_secs;  /* From Retry-After header, 0 if absent */
@@ -47,8 +49,28 @@ typedef struct {
     cJSON *parameters; /* JSON Schema object (owned) */
 } sc_tool_definition_t;
 
-/* Streaming callback: called with each text delta, NULL delta signals end */
-typedef void (*sc_stream_cb)(const char *delta, void *ctx);
+/* Streaming event types */
+typedef enum {
+    SC_STREAM_TEXT,            /* Regular text delta */
+    SC_STREAM_TOOL_START,      /* Tool call started (name known) */
+    SC_STREAM_TOOL_ARGS,       /* Partial tool argument JSON */
+    SC_STREAM_TOOL_END,        /* Tool call definition complete */
+    SC_STREAM_THINKING_START,  /* Extended thinking block started */
+    SC_STREAM_THINKING,        /* Thinking text delta */
+    SC_STREAM_THINKING_END,    /* Thinking block ended */
+} sc_stream_event_type_t;
+
+/* Streaming event passed to stream callback */
+typedef struct {
+    sc_stream_event_type_t type;
+    const char *data;          /* Text/JSON delta (NULL for start/end markers) */
+    const char *tool_name;     /* Tool name (for TOOL_START, NULL otherwise) */
+    const char *tool_id;       /* Tool call ID (for TOOL_START, NULL otherwise) */
+} sc_stream_event_t;
+
+/* Streaming callback: called with each event during LLM response.
+ * A NULL event pointer signals end of stream. */
+typedef void (*sc_stream_cb)(const sc_stream_event_t *event, void *ctx);
 
 /* Provider vtable */
 struct sc_provider {

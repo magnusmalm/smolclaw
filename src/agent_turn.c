@@ -6,6 +6,7 @@
 
 #include "agent_internal.h"
 
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -142,7 +143,8 @@ static const char *extract_user_intent(const sc_llm_message_t *msgs, int count)
 /* ---------- Per-turn tool result cache ---------- */
 
 static const char * const read_only_tools[] = {
-    "read_file", "list_dir", "memory_read", "memory_search", NULL
+    "read_file", "list_dir", "memory_read", "memory_search",
+    "web_search", "web_fetch", "context_search", NULL
 };
 
 static int is_read_only_tool(const char *name)
@@ -714,174 +716,393 @@ static sc_llm_response_t *call_llm_with_fallback(
     return NULL;
 }
 
+/* ---------- Parallel tool execution ---------- */
+
+/* Per-slot state for parallel execution */
+enum tool_slot_state {
+    SLOT_NEEDS_EXEC,    /* Needs execution (not cached, not stuck) */
+    SLOT_CACHED,        /* Result came from cache */
+    SLOT_STUCK_HINT,    /* Stuck loop: hint message injected */
+    SLOT_STUCK_BREAK,   /* Stuck loop: hard stop */
+    SLOT_LIMIT_HIT,     /* Turn limits exceeded */
+};
+
+typedef struct {
+    /* Input */
+    sc_tool_call_t *call;
+    sc_tool_registry_t *registry;
+    const char *channel;
+    const char *chat_id;
+    const char *user_intent;
+
+    /* Output */
+    sc_tool_result_t *result;
+    int cacheable;
+    uint32_t ckey;
+    enum tool_slot_state state;
+} tool_slot_t;
+
+/* Thread function for parallel tool execution */
+typedef struct {
+    tool_slot_t *slot;
+} parallel_tool_arg_t;
+
+static void *parallel_tool_thread(void *arg)
+{
+    parallel_tool_arg_t *pa = arg;
+    tool_slot_t *slot = pa->slot;
+
+    slot->result = sc_tool_registry_execute(
+        slot->registry, slot->call->name, slot->call->arguments,
+        slot->channel, slot->chat_id, (void *)slot->user_intent);
+
+    return NULL;
+}
+
+/* Append a tool result message to the context, growing the buffer if needed.
+ * Returns 0 on success, 1 on OOM. */
+static int append_tool_msg(sc_agent_t *agent, sc_turn_ctx_t *tc,
+                            sc_tool_call_t *call, sc_tool_result_t *result,
+                            int iteration)
+{
+    sc_llm_message_t tool_msg = wrap_tool_output(call, result, tc);
+
+    if (tc->msgs_len + 1 > tc->msgs_cap) {
+        int new_cap = tc->msgs_cap + 16;
+        sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
+            (size_t)new_cap * sizeof(sc_llm_message_t));
+        if (!new_msgs) {
+            SC_LOG_ERROR("agent", "OOM growing message array");
+            sc_llm_message_free_fields(&tool_msg);
+            return 1;
+        }
+        tc->msgs = new_msgs;
+        tc->msgs_cap = new_cap;
+    }
+
+    tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&tool_msg);
+    sc_session_add_full_message(agent->sessions, tc->session_key, &tool_msg);
+    sc_llm_message_free_fields(&tool_msg);
+    return 0;
+}
+
+/* Process a completed tool result: error budget, user progress, message append.
+ * Returns: 0 = continue, 1 = limit hit (out_content set), -1 = rewind triggered */
+static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
+                               tool_slot_t *slot, int iteration,
+                               char **out_content)
+{
+    sc_tool_call_t *call = slot->call;
+    sc_tool_result_t *result = slot->result;
+
+    if (result && result->is_error) {
+        char *preview = sc_truncate(result->for_llm, 200);
+        emit_progress(agent, tc, "  <- %s ERROR: %s", call->name,
+                      preview ? preview : "(no detail)");
+        free(preview);
+
+        tc->tool_error_count++;
+        int name_errs = track_tool_name_error(tc, call->name);
+
+        if (name_errs >= 3) {
+            SC_LOG_WARN("agent", "Tool '%s' failed %d times with different args",
+                        call->name, name_errs);
+            sc_audit_log_ext(call->name, "tool_name_stuck", 1, 0,
+                             tc->channel, tc->chat_id, "stuck_loop");
+        }
+
+        if (tc->tool_error_count >= 5) {
+            SC_LOG_WARN("agent", "Error budget exhausted: %d tool errors this turn",
+                        tc->tool_error_count);
+            sc_audit_log_ext("agent", "error_budget_exhausted", 1, 0,
+                             tc->channel, tc->chat_id, "error_budget");
+            *out_content = sc_strdup(
+                "Stopped: too many tool errors this turn. "
+                "Please describe what you're trying to accomplish "
+                "and I'll suggest an alternative approach.");
+            return 1;
+        }
+
+        if (tc->tool_error_count == 3) {
+            if (checkpoint_rewind(tc)) {
+                SC_LOG_WARN("agent", "3 tool errors — rewinding to checkpoint (rewind %d/2)",
+                            tc->rewind_count);
+                sc_audit_log_ext("agent", "checkpoint_rewind", 0, 0,
+                                 tc->channel, tc->chat_id, "rewind");
+
+                sc_llm_message_t rw_msg = sc_msg_user(
+                    "Your previous approach failed after 3 tool errors. "
+                    "The conversation has been rewound to the last successful "
+                    "state. Try a completely different approach.");
+                if (tc->msgs_len + 1 <= tc->msgs_cap ||
+                    (tc->msgs = sc_safe_realloc(tc->msgs,
+                        (size_t)(tc->msgs_cap + 16) * sizeof(sc_llm_message_t)),
+                     tc->msgs && (tc->msgs_cap += 16))) {
+                    tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&rw_msg);
+                }
+                sc_llm_message_free_fields(&rw_msg);
+                return -1; /* rewind */
+            }
+            SC_LOG_WARN("agent", "3 tool errors, no checkpoint available");
+        }
+    } else {
+        if (result && result->for_user && !result->silent) {
+            sc_outbound_msg_t *user_msg = sc_outbound_msg_new(
+                tc->channel, tc->chat_id, result->for_user);
+            if (user_msg) {
+                user_msg->is_progress = 1;
+                sc_bus_publish_outbound(agent->bus, user_msg);
+            }
+        } else if (!result || !result->silent) {
+            emit_progress(agent, tc, "  <- %s ok", call->name);
+        }
+    }
+
+    if (append_tool_msg(agent, tc, call, result, iteration)) {
+        *out_content = NULL;
+        return 1;
+    }
+
+    return 0;
+}
+
 /* ---------- Tool call execution ---------- */
 
 static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
                                sc_turn_ctx_t *tc, int iteration,
                                char **out_content)
 {
-    for (int t = 0; t < resp->tool_call_count; t++) {
+    int n = resp->tool_call_count;
+    tool_slot_t *slots = calloc((size_t)n, sizeof(tool_slot_t));
+    if (!slots) { *out_content = NULL; return 1; }
+
+    /*
+     * Phase 1 — Preflight (sequential).
+     * For each tool call: turn limits, stuck loop, cache lookup.
+     * Collect into slots with state indicating what to do next.
+     */
+    for (int t = 0; t < n; t++) {
         sc_tool_call_t *call = &resp->tool_calls[t];
+        tool_slot_t *s = &slots[t];
+
+        s->call = call;
+        s->registry = agent->tools;
+        s->channel = tc->channel;
+        s->chat_id = tc->chat_id;
+        s->user_intent = tc->user_intent;
+        s->state = SLOT_NEEDS_EXEC;
+
         tc->total_tool_calls++;
         hourly_record(agent, tc->root_session_key, 1, agent->max_tool_calls_per_hour);
 
         if (sc_shutdown_requested()) {
-            SC_LOG_INFO("agent", "Shutdown requested, aborting turn");
             *out_content = sc_strdup("Stopped: shutdown requested.");
+            free(slots);
             return 1;
         }
 
         const char *limit_msg = check_turn_limits(agent, tc);
         if (limit_msg) {
             *out_content = sc_strdup(limit_msg);
+            free(slots);
             return 1;
         }
 
         SC_LOG_INFO("agent", "Tool call: %s", call->name);
         emit_progress(agent, tc, "  -> %s ...", call->name);
 
-        /* Check per-turn cache for read-only tools */
-        sc_tool_result_t *result = NULL;
-        int cacheable = is_read_only_tool(call->name);
-        uint32_t ckey = 0;
+        s->cacheable = is_read_only_tool(call->name);
 
-        if (cacheable) {
-            ckey = cache_key_hash(call->name, call->arguments);
-            result = cache_lookup(tc, ckey);
-            if (result)
+        if (s->cacheable) {
+            s->ckey = cache_key_hash(call->name, call->arguments);
+            s->result = cache_lookup(tc, s->ckey);
+            if (s->result) {
                 SC_LOG_DEBUG("agent", "Tool cache hit: %s", call->name);
-        }
-
-        if (!result) {
-            int stuck = check_stuck_loop(call, tc, iteration);
-            if (stuck == 2) {
-                *out_content = sc_strdup("Stopped: repeated tool call detected.");
-                return 1;
-            }
-            if (stuck == 1) {
-                sc_llm_message_t hint_msg = sc_msg_tool_result(call->id,
-                    "Error: You have called this tool with identical arguments "
-                    "multiple times and it keeps failing. Try a different "
-                    "approach or different parameters.");
-                if (tc->msgs_len + 1 > tc->msgs_cap) {
-                    int new_cap = tc->msgs_cap + 16;
-                    sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
-                        (size_t)new_cap * sizeof(sc_llm_message_t));
-                    if (new_msgs) {
-                        tc->msgs = new_msgs; tc->msgs_cap = new_cap;
-                    } else {
-                        SC_LOG_ERROR("agent", "OOM growing message array for hint");
-                    }
-                }
-                if (tc->msgs_len < tc->msgs_cap) {
-                    tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&hint_msg);
-                    sc_session_add_full_message(agent->sessions,
-                                                 tc->session_key, &hint_msg);
-                }
-                sc_llm_message_free_fields(&hint_msg);
+                s->state = SLOT_CACHED;
                 continue;
             }
-
-            result = sc_tool_registry_execute(
-                agent->tools, call->name, call->arguments,
-                tc->channel, tc->chat_id, (void *)tc->user_intent);
-
-            if (cacheable && result && !result->is_error)
-                cache_store(tc, ckey, result);
         }
 
-        if (result && result->is_error) {
-            char *preview = sc_truncate(result->for_llm, 200);
-            emit_progress(agent, tc, "  <- %s ERROR: %s", call->name,
-                          preview ? preview : "(no detail)");
-            free(preview);
-
-            /* Option 2: Error budget — track total errors this turn */
-            tc->tool_error_count++;
-
-            /* Option 3: Per-tool-name error tracking */
-            int name_errs = track_tool_name_error(tc, call->name);
-
-            if (name_errs >= 3) {
-                SC_LOG_WARN("agent", "Tool '%s' failed %d times with different args",
-                            call->name, name_errs);
-                sc_audit_log_ext(call->name, "tool_name_stuck", 1, 0,
-                                 tc->channel, tc->chat_id, "stuck_loop");
-            }
-
-            if (tc->tool_error_count >= 5) {
-                SC_LOG_WARN("agent", "Error budget exhausted: %d tool errors this turn",
-                            tc->tool_error_count);
-                sc_audit_log_ext("agent", "error_budget_exhausted", 1, 0,
-                                 tc->channel, tc->chat_id, "error_budget");
-                *out_content = sc_strdup(
-                    "Stopped: too many tool errors this turn. "
-                    "Please describe what you're trying to accomplish "
-                    "and I'll suggest an alternative approach.");
-                sc_tool_result_free(result);
-                return 1;
-            }
-
-            if (tc->tool_error_count == 3) {
-                /* Rewind to checkpoint if available */
-                if (checkpoint_rewind(tc)) {
-                    SC_LOG_WARN("agent", "3 tool errors — rewinding to checkpoint (rewind %d/2)",
-                                tc->rewind_count);
-                    sc_audit_log_ext("agent", "checkpoint_rewind", 0, 0,
-                                     tc->channel, tc->chat_id, "rewind");
-
-                    /* Inject hint into rewound context */
-                    sc_llm_message_t rw_msg = sc_msg_user(
-                        "Your previous approach failed after 3 tool errors. "
-                        "The conversation has been rewound to the last successful "
-                        "state. Try a completely different approach.");
-                    if (tc->msgs_len + 1 <= tc->msgs_cap ||
-                        (tc->msgs = sc_safe_realloc(tc->msgs,
-                            (size_t)(tc->msgs_cap + 16) * sizeof(sc_llm_message_t)),
-                         tc->msgs && (tc->msgs_cap += 16))) {
-                        tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&rw_msg);
-                    }
-                    sc_llm_message_free_fields(&rw_msg);
-                    sc_tool_result_free(result);
-
-                    /* Break out of tool loop — the main iteration loop
-                     * will call the LLM again with the rewound context */
-                    return 0;
+        int stuck = check_stuck_loop(call, tc, iteration);
+        if (stuck == 2) {
+            *out_content = sc_strdup("Stopped: repeated tool call detected.");
+            free(slots);
+            return 1;
+        }
+        if (stuck == 1) {
+            sc_llm_message_t hint_msg = sc_msg_tool_result(call->id,
+                "Error: You have called this tool with identical arguments "
+                "multiple times and it keeps failing. Try a different "
+                "approach or different parameters.");
+            if (tc->msgs_len + 1 > tc->msgs_cap) {
+                int new_cap = tc->msgs_cap + 16;
+                sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
+                    (size_t)new_cap * sizeof(sc_llm_message_t));
+                if (new_msgs) {
+                    tc->msgs = new_msgs; tc->msgs_cap = new_cap;
                 }
-                SC_LOG_WARN("agent", "3 tool errors, no checkpoint available");
             }
-        } else {
-            emit_progress(agent, tc, "  <- %s ok", call->name);
+            if (tc->msgs_len < tc->msgs_cap) {
+                tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&hint_msg);
+                sc_session_add_full_message(agent->sessions,
+                                             tc->session_key, &hint_msg);
+            }
+            sc_llm_message_free_fields(&hint_msg);
+            s->state = SLOT_STUCK_HINT;
+            continue;
         }
 
-        sc_llm_message_t tool_msg = wrap_tool_output(call, result, tc);
-
-        /* Checkpoint after successful tool execution */
-        if (!result || !result->is_error)
-            checkpoint_save(tc, iteration);
-
-        if (tc->msgs_len + 1 > tc->msgs_cap) {
-            int new_cap = tc->msgs_cap + 16;
-            sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,
-                (size_t)new_cap * sizeof(sc_llm_message_t));
-            if (!new_msgs) {
-                SC_LOG_ERROR("agent", "OOM growing message array");
-                sc_llm_message_free_fields(&tool_msg);
-                sc_tool_result_free(result);
-                *out_content = NULL;
-                return 1;
-            }
-            tc->msgs = new_msgs;
-            tc->msgs_cap = new_cap;
-        }
-
-        tc->msgs[tc->msgs_len++] = sc_llm_message_clone(&tool_msg);
-        sc_session_add_full_message(agent->sessions, tc->session_key, &tool_msg);
-        sc_llm_message_free_fields(&tool_msg);
-        sc_tool_result_free(result);
+        /* Needs real execution */
+        s->state = SLOT_NEEDS_EXEC;
     }
 
-    return 0;
+    /*
+     * Phase 2 — Execute.
+     * Read-only tools that need execution run in parallel.
+     * Side-effect tools run sequentially on the main thread.
+     *
+     * Scan for a batch of consecutive read-only SLOT_NEEDS_EXEC slots,
+     * launch them in parallel, then run any side-effect tool sequentially,
+     * repeat until all slots are processed.
+     */
+    int t = 0;
+    while (t < n) {
+        if (slots[t].state != SLOT_NEEDS_EXEC) {
+            t++;
+            continue;
+        }
+
+        if (is_read_only_tool(slots[t].call->name)) {
+            /* Collect a run of consecutive read-only NEEDS_EXEC slots */
+            int batch_start = t;
+            int batch_end = t;
+            while (batch_end < n &&
+                   slots[batch_end].state == SLOT_NEEDS_EXEC &&
+                   is_read_only_tool(slots[batch_end].call->name)) {
+                batch_end++;
+            }
+            int batch_count = batch_end - batch_start;
+
+            if (batch_count == 1) {
+                /* Single tool — just execute inline */
+                tool_slot_t *s = &slots[batch_start];
+                s->result = sc_tool_registry_execute(
+                    s->registry, s->call->name, s->call->arguments,
+                    s->channel, s->chat_id, (void *)s->user_intent);
+            } else {
+                /* Multiple read-only tools — execute in parallel */
+                SC_LOG_INFO("agent", "Executing %d read-only tools in parallel",
+                            batch_count);
+
+                pthread_t *threads = calloc((size_t)batch_count, sizeof(pthread_t));
+                parallel_tool_arg_t *args = calloc((size_t)batch_count,
+                                                    sizeof(parallel_tool_arg_t));
+                if (!threads || !args) {
+                    /* Fallback: execute sequentially */
+                    free(threads);
+                    free(args);
+                    for (int i = batch_start; i < batch_end; i++) {
+                        tool_slot_t *s = &slots[i];
+                        s->result = sc_tool_registry_execute(
+                            s->registry, s->call->name, s->call->arguments,
+                            s->channel, s->chat_id, (void *)s->user_intent);
+                    }
+                } else {
+                    for (int i = 0; i < batch_count; i++) {
+                        args[i].slot = &slots[batch_start + i];
+                        int rc = pthread_create(&threads[i], NULL,
+                                                parallel_tool_thread, &args[i]);
+                        if (rc != 0) {
+                            /* Thread creation failed — execute inline */
+                            SC_LOG_WARN("agent", "pthread_create failed for %s, executing inline",
+                                        slots[batch_start + i].call->name);
+                            tool_slot_t *s = &slots[batch_start + i];
+                            s->result = sc_tool_registry_execute(
+                                s->registry, s->call->name, s->call->arguments,
+                                s->channel, s->chat_id, (void *)s->user_intent);
+                            threads[i] = 0;
+                        }
+                    }
+
+                    for (int i = 0; i < batch_count; i++) {
+                        if (threads[i])
+                            pthread_join(threads[i], NULL);
+                    }
+
+                    free(threads);
+                    free(args);
+                }
+            }
+
+            /* Cache successful read-only results */
+            for (int i = batch_start; i < batch_end; i++) {
+                tool_slot_t *s = &slots[i];
+                if (s->cacheable && s->result && !s->result->is_error)
+                    cache_store(tc, s->ckey, s->result);
+            }
+
+            t = batch_end;
+        } else {
+            /* Side-effect tool — execute sequentially on main thread */
+            tool_slot_t *s = &slots[t];
+            s->result = sc_tool_registry_execute(
+                s->registry, s->call->name, s->call->arguments,
+                s->channel, s->chat_id, (void *)s->user_intent);
+            if (s->cacheable && s->result && !s->result->is_error)
+                cache_store(tc, s->ckey, s->result);
+            t++;
+        }
+    }
+
+    /*
+     * Phase 3 — Postprocess (sequential, source order).
+     * Error budget, user progress, message wrapping, checkpoint.
+     */
+    int any_success = 0;
+    int ret = 0;
+
+    for (t = 0; t < n; t++) {
+        tool_slot_t *s = &slots[t];
+
+        if (s->state == SLOT_STUCK_HINT)
+            continue; /* hint already injected in phase 1 */
+
+        int pp = postprocess_result(agent, tc, s, iteration, out_content);
+        if (pp == 1) {
+            /* Limit hit — free remaining results and return */
+            sc_tool_result_free(s->result);
+            for (int j = t + 1; j < n; j++) {
+                if (slots[j].state == SLOT_NEEDS_EXEC ||
+                    slots[j].state == SLOT_CACHED)
+                    sc_tool_result_free(slots[j].result);
+            }
+            free(slots);
+            return 1;
+        }
+        if (pp == -1) {
+            /* Rewind triggered — free remaining results and return 0 */
+            sc_tool_result_free(s->result);
+            for (int j = t + 1; j < n; j++) {
+                if (slots[j].state == SLOT_NEEDS_EXEC ||
+                    slots[j].state == SLOT_CACHED)
+                    sc_tool_result_free(slots[j].result);
+            }
+            free(slots);
+            return 0;
+        }
+
+        if (!s->result || !s->result->is_error)
+            any_success = 1;
+
+        sc_tool_result_free(s->result);
+    }
+
+    /* Single checkpoint after the entire batch */
+    if (any_success)
+        checkpoint_save(tc, iteration);
+
+    free(slots);
+    return ret;
 }
 
 /* ---------- Turn summary logging ---------- */
@@ -1019,6 +1240,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
         sc_llm_message_t assist_msg = sc_msg_assistant_with_tools(
             resp->content, resp->tool_calls, resp->tool_call_count);
+        assist_msg.thinking = sc_strdup(resp->thinking);
 
         int needed = tc.msgs_len + 1 + resp->tool_call_count;
         if (needed > tc.msgs_cap) {

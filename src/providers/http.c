@@ -114,6 +114,7 @@ void sc_llm_message_free_fields(sc_llm_message_t *msg)
     free(msg->role);
     free(msg->content);
     free(msg->tool_call_id);
+    free(msg->thinking);
     for (int i = 0; i < msg->tool_call_count; i++) {
         sc_tool_call_free_fields(&msg->tool_calls[i]);
     }
@@ -121,6 +122,7 @@ void sc_llm_message_free_fields(sc_llm_message_t *msg)
     msg->role = NULL;
     msg->content = NULL;
     msg->tool_call_id = NULL;
+    msg->thinking = NULL;
     msg->tool_calls = NULL;
     msg->tool_call_count = 0;
 }
@@ -140,6 +142,7 @@ sc_llm_message_t sc_llm_message_clone(const sc_llm_message_t *msg)
         .role = sc_strdup(msg->role),
         .content = sc_strdup(msg->content),
         .tool_call_id = sc_strdup(msg->tool_call_id),
+        .thinking = sc_strdup(msg->thinking),
         .tool_calls = NULL,
         .tool_call_count = msg->tool_call_count,
     };
@@ -163,6 +166,7 @@ void sc_llm_response_free(sc_llm_response_t *resp)
 {
     if (!resp) return;
     free(resp->content);
+    free(resp->thinking);
     for (int i = 0; i < resp->tool_call_count; i++) {
         sc_tool_call_free_fields(&resp->tool_calls[i]);
     }
@@ -204,7 +208,19 @@ static cJSON *build_messages_json(sc_llm_message_t *msgs, int msg_count)
         cJSON *msg_obj = cJSON_CreateObject();
         cJSON_AddStringToObject(msg_obj, "role", m->role);
 
-        if (m->content) {
+        if (m->thinking && m->content &&
+            m->role && strcmp(m->role, "assistant") == 0) {
+            /* Cross-provider: convert thinking to XML tags */
+            sc_strbuf_t combined;
+            sc_strbuf_init(&combined);
+            sc_strbuf_append(&combined, "<thinking>\n");
+            sc_strbuf_append(&combined, m->thinking);
+            sc_strbuf_append(&combined, "\n</thinking>\n\n");
+            sc_strbuf_append(&combined, m->content);
+            char *merged = sc_strbuf_finish(&combined);
+            cJSON_AddStringToObject(msg_obj, "content", merged);
+            free(merged);
+        } else if (m->content) {
             cJSON_AddStringToObject(msg_obj, "content", m->content);
         } else if (strcmp(m->role, "assistant") != 0) {
             cJSON_AddStringToObject(msg_obj, "content", "");
@@ -515,7 +531,10 @@ static void http_stream_event(const char *data, void *ctx)
         const char *content = sc_json_get_string(delta, "content", NULL);
         if (content) {
             sc_strbuf_append(&sc->content, content);
-            if (sc->user_cb) sc->user_cb(content, sc->user_ctx);
+            if (sc->user_cb) {
+                sc_stream_event_t ev = { .type = SC_STREAM_TEXT, .data = content };
+                sc->user_cb(&ev, sc->user_ctx);
+            }
         }
 
         /* Tool call deltas */
@@ -564,11 +583,26 @@ static void http_stream_event(const char *data, void *ctx)
                 cJSON *fn = sc_json_get_object(tc_delta, "function");
                 if (fn) {
                     const char *name = sc_json_get_string(fn, "name", NULL);
-                    if (name && !tc->name) tc->name = sc_strdup(name);
+                    if (name && !tc->name) {
+                        tc->name = sc_strdup(name);
+                        if (sc->user_cb) {
+                            sc_stream_event_t ev = {
+                                .type = SC_STREAM_TOOL_START,
+                                .tool_name = tc->name,
+                                .tool_id = tc->id,
+                            };
+                            sc->user_cb(&ev, sc->user_ctx);
+                        }
+                    }
 
                     const char *args = sc_json_get_string(fn, "arguments", NULL);
                     if (args && idx < sc->tool_arg_buf_count) {
                         sc_strbuf_append(&sc->tool_arg_bufs[idx], args);
+                        if (sc->user_cb) {
+                            sc_stream_event_t ev = {
+                                .type = SC_STREAM_TOOL_ARGS, .data = args };
+                            sc->user_cb(&ev, sc->user_ctx);
+                        }
                     }
                 }
             }
@@ -580,6 +614,13 @@ static void http_stream_event(const char *data, void *ctx)
     if (fr) {
         free(sc->finish_reason);
         sc->finish_reason = sc_strdup(fr);
+        /* Emit TOOL_END for each tool when finish_reason signals completion */
+        if (strcmp(fr, "tool_calls") == 0 && sc->user_cb) {
+            for (int i = 0; i < sc->tool_call_count; i++) {
+                sc_stream_event_t ev = { .type = SC_STREAM_TOOL_END };
+                sc->user_cb(&ev, sc->user_ctx);
+            }
+        }
     }
 
     cJSON_Delete(event);

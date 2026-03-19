@@ -731,6 +731,7 @@ void sc_agent_free(sc_agent_t *agent)
     free(agent->alias_names);
     free(agent->alias_models);
     free(agent->hourly_slots);
+    free(agent->transforms);
     /* provider and bus are borrowed */
     free(agent);
 }
@@ -780,6 +781,24 @@ void sc_agent_set_stream_cb(sc_agent_t *agent, sc_stream_cb cb, void *ctx)
     if (!agent) return;
     agent->stream_cb = cb;
     agent->stream_ctx = ctx;
+}
+
+void sc_agent_add_transform(sc_agent_t *agent, const char *name,
+                             sc_context_transform_fn fn, void *userdata)
+{
+    if (!agent || !fn) return;
+    if (agent->transform_count >= agent->transform_cap) {
+        int new_cap = agent->transform_cap ? agent->transform_cap * 2 : 4;
+        sc_context_transform_t *new_arr = realloc(agent->transforms,
+            (size_t)new_cap * sizeof(sc_context_transform_t));
+        if (!new_arr) return;
+        agent->transforms = new_arr;
+        agent->transform_cap = new_cap;
+    }
+    sc_context_transform_t *t = &agent->transforms[agent->transform_count++];
+    t->fn = fn;
+    t->userdata = userdata;
+    t->name = name ? name : "unnamed";
 }
 
 void sc_agent_wait_summarize(sc_agent_t *agent)
@@ -1025,6 +1044,34 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         summary, actual_message,
         channel, chat_id,
         &msg_count);
+
+    if (!messages)
+        return sc_strdup("Error: failed to build context messages.");
+
+    /* Apply context transforms */
+    if (agent->transform_count > 0) {
+        int msg_cap = msg_count + 16; /* headroom for transforms that append */
+        messages = realloc(messages, (size_t)msg_cap * sizeof(sc_llm_message_t));
+        if (messages) {
+            sc_context_snap_t snap = {
+                .msgs = &messages,
+                .msg_count = &msg_count,
+                .msg_cap = &msg_cap,
+                .channel = channel,
+                .session_key = session_key,
+            };
+            for (int i = 0; i < agent->transform_count; i++) {
+                SC_LOG_DEBUG("agent", "Running context transform: %s",
+                             agent->transforms[i].name);
+                int rc = agent->transforms[i].fn(&snap, agent->transforms[i].userdata);
+                if (rc != 0) {
+                    SC_LOG_WARN("agent", "Context transform '%s' returned %d, skipping remaining",
+                                agent->transforms[i].name, rc);
+                    break;
+                }
+            }
+        }
+    }
 
     if (!messages)
         return sc_strdup("Error: failed to build context messages.");
