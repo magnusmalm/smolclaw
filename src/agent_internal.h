@@ -57,6 +57,12 @@ typedef struct {
     sc_recent_call_t recent_calls[SC_MAX_RECENT_CALLS];
     int recent_count;
 
+    /* Error tracking — tool failures per turn */
+    int tool_error_count;
+    int tool_name_error_counts[SC_MAX_RECENT_CALLS]; /* per-tool error count */
+    uint32_t tool_name_hashes[SC_MAX_RECENT_CALLS];
+    int tool_name_count;
+
     /* Intent threading: original user question (borrowed, not owned) */
     const char *user_intent;
 

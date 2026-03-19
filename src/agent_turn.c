@@ -329,6 +329,33 @@ static int check_stuck_loop(const sc_tool_call_t *call, sc_turn_ctx_t *tc,
     return 0;
 }
 
+/*
+ * Track per-tool-name error count (regardless of args).
+ * Catches "same tool, different bad args" patterns that bypass
+ * the exact-match stuck loop detection above.
+ * Returns the error count for this tool name.
+ */
+static int track_tool_name_error(sc_turn_ctx_t *tc, const char *tool_name)
+{
+    uint32_t h = 2166136261u;
+    for (const char *p = tool_name; *p; p++)
+        h = (h ^ (uint8_t)*p) * 16777619u;
+
+    for (int i = 0; i < tc->tool_name_count; i++) {
+        if (tc->tool_name_hashes[i] == h) {
+            return ++tc->tool_name_error_counts[i];
+        }
+    }
+
+    if (tc->tool_name_count < SC_MAX_RECENT_CALLS) {
+        int slot = tc->tool_name_count++;
+        tc->tool_name_hashes[slot] = h;
+        tc->tool_name_error_counts[slot] = 1;
+        return 1;
+    }
+    return 1;
+}
+
 /* ---------- Tool output wrapping ---------- */
 
 static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
@@ -685,6 +712,37 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
             emit_progress(agent, tc, "  <- %s ERROR: %s", call->name,
                           preview ? preview : "(no detail)");
             free(preview);
+
+            /* Option 2: Error budget — track total errors this turn */
+            tc->tool_error_count++;
+
+            /* Option 3: Per-tool-name error tracking */
+            int name_errs = track_tool_name_error(tc, call->name);
+
+            if (name_errs >= 3) {
+                SC_LOG_WARN("agent", "Tool '%s' failed %d times with different args",
+                            call->name, name_errs);
+                sc_audit_log_ext(call->name, "tool_name_stuck", 1, 0,
+                                 tc->channel, tc->chat_id, "stuck_loop");
+            }
+
+            if (tc->tool_error_count >= 5) {
+                SC_LOG_WARN("agent", "Error budget exhausted: %d tool errors this turn",
+                            tc->tool_error_count);
+                sc_audit_log_ext("agent", "error_budget_exhausted", 1, 0,
+                                 tc->channel, tc->chat_id, "error_budget");
+                *out_content = sc_strdup(
+                    "Stopped: too many tool errors this turn. "
+                    "Please describe what you're trying to accomplish "
+                    "and I'll suggest an alternative approach.");
+                sc_tool_result_free(result);
+                return 1;
+            }
+
+            if (tc->tool_error_count == 3) {
+                /* Inject a strong hint at 3 errors */
+                SC_LOG_WARN("agent", "3 tool errors — injecting guidance hint");
+            }
         } else {
             emit_progress(agent, tc, "  <- %s ok", call->name);
         }
@@ -873,6 +931,43 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                                             &final_content);
 
         sc_llm_response_free(resp);
+
+        /* Option 1: Model escalation on error budget exhaustion.
+         * If the current model is the primary (local) and we've hit
+         * the error budget, retry remaining work with a fallback model. */
+        if (limit_hit && tc.tool_error_count >= 5 &&
+            agent->fallback_count > 0) {
+            SC_LOG_INFO("agent", "Escalating to fallback model after %d tool errors",
+                        tc.tool_error_count);
+            sc_audit_log_ext("agent", "model_escalation", 0, 0,
+                             tc.channel, tc.chat_id, "escalation");
+
+            /* Reset error counts for the retry */
+            tc.tool_error_count = 0;
+            tc.tool_name_count = 0;
+            tc.recent_count = 0;
+            free(final_content);
+            final_content = NULL;
+
+            /* Inject escalation hint into conversation */
+            sc_llm_message_t esc_msg = sc_msg_user(
+                "The previous approach failed repeatedly. You are now "
+                "running on a more capable model. Please re-read the "
+                "original request and try again with a correct approach.");
+            if (tc.msgs_len + 1 <= tc.msgs_cap ||
+                (tc.msgs = sc_safe_realloc(tc.msgs,
+                    (size_t)(tc.msgs_cap + 16) * sizeof(sc_llm_message_t)),
+                 tc.msgs && (tc.msgs_cap += 16))) {
+                tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&esc_msg);
+            }
+            sc_llm_message_free_fields(&esc_msg);
+
+            /* Continue the loop with the fallback provider/model */
+            provider = agent->fallback_providers[0];
+            model = agent->fallback_models[0];
+            continue;
+        }
+
         if (limit_hit) break;
     }
 
