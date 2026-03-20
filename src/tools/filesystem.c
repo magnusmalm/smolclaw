@@ -247,13 +247,27 @@ static char *fs_validate_path(const fs_tool_data_t *d, const char *path,
 
     char *resolved = sc_validate_path(path, d->workspace, d->restrict_to_workspace);
     if (!resolved) {
-        static _Thread_local char ws_err[512];
-        snprintf(ws_err, sizeof(ws_err),
-                 "Access denied: '%s' is outside the workspace. "
-                 "Use paths relative to your workspace root, e.g. 'hello.py' or "
-                 "'projects/myrepo/file.py' (NOT 'workspace/hello.py'). "
-                 "Your workspace is: %s",
-                 path, d->workspace);
+        static _Thread_local char ws_err[768];
+
+        /* Extract a suggested filename from the rejected path */
+        const char *basename = strrchr(path, '/');
+        basename = basename ? basename + 1 : path;
+
+        if (basename[0] && strcmp(basename, ".") != 0 &&
+            strcmp(basename, "..") != 0) {
+            snprintf(ws_err, sizeof(ws_err),
+                     "Access denied: '%s' is outside the workspace. "
+                     "Did you mean '%s'? "
+                     "Use workspace-relative paths like '%s' or "
+                     "'projects/myrepo/%s'.",
+                     path, basename, basename, basename);
+        } else {
+            snprintf(ws_err, sizeof(ws_err),
+                     "Access denied: '%s' is outside the workspace. "
+                     "Use workspace-relative paths like 'file.py' or "
+                     "'projects/myrepo/file.py'.",
+                     path);
+        }
         *err_msg = ws_err;
         return NULL;
     }
