@@ -349,11 +349,13 @@ static sc_session_t *session_from_legacy_json(const cJSON *root)
         cJSON_ArrayForEach(item, msgs) {
             if (session_ensure_node_cap(s) != 0) break;
             sc_session_node_t *node = &s->nodes[s->node_count++];
+            memset(node, 0, sizeof(*node));
             node->id = id;
             node->parent_id = id > 0 ? id - 1 : -1;
             node->timestamp = s->updated;
 
-            /* Parse message fields inline (same as old message_from_json) */
+            /* Parse message fields — use memset above to zero all fields
+             * so any missing fields (like thinking) are safely NULL */
             node->msg.role = sc_strdup(sc_json_get_string(item, "role", NULL));
             node->msg.content = sc_strdup(sc_json_get_string(item, "content", NULL));
             node->msg.thinking = sc_strdup(sc_json_get_string(item, "thinking", NULL));
@@ -411,11 +413,19 @@ static void load_sessions(sc_session_manager_t *sm)
             /* Legacy JSON format — migrate */
             cJSON *root = sc_json_load_file(fpath);
             if (root) {
-                s = session_from_legacy_json(root);
-                cJSON_Delete(root);
-                if (s) {
-                    SC_LOG_INFO(LOG_TAG, "Migrated legacy session: %s", s->key);
+                /* Validate minimal structure before migration */
+                const char *jkey = sc_json_get_string(root, "key", NULL);
+                const cJSON *jmsgs = cJSON_GetObjectItem(root, "messages");
+                if (jkey && jmsgs && cJSON_IsArray(jmsgs)) {
+                    s = session_from_legacy_json(root);
+                    if (s) {
+                        SC_LOG_INFO(LOG_TAG, "Migrated legacy session: %s", s->key);
+                    }
+                } else {
+                    SC_LOG_WARN(LOG_TAG, "Skipping malformed legacy session: %s",
+                                ent->d_name);
                 }
+                cJSON_Delete(root);
             }
         }
 
