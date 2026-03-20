@@ -117,10 +117,12 @@ static int is_sensitive_path(const char *resolved)
         return 1;
     if (strstr(resolved, "/.kube/") || str_ends_with(resolved, "/.kube"))
         return 1;
-    /* Agent config directory (config, sessions, pairing, audit — but NOT workspace) */
+    /* Agent config directory (config, sessions, pairing, audit — but NOT workspace).
+     * Multi-agent layout: ~/.smolclaw/agents/<name>/workspace/
+     * Single-agent layout: ~/.smolclaw/workspace/ */
     if (strstr(resolved, "/.smolclaw/") || str_ends_with(resolved, "/.smolclaw")) {
-        if (!strstr(resolved, "/.smolclaw/workspace/") &&
-            !str_ends_with(resolved, "/.smolclaw/workspace"))
+        if (!strstr(resolved, "/workspace/") &&
+            !str_ends_with(resolved, "/workspace"))
             return 1;
     }
 
