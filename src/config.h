@@ -220,6 +220,9 @@ typedef struct {
     /* Send progress updates (LLM calls, tool calls) to the channel */
     int verbose;
 
+    /* Auto-approve tool confirmations (for headless/autonomous operation) */
+    int auto_confirm;
+
     /* Model aliases for in-prompt override */
     char **model_alias_names;
     char **model_alias_models;

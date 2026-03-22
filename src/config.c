@@ -493,6 +493,7 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->memory_consolidation, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_CONSOLIDATION");
     env_override_bool(&cfg->announce_on_join, "SMOLCLAW_ANNOUNCE_ON_JOIN");
     env_override_bool(&cfg->verbose, "SMOLCLAW_AGENTS_DEFAULTS_VERBOSE");
+    env_override_bool(&cfg->auto_confirm, "SMOLCLAW_AGENTS_DEFAULTS_AUTO_CONFIRM");
     env_override_bool(&cfg->tee_enabled, "SMOLCLAW_AGENTS_DEFAULTS_TEE_ENABLED");
     env_override_int(&cfg->tee_max_files, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILES");
     env_override_int(&cfg->tee_max_file_size, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILE_SIZE");
@@ -868,6 +869,8 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->announce_on_join = sc_json_get_bool(defaults, "announce_on_join",
                                               cfg->announce_on_join);
     cfg->verbose = sc_json_get_bool(defaults, "verbose", cfg->verbose);
+    cfg->auto_confirm = sc_json_get_bool(defaults, "auto_confirm",
+                                          cfg->auto_confirm);
 
     /* Tee config from agents.defaults.tee.{enabled,max_files,max_file_size} */
     const cJSON *tee = sc_json_get_object(defaults, "tee");

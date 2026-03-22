@@ -95,6 +95,9 @@ static void install_signal(int signo, void (*handler)(int))
     sigaction(signo, &sa, NULL);
 }
 
+/* Auto-approve callback for headless/autonomous operation (defined later) */
+static int gateway_auto_confirm(const char *tool, const char *args, void *ctx);
+
 /* Load config, exit if NULL (strict security mode rejects version mismatch) */
 static sc_config_t *load_config_or_exit(void)
 {
@@ -579,8 +582,12 @@ static void cmd_agent(int argc, char **argv)
     /* Wire SIGINT so Ctrl+C sets g_shutdown for mid-turn abort */
     install_signal(SIGINT, signal_handler);
 
-    /* Set CLI confirmation callback for dangerous tools */
-    sc_tool_registry_set_confirm(agent->tools, sc_cli_confirm_tool, NULL);
+    /* Set tool confirmation callback — auto-approve for headless operation,
+     * interactive CLI prompt otherwise */
+    if (cfg->auto_confirm)
+        sc_tool_registry_set_confirm(agent->tools, gateway_auto_confirm, NULL);
+    else
+        sc_tool_registry_set_confirm(agent->tools, sc_cli_confirm_tool, NULL);
 
     /* Wire allowlist from config */
     if (cfg->allowed_tools && cfg->allowed_tool_count > 0) {
