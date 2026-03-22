@@ -627,6 +627,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_turn_secs = cfg->max_turn_secs;
     agent->max_output_total = cfg->max_output_total;
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
+    agent->max_tokens_per_hour = cfg->max_tokens_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
     agent->verbose = cfg->verbose;
     agent->running = 0;
@@ -663,6 +664,8 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 
     /* Cost tracker */
     agent->cost_tracker = sc_cost_tracker_new(workspace);
+    if (agent->cost_tracker && cfg->pricing_overrides)
+        sc_cost_tracker_set_pricing(agent->cost_tracker, cfg->pricing_overrides);
 
 #if SC_ENABLE_ANALYTICS
     agent->analytics = sc_analytics_new(workspace);
@@ -816,6 +819,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_turn_secs = cfg->max_turn_secs;
     agent->max_output_total = cfg->max_output_total;
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
+    agent->max_tokens_per_hour = cfg->max_tokens_per_hour;
     agent->verbose = cfg->verbose;
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;

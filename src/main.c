@@ -909,25 +909,35 @@ static void cmd_cost(int argc, char **argv)
     char *workspace = sc_config_workspace_path(cfg);
     sc_cost_tracker_t *ct = sc_cost_tracker_new(workspace);
     free(workspace);
-    sc_config_free(cfg);
 
     if (!ct) {
         fprintf(stderr, "Error: could not initialize cost tracker\n");
+        sc_config_free(cfg);
         return;
     }
 
+    /* Wire pricing overrides so print_summary shows dollar amounts */
+    if (cfg->pricing_overrides)
+        sc_cost_tracker_set_pricing(ct, cfg->pricing_overrides);
+
     int do_reset = 0;
+    int do_sessions = 0;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--reset") == 0 || strcmp(argv[i], "-r") == 0)
             do_reset = 1;
+        else if (strcmp(argv[i], "--sessions") == 0 || strcmp(argv[i], "-s") == 0)
+            do_sessions = 1;
     }
 
     if (do_reset)
         sc_cost_tracker_reset(ct);
+    else if (do_sessions)
+        sc_cost_tracker_print_sessions(ct);
     else
         sc_cost_tracker_print_summary(ct);
 
     sc_cost_tracker_free(ct);
+    sc_config_free(cfg);
 }
 
 #if SC_ENABLE_ANALYTICS

@@ -128,6 +128,62 @@ static int hourly_remaining(const sc_agent_t *agent, const char *session_key,
     return limit;
 }
 
+/* Record token usage in hourly window. Returns remaining budget. */
+static int hourly_token_record(sc_agent_t *agent, const char *session_key,
+                                int tokens, int limit)
+{
+    if (limit <= 0 || !agent->hourly_slots) return limit;
+
+    sc_hourly_slot_t *slots = (sc_hourly_slot_t *)agent->hourly_slots;
+    uint32_t h = fnv1a_str(session_key);
+    time_t now = time(NULL);
+    int oldest = 0;
+    time_t oldest_time = now + 1;
+
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        double elapsed = difftime(now, slots[i].window_start);
+        if (slots[i].key_hash == h &&
+            strncmp(slots[i].key_prefix, session_key ? session_key : "",
+                    sizeof(slots[i].key_prefix) - 1) == 0 &&
+            elapsed >= 0 && elapsed < 3600) {
+            slots[i].token_count += tokens;
+            return limit - slots[i].token_count;
+        }
+        if (slots[i].window_start < oldest_time) {
+            oldest_time = slots[i].window_start;
+            oldest = i;
+        }
+    }
+
+    slots[oldest].key_hash = h;
+    copy_key_prefix(slots[oldest].key_prefix, session_key);
+    slots[oldest].token_count = tokens;
+    slots[oldest].window_start = now;
+    return limit - tokens;
+}
+
+/* Check hourly token budget without recording. */
+static int hourly_token_remaining(const sc_agent_t *agent,
+                                   const char *session_key, int limit)
+{
+    if (limit <= 0 || !agent->hourly_slots) return limit;
+
+    const sc_hourly_slot_t *slots = (const sc_hourly_slot_t *)agent->hourly_slots;
+    uint32_t h = fnv1a_str(session_key);
+    time_t now = time(NULL);
+
+    for (int i = 0; i < SC_HOURLY_SLOTS; i++) {
+        double elapsed = difftime(now, slots[i].window_start);
+        if (slots[i].key_hash == h &&
+            strncmp(slots[i].key_prefix, session_key ? session_key : "",
+                    sizeof(slots[i].key_prefix) - 1) == 0 &&
+            elapsed >= 0 && elapsed < 3600) {
+            return limit - slots[i].token_count;
+        }
+    }
+    return limit;
+}
+
 /* ---------- Intent threading ---------- */
 
 /* Extract user's original question from the message array (last user msg) */
@@ -280,6 +336,15 @@ static const char *check_turn_limits(const sc_agent_t *agent,
         sc_audit_log_ext("agent", "hourly_tool_limit", 1, 0,
                          tc->channel, tc->chat_id, "rate_limit");
         return "Stopped: hourly tool call limit exceeded. Try again later.";
+    }
+    if (agent->max_tokens_per_hour > 0 &&
+        hourly_token_remaining(agent, tc->root_session_key,
+                               agent->max_tokens_per_hour) <= 0) {
+        SC_LOG_WARN("agent", "Hourly token limit reached (%d/hour)",
+                    agent->max_tokens_per_hour);
+        sc_audit_log_ext("agent", "hourly_token_limit", 1, 0,
+                         tc->channel, tc->chat_id, "rate_limit");
+        return "Stopped: hourly token budget exceeded. Try again later.";
     }
     return NULL;
 }
@@ -1127,6 +1192,11 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
     if (agent->cost_tracker)
         sc_cost_tracker_record(agent->cost_tracker, model, tc->session_key,
                                 tc->prompt_tokens, tc->completion_tokens);
+
+    /* Record tokens in hourly budget tracker */
+    if (agent->max_tokens_per_hour > 0)
+        hourly_token_record(agent, tc->root_session_key ? tc->root_session_key : tc->session_key,
+                            total, agent->max_tokens_per_hour);
 
 #if SC_ENABLE_ANALYTICS
     if (agent->analytics)

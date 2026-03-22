@@ -23,6 +23,7 @@ typedef struct {
     uint32_t key_hash;
     char key_prefix[32];  /* collision detection */
     int tool_calls;
+    int token_count;      /* total tokens consumed in this window */
     time_t window_start;
 } sc_hourly_slot_t;
 

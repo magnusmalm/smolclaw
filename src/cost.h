@@ -1,11 +1,18 @@
 #ifndef SC_COST_H
 #define SC_COST_H
 
+struct cJSON;
+
 /* Opaque cost tracker */
 typedef struct sc_cost_tracker sc_cost_tracker_t;
 
 /* Create cost tracker, loading existing data from workspace/state/costs.json */
 sc_cost_tracker_t *sc_cost_tracker_new(const char *workspace);
+
+/* Set pricing overrides from config (borrowed pointer, not owned).
+ * Format: {"model-name": {"prompt": rate, "completion": rate}} ($/M tokens) */
+void sc_cost_tracker_set_pricing(sc_cost_tracker_t *ct,
+                                  struct cJSON *overrides);
 
 /* Record tokens for a turn */
 void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
@@ -14,6 +21,9 @@ void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
 
 /* Print summary table to stdout */
 void sc_cost_tracker_print_summary(sc_cost_tracker_t *ct);
+
+/* Print per-session breakdown to stdout */
+void sc_cost_tracker_print_sessions(sc_cost_tracker_t *ct);
 
 /* Reset all tracked data */
 void sc_cost_tracker_reset(sc_cost_tracker_t *ct);

@@ -186,6 +186,7 @@ typedef struct {
 
     /* Cross-turn rate limiting */
     int max_tool_calls_per_hour;
+    int max_tokens_per_hour;  /* 0 = unlimited */
 
     /* Gateway rate limiting */
     int rate_limit_per_minute;
@@ -207,6 +208,10 @@ typedef struct {
     int tee_enabled;           /* default 1 */
     int tee_max_files;         /* default 50 */
     int tee_max_file_size;     /* default 10*1024*1024 */
+
+    /* Pricing overrides: {"model": {"prompt": rate, "completion": rate}} ($/M tokens).
+     * Borrowed pointer from parsed config JSON, not owned. */
+    struct cJSON *pricing_overrides;
 
     /* Persistent log file (NULL = stderr only) */
     char *log_path;
