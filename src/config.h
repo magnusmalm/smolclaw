@@ -201,6 +201,9 @@ typedef struct {
     char **exec_allowed_commands;    /* e.g., ["ls", "cat", "grep", ...] */
     int exec_allowed_command_count;
 
+    /* Network scope for outbound tool requests (SC_NET_SCOPE_*) */
+    int network_scope;           /* 0=none, 1=local, 2=public (default), 3=any */
+
     /* OS-level sandbox for exec children (Landlock + seccomp-bpf) */
     int sandbox_enabled;
 
@@ -274,6 +277,9 @@ typedef struct {
 
     /* Delegation */
     sc_delegation_config_t delegation;
+
+    /* Notifications (Apprise-compatible URLs) */
+    char *notify_urls;  /* comma-separated, e.g. "discord://id/tok,tg://bot/chat" */
 
     /* Raw JSON for round-trip preservation */
     cJSON *raw;

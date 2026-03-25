@@ -14,6 +14,7 @@
 
 #include "memory_index.h"
 #include "logger.h"
+#include "util/db_migrate.h"
 #include "util/str.h"
 
 #include <sqlite3.h>
@@ -30,6 +31,21 @@
 #define CHUNK_THRESHOLD_LINES 200
 #define CHUNK_SIZE_LINES      100
 #define CHUNK_OVERLAP_LINES   10
+
+/* Schema migrations */
+static const char MEMORY_MIG_V1[] =
+    "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
+    "  source UNINDEXED,"
+    "  content,"
+    "  tokenize = 'porter unicode61'"
+    ");"
+    "CREATE TABLE IF NOT EXISTS memory_hashes ("
+    "  source TEXT PRIMARY KEY,"
+    "  content_hash TEXT NOT NULL,"
+    "  mtime INTEGER NOT NULL"
+    ");";
+
+static const char *const MEMORY_MIGRATIONS[] = { MEMORY_MIG_V1 };
 
 struct sc_memory_index {
     sqlite3 *db;
@@ -161,31 +177,14 @@ sc_memory_index_t *sc_memory_index_new(const char *db_path)
     /* WAL mode for crash safety and concurrent reads */
     sqlite3_exec(idx->db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
 
-    /* Create FTS5 virtual table */
-    const char *create_sql =
-        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5("
-        "  source UNINDEXED,"
-        "  content,"
-        "  tokenize = 'porter unicode61'"
-        ")";
-    char *err = NULL;
-    rc = sqlite3_exec(idx->db, create_sql, NULL, NULL, &err);
-    if (rc != SQLITE_OK) {
-        SC_LOG_ERROR(LOG_TAG, "Failed to create FTS5 table: %s",
-                     err ? err : "unknown");
-        sqlite3_free(err);
+    /* Run schema migrations (arrays defined at file scope) */
+    int nmig = (int)(sizeof(MEMORY_MIGRATIONS) / sizeof(MEMORY_MIGRATIONS[0]));
+    if (sc_db_migrate(idx->db, MEMORY_MIGRATIONS, nmig, "memory_index") < 0) {
+        SC_LOG_ERROR(LOG_TAG, "Schema migration failed");
         sqlite3_close(idx->db);
         free(idx);
         return NULL;
     }
-
-    /* Content hashing table for incremental rebuild */
-    sqlite3_exec(idx->db,
-        "CREATE TABLE IF NOT EXISTS memory_hashes ("
-        "  source TEXT PRIMARY KEY,"
-        "  content_hash TEXT NOT NULL,"
-        "  mtime INTEGER NOT NULL"
-        ")", NULL, NULL, NULL);
 
     /* Prepare statements */
     /* Put: delete old then insert (FTS5 doesn't support REPLACE) */

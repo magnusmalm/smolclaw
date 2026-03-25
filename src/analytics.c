@@ -14,6 +14,7 @@
 #include <time.h>
 #include <sqlite3.h>
 
+#include "util/db_migrate.h"
 #include "util/str.h"
 #include "logger.h"
 
@@ -25,7 +26,8 @@ struct sc_analytics {
     sqlite3_stmt *insert_stmt;
 };
 
-static const char *CREATE_SQL =
+/* Migration v1: initial schema */
+static const char MIGRATION_V1[] =
     "CREATE TABLE IF NOT EXISTS turns ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  ts INTEGER NOT NULL,"
@@ -40,6 +42,14 @@ static const char *CREATE_SQL =
     "CREATE INDEX IF NOT EXISTS idx_turns_ts ON turns(ts);"
     "CREATE INDEX IF NOT EXISTS idx_turns_model ON turns(model);"
     "CREATE INDEX IF NOT EXISTS idx_turns_channel ON turns(channel);";
+
+static const char *const ANALYTICS_MIGRATIONS[] = {
+    MIGRATION_V1,
+    /* Future migrations go here:
+     * MIGRATION_V2,
+     * MIGRATION_V3,
+     */
+};
 
 static const char *INSERT_SQL =
     "INSERT INTO turns (ts, model, session_key, channel, "
@@ -79,12 +89,10 @@ sc_analytics_t *sc_analytics_new(const char *workspace)
     sqlite3_exec(a->db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
     sqlite3_exec(a->db, "PRAGMA synchronous=NORMAL", NULL, NULL, NULL);
 
-    /* Create schema */
-    char *err = NULL;
-    rc = sqlite3_exec(a->db, CREATE_SQL, NULL, NULL, &err);
-    if (rc != SQLITE_OK) {
-        SC_LOG_ERROR(LOG_TAG, "Failed to create schema: %s", err ? err : "unknown");
-        sqlite3_free(err);
+    /* Run schema migrations */
+    int nmig = (int)(sizeof(ANALYTICS_MIGRATIONS) / sizeof(ANALYTICS_MIGRATIONS[0]));
+    if (sc_db_migrate(a->db, ANALYTICS_MIGRATIONS, nmig, "analytics") < 0) {
+        SC_LOG_ERROR(LOG_TAG, "Schema migration failed");
         sqlite3_close(a->db);
         free(a);
         return NULL;

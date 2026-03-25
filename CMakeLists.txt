@@ -192,6 +192,7 @@ set(SC_SOURCES
     src/util/secrets.c
     src/util/curl_common.c
     src/util/prompt_guard.c
+    src/util/db_migrate.c
     src/util/sandbox.c
     src/util/sha256.c
     src/logger.c
@@ -213,6 +214,7 @@ set(SC_SOURCES
     src/tools/shell.c
     src/tools/message.c
     src/tools/memory_tools.c
+    src/tools/notify.c
     src/providers/provider_common.c
     src/providers/http.c
     src/providers/claude.c

@@ -46,6 +46,9 @@
 /* Secret file reference limit */
 #define SC_MAX_SECRET_FILE_SIZE  (4 * 1024)  /* 4 KB max for file-referenced secrets */
 
+/* Audit log rotation */
+#define SC_AUDIT_MAX_LOG_SIZE  (10 * 1024 * 1024)  /* 10 MB */
+
 /* Spawn depth limit */
 #define SC_MAX_SPAWN_DEPTH 3
 

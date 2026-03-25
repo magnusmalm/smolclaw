@@ -33,3 +33,84 @@ full untruncated text instead of the 280-char truncation.
 Currently only `x_get_tweet` requests `note_tweet`. The `format_tweet()`
 helper already handles `note_tweet.text` — just needs the field requested
 in the other endpoints' `tweet.fields` params.
+
+## Optional microsandbox exec backend
+
+Inspired by [microsandbox](https://github.com/zerocore-ai/microsandbox) —
+a Rust microVM sandbox platform using libkrun/KVM for hardware-level isolation.
+
+### Goal
+
+Add a new exec mode `agents.defaults.exec_mode: "microsandbox"` that routes
+`exec` and `exec_background` tool calls through microsandbox's REST API
+instead of fork+exec. This provides hardware VM isolation (own kernel per
+sandbox) as defense-in-depth on top of existing deny patterns + Landlock +
+seccomp.
+
+### Why
+
+smolclaw's current sandbox (Landlock + seccomp-bpf) runs on the shared host
+kernel. A kernel exploit could escape it. microsandbox runs each sandbox in
+a separate microVM with its own kernel — a fundamentally stronger boundary.
+For running AI-generated code or untrusted user scripts, this is a material
+security upgrade.
+
+### Design
+
+```
+Tool call: exec("pip install requests && python script.py")
+  current path:  fork → seccomp+Landlock → exec (shared kernel)
+  msb path:      HTTP POST localhost:5555 → sandbox.run_command → microVM
+```
+
+### Implementation plan
+
+1. **Add `exec_mode` value**: extend `config.c` to accept `"microsandbox"`
+   alongside `"denylist"` and `"allowlist"`. Store as enum/int in config.
+
+2. **Add microsandbox client** (`src/tools/msb_client.c`):
+   - HTTP POST to `http://localhost:5555/api/json-rpc` (configurable via
+     `agents.defaults.microsandbox_url`)
+   - JSON-RPC 2.0 requests: `sandbox.start`, `sandbox.run_command`,
+     `sandbox.run_code`, `sandbox.stop`
+   - Uses libcurl (already a dependency)
+   - Manages a persistent sandbox per session (start on first exec, reuse)
+
+3. **Wire into exec tools** (`src/tools/shell.c`, `src/tools/background.c`):
+   - At top of `exec_execute()`, check `exec_mode`
+   - If `"microsandbox"`, delegate to `sc_msb_run_command()` instead of
+     fork+exec
+   - Deny patterns still run first (defense-in-depth)
+   - Background procs: `sandbox.run_command` with async flag, poll via
+     `sandbox.get_metrics`
+
+4. **Sandbox lifecycle**:
+   - Start sandbox on first exec call per session (lazy init)
+   - Configure via `agents.defaults.microsandbox_image` (default:
+     `"ubuntu:22.04"`)
+   - Resource limits: `microsandbox_memory_mb` (default 512),
+     `microsandbox_cpus` (default 1)
+   - Stop sandbox on agent shutdown or session end
+
+5. **Fallback**: if microsandbox-server is unreachable, log error and fall
+   back to native exec with Landlock+seccomp (don't silently degrade —
+   warn the user).
+
+### Prerequisites
+
+- microsandbox-server running on localhost:5555
+- Linux with KVM support (Intel VT-x / AMD-V)
+- `msb` CLI installed for initial setup
+
+### Files to modify
+
+- `src/config.h` / `src/config.c` — new config fields
+- `src/tools/shell.c` — exec routing
+- `src/tools/background.c` — background exec routing
+- New: `src/tools/msb_client.c` / `src/tools/msb_client.h` — HTTP client
+- `CMakeLists.txt` — new source file + Kconfig flag `SC_ENABLE_MICROSANDBOX`
+
+### Effort estimate
+
+Multi-week. The HTTP client and sandbox lifecycle management are the bulk of
+the work. Testing requires a KVM-capable host with microsandbox installed.

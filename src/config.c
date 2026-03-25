@@ -504,6 +504,14 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     if (exec_mode_env)
         cfg->exec_use_allowlist = (strcmp(exec_mode_env, "allowlist") == 0);
 
+    const char *scope_env = getenv("SMOLCLAW_AGENTS_DEFAULTS_NETWORK_SCOPE");
+    if (scope_env) {
+        if (strcmp(scope_env, "none") == 0)        cfg->network_scope = 0;
+        else if (strcmp(scope_env, "local") == 0)   cfg->network_scope = 1;
+        else if (strcmp(scope_env, "public") == 0)  cfg->network_scope = 2;
+        else if (strcmp(scope_env, "any") == 0)     cfg->network_scope = 3;
+    }
+
     env_parse_csv("SMOLCLAW_AGENTS_DEFAULTS_EXEC_ALLOWED_COMMANDS",
                   &cfg->exec_allowed_commands, &cfg->exec_allowed_command_count);
     env_parse_csv("SMOLCLAW_AGENTS_DEFAULTS_ALLOWED_TOOLS",
@@ -674,6 +682,9 @@ static void apply_env_overrides(sc_config_t *cfg)
     env_override_str(&cfg->updater.manifest_url,         "SMOLCLAW_UPDATER_MANIFEST_URL");
     env_override_int(&cfg->updater.check_interval_hours, "SMOLCLAW_UPDATER_CHECK_INTERVAL");
     env_override_bool(&cfg->updater.auto_apply,          "SMOLCLAW_UPDATER_AUTO_APPLY");
+
+    /* Notifications */
+    env_override_str(&cfg->notify_urls,                  "SMOLCLAW_NOTIFY_URLS");
 }
 
 sc_config_t *sc_config_default(void)
@@ -710,6 +721,7 @@ sc_config_t *sc_config_default(void)
     cfg->max_tool_calls_per_hour = SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR;
     cfg->max_tokens_per_hour = SC_DEFAULT_MAX_TOKENS_PER_HOUR;
     cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
+    cfg->network_scope        = 2; /* SC_NET_SCOPE_PUBLIC */
     cfg->sandbox_enabled      = 1;
     cfg->memory_consolidation = 1;
     cfg->tee_enabled          = 1;
@@ -865,6 +877,14 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->exec_allowed_commands = sc_json_parse_string_list(
         sc_json_get_array(defaults, "exec_allowed_commands"),
         &cfg->exec_allowed_command_count);
+
+    const char *net_scope = sc_json_get_string(defaults, "network_scope", NULL);
+    if (net_scope) {
+        if (strcmp(net_scope, "none") == 0)        cfg->network_scope = 0;
+        else if (strcmp(net_scope, "local") == 0)   cfg->network_scope = 1;
+        else if (strcmp(net_scope, "public") == 0)  cfg->network_scope = 2;
+        else if (strcmp(net_scope, "any") == 0)     cfg->network_scope = 3;
+    }
 
     cfg->sandbox_enabled = sc_json_get_bool(defaults, "sandbox",
                                              cfg->sandbox_enabled);
@@ -1206,6 +1226,13 @@ sc_config_t *sc_config_load(const char *path)
     load_mcp_config(cfg, root);
     load_delegation_config(cfg, root);
 
+    /* notifications */
+    const char *nu = sc_json_get_string(root, "notify_urls", NULL);
+    if (nu) {
+        free(cfg->notify_urls);
+        cfg->notify_urls = sc_strdup(nu);
+    }
+
     /* Apply environment variable overrides last */
     apply_env_overrides(cfg);
 
@@ -1329,6 +1356,12 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     }
     if (cfg->restrict_message_tool)
         cJSON_AddBoolToObject(defaults, "restrict_message_tool", cfg->restrict_message_tool);
+    {
+        const char *scope_names[] = {"none", "local", "public", "any"};
+        int si = cfg->network_scope;
+        if (si >= 0 && si <= 3)
+            cJSON_AddStringToObject(defaults, "network_scope", scope_names[si]);
+    }
     cJSON_AddBoolToObject(defaults, "sandbox", cfg->sandbox_enabled);
     cJSON_AddBoolToObject(defaults, "memory_consolidation", cfg->memory_consolidation);
 
@@ -1720,6 +1753,9 @@ void sc_config_free(sc_config_t *cfg)
 
     /* Updater */
     free(cfg->updater.manifest_url);
+
+    /* Notifications */
+    free(cfg->notify_urls);
 
     if (cfg->raw) cJSON_Delete(cfg->raw);
 

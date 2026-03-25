@@ -4,6 +4,7 @@
  */
 
 #include "audit.h"
+#include "constants_limits.h"
 #include "logger.h"
 #include "util/str.h"
 
@@ -21,6 +22,7 @@
 
 static pthread_mutex_t audit_lock = PTHREAD_MUTEX_INITIALIZER;
 static FILE *audit_file;
+static char *audit_path;   /* log file path for rotation (owned) */
 static char *audit_model;  /* current LLM model, set per-turn (owned) */
 
 /* Ensure parent directory exists (single level) */
@@ -60,25 +62,70 @@ static void write_json_string(FILE *f, const char *s)
     fputc('"', f);
 }
 
+/* Open (or reopen) the audit log file. Returns 1 on success, 0 on failure. */
+static int audit_open(const char *path)
+{
+    int fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0600);
+    if (fd < 0)
+        return 0;
+    FILE *f = fdopen(fd, "a");
+    if (!f) {
+        close(fd);
+        return 0;
+    }
+    audit_file = f;
+    return 1;
+}
+
+/* Rotate the log if it exceeds SC_AUDIT_MAX_LOG_SIZE.
+ * Must be called with audit_lock held. */
+static void rotate_if_needed(void)
+{
+    if (!audit_file || !audit_path)
+        return;
+
+    struct stat st;
+    if (fstat(fileno(audit_file), &st) != 0)
+        return;
+    if (st.st_size < SC_AUDIT_MAX_LOG_SIZE)
+        return;
+
+    /* Build rotated path: "<path>.1" */
+    size_t plen = strlen(audit_path);
+    char *rotated = malloc(plen + 3);
+    if (!rotated)
+        return;
+    memcpy(rotated, audit_path, plen);
+    rotated[plen] = '.';
+    rotated[plen + 1] = '1';
+    rotated[plen + 2] = '\0';
+
+    fclose(audit_file);
+    audit_file = NULL;
+
+    rename(audit_path, rotated);
+    free(rotated);
+
+    if (!audit_open(audit_path))
+        SC_LOG_WARN(LOG_TAG, "Failed to reopen audit log after rotation");
+    else
+        SC_LOG_INFO(LOG_TAG, "Audit log rotated");
+}
+
 void sc_audit_init(const char *log_path)
 {
     if (!log_path) return;
 
     ensure_parent_dir(log_path);
 
-    /* Open with O_APPEND and restrictive permissions (0600) */
-    int fd = open(log_path, O_WRONLY | O_APPEND | O_CREAT, 0600);
-    if (fd < 0) {
+    if (!audit_open(log_path)) {
         SC_LOG_WARN(LOG_TAG, "Failed to open audit log: %s", log_path);
         return;
     }
-    audit_file = fdopen(fd, "a");
-    if (!audit_file) {
-        close(fd);
-        SC_LOG_WARN(LOG_TAG, "Failed to fdopen audit log: %s", log_path);
-    } else {
-        SC_LOG_INFO(LOG_TAG, "Audit log opened: %s", log_path);
-    }
+
+    free(audit_path);
+    audit_path = sc_strdup(log_path);
+    SC_LOG_INFO(LOG_TAG, "Audit log opened: %s", log_path);
 }
 
 void sc_audit_shutdown(void)
@@ -87,6 +134,8 @@ void sc_audit_shutdown(void)
         fclose(audit_file);
         audit_file = NULL;
     }
+    free(audit_path);
+    audit_path = NULL;
     free(audit_model);
     audit_model = NULL;
 }
@@ -97,6 +146,12 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
                       const char *event)
 {
     pthread_mutex_lock(&audit_lock);
+    if (!audit_file) {
+        pthread_mutex_unlock(&audit_lock);
+        return;
+    }
+
+    rotate_if_needed();
     if (!audit_file) {
         pthread_mutex_unlock(&audit_lock);
         return;
@@ -150,6 +205,51 @@ void sc_audit_log(const char *tool, const char *args_summary,
                   int is_error, long ms)
 {
     sc_audit_log_ext(tool, args_summary, is_error, ms, NULL, NULL, NULL);
+}
+
+void sc_audit_log_rss(const char *tool, const char *args_summary,
+                      int is_error, long ms, long rss_delta_kb)
+{
+    pthread_mutex_lock(&audit_lock);
+    if (!audit_file) {
+        pthread_mutex_unlock(&audit_lock);
+        return;
+    }
+
+    rotate_if_needed();
+    if (!audit_file) {
+        pthread_mutex_unlock(&audit_lock);
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    gmtime_r(&now, &tm_buf);
+    char ts[32];
+    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
+
+    char trunc_buf[201];
+    if (args_summary && strlen(args_summary) > 200) {
+        memcpy(trunc_buf, args_summary, 200);
+        trunc_buf[200] = '\0';
+        args_summary = trunc_buf;
+    }
+
+    fputs("{\"ts\":", audit_file);
+    write_json_string(audit_file, ts);
+    fputs(",\"tool\":", audit_file);
+    write_json_string(audit_file, tool);
+    fputs(",\"args\":", audit_file);
+    write_json_string(audit_file, args_summary ? args_summary : "");
+    fprintf(audit_file, ",\"status\":\"%s\",\"ms\":%ld,\"rss_delta_kb\":%ld",
+            is_error ? "error" : "ok", ms, rss_delta_kb);
+    if (audit_model) {
+        fputs(",\"model\":", audit_file);
+        write_json_string(audit_file, audit_model);
+    }
+    fputs("}\n", audit_file);
+    fflush(audit_file);
+    pthread_mutex_unlock(&audit_lock);
 }
 
 void sc_audit_set_model(const char *model)

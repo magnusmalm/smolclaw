@@ -6,6 +6,7 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -16,6 +17,23 @@
 #include "audit.h"
 #include "util/str.h"
 #include "logger.h"
+
+/* Read current VmRSS from /proc/self/status in KB. Returns 0 on failure. */
+static long read_rss_kb(void)
+{
+    FILE *f = fopen("/proc/self/status", "r");
+    if (!f) return 0;
+    char line[256];
+    long rss = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            rss = strtol(line + 6, NULL, 10);
+            break;
+        }
+    }
+    fclose(f);
+    return rss;
+}
 
 /* ---------- Tool result constructors ---------- */
 
@@ -279,6 +297,7 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     if (tool->set_context && channel && chat_id)
         tool->set_context(tool, channel, chat_id);
 
+    long rss_before = read_rss_kb();
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -287,6 +306,8 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     clock_gettime(CLOCK_MONOTONIC, &end);
     long ms = (end.tv_sec - start.tv_sec) * 1000
             + (end.tv_nsec - start.tv_nsec) / 1000000;
+    long rss_after = read_rss_kb();
+    long rss_delta = rss_after - rss_before;
 
     if (!result) {
         SC_LOG_ERROR("tool", "Tool %s returned NULL result", name);
@@ -300,13 +321,14 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     }
 
     if (result->is_error) {
-        SC_LOG_ERROR("tool", "Tool %s failed (%ldms): %s",
-                     name, ms, result->for_llm ? result->for_llm : "(null)");
+        SC_LOG_ERROR("tool", "Tool %s failed (%ldms, rss%+ldKB): %s",
+                     name, ms, rss_delta,
+                     result->for_llm ? result->for_llm : "(null)");
     } else if (result->async) {
         SC_LOG_INFO("tool", "Tool %s started async (%ldms)", name, ms);
     } else {
-        SC_LOG_INFO("tool", "Tool %s completed (%ldms, result_len=%zu)",
-                    name, ms,
+        SC_LOG_INFO("tool", "Tool %s completed (%ldms, rss%+ldKB, result_len=%zu)",
+                    name, ms, rss_delta,
                     result->for_llm ? strlen(result->for_llm) : 0);
     }
 
@@ -327,7 +349,7 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
             summary = summary_alloc;
         }
     }
-    sc_audit_log(name, summary, result->is_error, ms);
+    sc_audit_log_rss(name, summary, result->is_error, ms, rss_delta);
     free(summary_alloc);
 
     return result;

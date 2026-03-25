@@ -29,6 +29,15 @@
 #include "constants.h"
 #include "cJSON.h"
 
+/* Network scope policy — default public (block private IPs) */
+static int network_scope = SC_NET_SCOPE_PUBLIC;
+
+void sc_web_set_network_scope(int scope)
+{
+    if (scope >= SC_NET_SCOPE_NONE && scope <= SC_NET_SCOPE_ANY)
+        network_scope = scope;
+}
+
 /* Test-only SSRF bypass flag — not settable via environment (H-1 hardening) */
 static int ssrf_bypass_enabled = 0;
 
@@ -680,6 +689,9 @@ static sc_tool_result_t *web_search_execute(sc_tool_t *self, cJSON *args, void *
     (void)ctx;
     web_search_data_t *d = self->data;
 
+    if (network_scope == SC_NET_SCOPE_NONE)
+        return sc_tool_result_error("blocked: network_scope is none (no outbound network)");
+
     const char *query = sc_json_get_string(args, "query", NULL);
     if (!query)
         return sc_tool_result_error("query is required");
@@ -933,6 +945,16 @@ static ssrf_result_t check_ssrf(const char *url)
     res.resolved_ip[0] = '\0';
     res.hostname[0] = '\0';
 
+    /* Network scope: none blocks all outbound */
+    if (network_scope == SC_NET_SCOPE_NONE) {
+        res.error = "blocked: network_scope is none (no outbound network)";
+        return res;
+    }
+
+    /* Network scope: any skips all SSRF checks */
+    if (network_scope == SC_NET_SCOPE_ANY)
+        return res;
+
     /* Allow tests to bypass SSRF checks for mock server on localhost.
      * Uses internal flag (not env var) to prevent injection (H-1). */
     if (ssrf_bypass_enabled) return res;
@@ -945,7 +967,7 @@ static ssrf_result_t check_ssrf(const char *url)
     if (hlen < sizeof(res.hostname))
         memcpy(res.hostname, host, hlen + 1);
 
-    /* Block known metadata hostnames */
+    /* Block known metadata hostnames (always, regardless of scope) */
     if (strcasecmp(host, "metadata.google.internal") == 0 ||
         strcasecmp(host, "metadata") == 0) {
         free(host);
@@ -968,7 +990,10 @@ static ssrf_result_t check_ssrf(const char *url)
     for (struct addrinfo *rp = result; rp; rp = rp->ai_next) {
         if (rp->ai_family == AF_INET) {
             struct sockaddr_in *sin = (struct sockaddr_in *)rp->ai_addr;
-            if (is_private_ipv4(&sin->sin_addr)) { blocked = 1; break; }
+            int is_priv = is_private_ipv4(&sin->sin_addr);
+            /* public scope: block private; local scope: block non-private */
+            if (network_scope == SC_NET_SCOPE_PUBLIC && is_priv) { blocked = 1; break; }
+            if (network_scope == SC_NET_SCOPE_LOCAL && !is_priv) { blocked = 1; break; }
             if (!got_ip) {
                 inet_ntop(AF_INET, &sin->sin_addr, res.resolved_ip,
                           sizeof(res.resolved_ip));
@@ -976,7 +1001,9 @@ static ssrf_result_t check_ssrf(const char *url)
             }
         } else if (rp->ai_family == AF_INET6) {
             struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)rp->ai_addr;
-            if (is_private_ipv6(&sin6->sin6_addr)) { blocked = 1; break; }
+            int is_priv = is_private_ipv6(&sin6->sin6_addr);
+            if (network_scope == SC_NET_SCOPE_PUBLIC && is_priv) { blocked = 1; break; }
+            if (network_scope == SC_NET_SCOPE_LOCAL && !is_priv) { blocked = 1; break; }
             if (!got_ip) {
                 inet_ntop(AF_INET6, &sin6->sin6_addr, res.resolved_ip,
                           sizeof(res.resolved_ip));
@@ -987,8 +1014,12 @@ static ssrf_result_t check_ssrf(const char *url)
     freeaddrinfo(result);
     free(host);
 
-    if (blocked)
-        res.error = "blocked: URL resolves to private/reserved IP (SSRF protection)";
+    if (blocked) {
+        if (network_scope == SC_NET_SCOPE_LOCAL)
+            res.error = "blocked: URL resolves to public IP (network_scope is local)";
+        else
+            res.error = "blocked: URL resolves to private/reserved IP (SSRF protection)";
+    }
     return res;
 }
 

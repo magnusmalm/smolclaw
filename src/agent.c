@@ -58,6 +58,7 @@
 #if SC_ENABLE_X_TOOLS
 #include "tools/x_tools.h"
 #endif
+#include "tools/notify.h"
 #include "cost.h"
 #if SC_ENABLE_TEE
 #include "tee.h"
@@ -143,6 +144,7 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
 
     /* Web tools */
 #if SC_ENABLE_WEB_TOOLS
+    sc_web_set_network_scope(cfg->network_scope);
     sc_web_search_opts_t web_opts = {
         .brave_enabled = cfg->web_tools.brave_enabled,
         .brave_api_key = cfg->web_tools.brave_api_key,
@@ -247,6 +249,11 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                                                       cfg->gitea.token,
                                                       cfg->gitea.default_org));
 #endif
+
+    /* Notify tool */
+    if (cfg->notify_urls && cfg->notify_urls[0])
+        sc_tool_registry_register(reg,
+                                   sc_tool_notify_new(cfg->notify_urls));
 }
 
 /* Register all default tools into the agent's registry.
@@ -297,6 +304,7 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
 
     /* Web tools */
 #if SC_ENABLE_WEB_TOOLS
+    sc_web_set_network_scope(cfg->network_scope);
     sc_web_search_opts_t web_opts = {
         .brave_enabled = cfg->web_tools.brave_enabled,
         .brave_api_key = cfg->web_tools.brave_api_key,
@@ -415,6 +423,11 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                                       cfg->gitea.token,
                                                       cfg->gitea.default_org));
 #endif
+
+    /* Notify tool */
+    if (cfg->notify_urls && cfg->notify_urls[0])
+        sc_tool_registry_register(agent->tools,
+                                   sc_tool_notify_new(cfg->notify_urls));
 
     /* Spawn tool (agent-specific: needs agent pointer) */
 #if SC_ENABLE_SPAWN
@@ -837,6 +850,11 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
 
     /* Per-channel tool allowlists */
     load_channel_tools(agent, cfg);
+
+    /* Network scope can be updated at runtime (module-level static in web.c) */
+#if SC_ENABLE_WEB_TOOLS
+    sc_web_set_network_scope(cfg->network_scope);
+#endif
 
     /* Note: exec_timeout_secs, max_output_chars, max_fetch_chars are captured
      * by tools at construction time and cannot be updated by reload. */

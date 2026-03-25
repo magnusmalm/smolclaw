@@ -17,6 +17,10 @@ void sc_audit_log_ext(const char *tool, const char *args_summary,
                       const char *channel, const char *user_id,
                       const char *event);
 
+/* Log a tool execution with resource tracking (RSS delta in KB). */
+void sc_audit_log_rss(const char *tool, const char *args_summary,
+                      int is_error, long ms, long rss_delta_kb);
+
 /* Set the current LLM model for inclusion in audit log entries. */
 void sc_audit_set_model(const char *model);
 
