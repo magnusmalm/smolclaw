@@ -270,12 +270,48 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             mcp_tmpdir = sc_strdup(mcp_tmp);
     }
 
+    /* Resolve binary directory for Landlock sandbox.
+     * User-installed MCP servers (e.g. ~/.local/bin) are outside the
+     * default system rx_paths, so we need to whitelist the directory. */
+    char *bin_dir = NULL;
+    if (workspace && command[0]) {
+        if (command[0][0] == '/') {
+            /* Absolute path — extract parent directory */
+            char *tmp = sc_strdup(command[0]);
+            char *slash = strrchr(tmp, '/');
+            if (slash && slash != tmp) {
+                *slash = '\0';
+                bin_dir = tmp;
+            } else {
+                free(tmp);
+            }
+        } else {
+            /* Relative name — search PATH */
+            const char *path_env = getenv("PATH");
+            if (path_env) {
+                char *pcopy = sc_strdup(path_env);
+                char *saveptr = NULL;
+                for (char *dir = strtok_r(pcopy, ":", &saveptr); dir;
+                     dir = strtok_r(NULL, ":", &saveptr)) {
+                    char probe[4096];
+                    snprintf(probe, sizeof(probe), "%s/%s", dir, command[0]);
+                    if (access(probe, X_OK) == 0) {
+                        bin_dir = sc_strdup(dir);
+                        break;
+                    }
+                }
+                free(pcopy);
+            }
+        }
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         SC_LOG_ERROR(LOG_TAG, "[%s] fork failed: %s", name, strerror(errno));
         close(pipe_stdin[0]); close(pipe_stdin[1]);
         close(pipe_stdout[0]); close(pipe_stdout[1]);
         if (mcp_tmpdir) { rmdir(mcp_tmpdir); free(mcp_tmpdir); }
+        free(bin_dir);
         return NULL;
     }
 
@@ -309,6 +345,7 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             sc_sandbox_opts_t sandbox_opts = {
                 .workspace = workspace,
                 .tmpdir = tmpdir,
+                .bin_dir = bin_dir,
             };
             sc_sandbox_apply(&sandbox_opts);
             setenv("TMPDIR", tmpdir, 1);
@@ -351,6 +388,7 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
     }
 
     /* Parent process */
+    free(bin_dir);
     close(pipe_stdin[0]);   /* close child's read end */
     close(pipe_stdout[1]);  /* close child's write end */
 

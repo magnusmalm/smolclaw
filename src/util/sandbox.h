@@ -4,6 +4,7 @@
 typedef struct {
     const char *workspace;    /* Full path to workspace dir (rw access) */
     const char *tmpdir;       /* Temp dir (rw access), NULL = /tmp */
+    const char *bin_dir;      /* Extra binary dir (rx access), e.g. ~/.local/bin */
 } sc_sandbox_opts_t;
 
 /* Apply Landlock + seccomp sandbox. Call in child between FD cleanup and exec.

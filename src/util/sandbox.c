@@ -195,6 +195,10 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
     for (int i = 0; rx_paths[i]; i++)
         ll_add_path_rule(ruleset_fd, rx_paths[i], rx);
 
+    /* Extra binary dir (e.g. ~/.local/bin for user-installed MCP servers) */
+    if (opts->bin_dir)
+        ll_add_path_rule(ruleset_fd, opts->bin_dir, rx);
+
     /* Config dirs: read only */
     ll_add_path_rule(ruleset_fd, "/etc", ro);
 
