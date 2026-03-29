@@ -189,7 +189,7 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
                                          cfg->web.allow_from_count)) {
 #endif
             SC_LOG_INFO("channels", "Initializing Web channel");
-            sc_channel_t *web = sc_channel_web_new(&cfg->web, bus);
+            sc_channel_t *web = sc_channel_web_new(&cfg->web, bus, cfg->workspace);
             if (web)
                 manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
             else

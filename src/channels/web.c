@@ -3,9 +3,11 @@
  * HTTP REST API for agent interaction + embedded chat UI.
  *
  * Runs its own event_base in a dedicated thread.
- * POST /api/message — send a message, get agent response
- * GET /api/health   — health check
- * GET /             — embedded chat UI
+ * POST /api/message       — send a message, get agent response
+ * POST /api/memory/log    — append to agent's daily notes (bearer auth)
+ * POST /api/memory/search — query agent's FTS5 memory index (bearer auth)
+ * GET /api/health         — health check
+ * GET /                   — embedded chat UI
  *
  * Async response delivery: inbound messages are published to the bus.
  * When the agent responds, the main thread writes to a pipe which
@@ -33,9 +35,14 @@
 #include <openssl/err.h>
 #endif
 
+#include "sc_features.h"
 #include "cJSON.h"
 #include "constants.h"
 #include "logger.h"
+#include "memory.h"
+#if SC_ENABLE_MEMORY_SEARCH
+#include "memory_index.h"
+#endif
 #include "util/str.h"
 #include "util/uuid.h"
 #include "util/json_helpers.h"
@@ -79,6 +86,9 @@ typedef struct {
     /* Pipe for thread-safe response delivery */
     int response_pipe[2];
     struct event *pipe_event;
+
+    /* Workspace path for memory access */
+    char *workspace;
 
     /* Uptime tracking */
     time_t start_time;
@@ -423,6 +433,193 @@ static void handle_health(struct evhttp_request *req, void *arg)
     evbuffer_free(buf);
 }
 
+/* Handle POST /api/memory/log — append to daily notes from external caller */
+static void handle_memory_log(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (evhttp_request_get_command(req) != EVHTTP_REQ_POST) {
+        send_json_error(req, 405, "Method not allowed");
+        return;
+    }
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    if (!wd->workspace) {
+        send_json_error(req, 500, "Workspace not configured");
+        return;
+    }
+
+    /* Parse body */
+    struct evbuffer *input = evhttp_request_get_input_buffer(req);
+    size_t len = evbuffer_get_length(input);
+    if (len == 0 || len > 64 * 1024) {
+        send_json_error(req, 400, "Invalid request body");
+        return;
+    }
+
+    char *body = malloc(len + 1);
+    if (!body) {
+        send_json_error(req, 500, "Out of memory");
+        return;
+    }
+    evbuffer_copyout(input, body, len);
+    body[len] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    free(body);
+    if (!json) {
+        send_json_error(req, 400, "Invalid JSON");
+        return;
+    }
+
+    const char *content = sc_json_get_string(json, "content", NULL);
+    if (!content || !content[0]) {
+        cJSON_Delete(json);
+        send_json_error(req, 400, "Missing 'content' field");
+        return;
+    }
+
+    /* Append to daily notes */
+    sc_memory_t *mem = sc_memory_new(wd->workspace);
+    if (!mem) {
+        cJSON_Delete(json);
+        send_json_error(req, 500, "Failed to open memory store");
+        return;
+    }
+
+    int rc = sc_memory_append_today(mem, content);
+    sc_memory_free(mem);
+    cJSON_Delete(json);
+
+    if (rc != 0) {
+        send_json_error(req, 500, "Failed to write to daily notes");
+        return;
+    }
+
+    SC_LOG_INFO(WEB_TAG, "Memory log entry appended via API");
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "ok");
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+
+    struct evbuffer *buf = evbuffer_new();
+    evbuffer_add(buf, str, strlen(str));
+    free(str);
+
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+}
+
+#if SC_ENABLE_MEMORY_SEARCH
+/* Handle POST /api/memory/search — query agent's FTS5 memory index */
+static void handle_memory_search(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (evhttp_request_get_command(req) != EVHTTP_REQ_POST) {
+        send_json_error(req, 405, "Method not allowed");
+        return;
+    }
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    if (!wd->workspace) {
+        send_json_error(req, 500, "Workspace not configured");
+        return;
+    }
+
+    /* Parse body */
+    struct evbuffer *input = evhttp_request_get_input_buffer(req);
+    size_t len = evbuffer_get_length(input);
+    if (len == 0 || len > 64 * 1024) {
+        send_json_error(req, 400, "Invalid request body");
+        return;
+    }
+
+    char *body = malloc(len + 1);
+    if (!body) {
+        send_json_error(req, 500, "Out of memory");
+        return;
+    }
+    evbuffer_copyout(input, body, len);
+    body[len] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    free(body);
+    if (!json) {
+        send_json_error(req, 400, "Invalid JSON");
+        return;
+    }
+
+    const char *query = sc_json_get_string(json, "query", NULL);
+    if (!query || !query[0]) {
+        cJSON_Delete(json);
+        send_json_error(req, 400, "Missing 'query' field");
+        return;
+    }
+    int max_results = sc_json_get_int(json, "max_results", 10);
+    if (max_results < 1) max_results = 1;
+    if (max_results > 50) max_results = 50;
+
+    /* Open index from workspace */
+    sc_strbuf_t db_path;
+    sc_strbuf_init(&db_path);
+    sc_strbuf_appendf(&db_path, "%s/memory/search.db", wd->workspace);
+    char *db = sc_strbuf_finish(&db_path);
+
+    sc_memory_index_t *idx = sc_memory_index_new(db);
+    free(db);
+    if (!idx) {
+        cJSON_Delete(json);
+        send_json_error(req, 500, "Memory search index not available");
+        return;
+    }
+
+    int count = 0;
+    sc_memory_search_result_t *results =
+        sc_memory_index_search(idx, query, max_results, &count);
+    sc_memory_index_free(idx);
+    cJSON_Delete(json);
+
+    /* Build JSON response */
+    cJSON *resp = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(resp, "results");
+    for (int i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "source", results[i].source);
+        cJSON_AddStringToObject(item, "snippet", results[i].snippet);
+        cJSON_AddNumberToObject(item, "rank", results[i].rank);
+        cJSON_AddItemToArray(arr, item);
+    }
+    cJSON_AddNumberToObject(resp, "count", count);
+    sc_memory_search_results_free(results, count);
+
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+
+    struct evbuffer *buf = evbuffer_new();
+    evbuffer_add(buf, str, strlen(str));
+    free(str);
+
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+}
+#endif /* SC_ENABLE_MEMORY_SEARCH */
+
 /* Handle GET / (chat UI) */
 static void handle_root(struct evhttp_request *req, void *arg)
 {
@@ -579,6 +776,10 @@ static int web_start(sc_channel_t *self)
 
     /* Set up routes */
     evhttp_set_cb(wd->http, "/api/message", handle_message, self);
+    evhttp_set_cb(wd->http, "/api/memory/log", handle_memory_log, self);
+#if SC_ENABLE_MEMORY_SEARCH
+    evhttp_set_cb(wd->http, "/api/memory/search", handle_memory_search, self);
+#endif
     evhttp_set_cb(wd->http, "/api/health", handle_health, self);
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
@@ -695,6 +896,7 @@ static void web_destroy(sc_channel_t *self)
         free(wd->bind_addr);
         free(wd->tls_cert);
         free(wd->tls_key);
+        free(wd->workspace);
         pthread_mutex_destroy(&wd->pending_lock);
         free(wd);
     }
@@ -702,7 +904,8 @@ static void web_destroy(sc_channel_t *self)
     sc_channel_base_free(self);
 }
 
-sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
+sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
+                                  const char *workspace)
 {
     if (!cfg) return NULL;
 
@@ -719,6 +922,7 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus)
     wd->auto_port = cfg->auto_port;
     wd->tls_cert = sc_strdup(cfg->tls_cert);
     wd->tls_key = sc_strdup(cfg->tls_key);
+    wd->workspace = sc_strdup(workspace);
     wd->base = NULL;
     wd->http = NULL;
     wd->thread_started = 0;

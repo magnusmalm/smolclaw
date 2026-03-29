@@ -32,6 +32,7 @@
 #if SC_ENABLE_CRON
 #include "cron/service.h"
 #include "tools/cron.h"
+#include "memory_compact.h"
 #endif
 #if SC_ENABLE_HEARTBEAT
 #include "heartbeat/service.h"
@@ -246,6 +247,30 @@ static void cmd_mcp_server(void)
     sc_tool_registry_free(reg);
     free(workspace);
     sc_config_free(cfg);
+}
+#endif
+
+#if SC_ENABLE_CRON
+/* Cron handler callback — dispatches based on job message prefix */
+static char *cron_handler(sc_cron_job_t *job, void *ctx)
+{
+    sc_agent_t *agent = ctx;
+    if (!agent || !job) return NULL;
+
+    const char *msg = job->payload.message;
+    if (!msg) return NULL;
+
+    /* #compact-memory — run AI-driven MEMORY.md compaction */
+    if (strncmp(msg, "#compact-memory", 15) == 0) {
+        SC_LOG_INFO("cron", "Running memory compaction job '%s'",
+                    job->name ? job->name : job->id);
+        int rc = sc_memory_compact(agent->workspace, agent->provider,
+                                    agent->model, 0);
+        return sc_strdup(rc == 0 ? "ok" : "error");
+    }
+
+    /* Default: treat as an agent turn (send message through processing) */
+    return sc_agent_process_heartbeat(agent, msg, SC_CHANNEL_CLI, "cron");
 }
 #endif
 
@@ -1654,6 +1679,7 @@ static void gateway_start_services(gateway_services_t *svc,
     svc->cron = sc_cron_service_new(cron_store, base);
     free(cron_store);
     sc_agent_register_tool(agent, sc_tool_cron_new(svc->cron));
+    sc_cron_service_set_handler(svc->cron, cron_handler, agent);
     sc_cron_service_start(svc->cron);
     printf("  Cron service started\n");
 #endif

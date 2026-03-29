@@ -23,8 +23,8 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 | **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
 | **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense      |
 | **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators                                                               |
-| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote agent delegation via REST API, per-agent isolated workspaces via `SMOLCLAW_HOME`                                      |
-| **Services**    | Cron scheduling, heartbeat, self-update, analytics                                                                                                                          |
+| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote agent delegation via REST API, multi-turn agent dialogue (converse tool), cross-agent memory search, per-agent isolated workspaces via `SMOLCLAW_HOME` |
+| **Services**    | Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics                                                                                               |
 
 ## Quickstart
 
@@ -240,7 +240,59 @@ The `delegate` tool sends tasks to remote agents via their Web REST API:
 }
 ```
 
-Build with `SC_ENABLE_DELEGATE=ON`. The agent can then use the `delegate` tool to send tasks to any configured target and receive the response.
+Build with `SC_ENABLE_DELEGATE=ON`. The agent can then use the `delegate` tool to send tasks to any configured target and receive the response. Delegation results are automatically logged to the delegating agent's daily notes.
+
+#### Cross-agent memory search
+
+The `delegate` tool supports a `memory_search` action that queries another agent's FTS5 memory index directly, without routing through the target's LLM:
+
+```json
+{"name": "delegate", "arguments": {
+  "target": "researcher",
+  "task": "VRAM optimization techniques",
+  "action": "memory_search"
+}}
+```
+
+This POSTs to the target's `POST /api/memory/search` endpoint and returns ranked results with snippets. Fast, free, no token cost.
+
+#### Multi-turn agent dialogue
+
+The `converse` tool facilitates structured debates between two remote agents:
+
+```json
+{"name": "converse", "arguments": {
+  "agent_a": "coder",
+  "agent_b": "researcher",
+  "topic": "Should we use approach X for the migration?",
+  "rounds": 3
+}}
+```
+
+Each round alternates between agents, with session continuity so both agents build on the full conversation. Returns a markdown transcript. Requires two delegation targets.
+
+#### Memory API endpoints
+
+The Web channel exposes two endpoints for cross-agent memory operations:
+
+- `POST /api/memory/log` — Append an entry to the agent's daily notes. Body: `{"content": "..."}`. Used by other agents and orchestration tools to propagate context.
+- `POST /api/memory/search` — Query the agent's FTS5 memory index. Body: `{"query": "...", "max_results": 10}`. Returns ranked results with source and snippet. Requires `SC_ENABLE_MEMORY_SEARCH`.
+
+Both endpoints require bearer token authentication.
+
+#### Memory compaction
+
+When scheduled via the cron tool, the agent can compact its MEMORY.md using AI-driven curation. Recent entries (last 3 days) are kept verbatim, older entries are compressed or dropped based on relevance.
+
+Schedule it with a cron job using the `#compact-memory` message prefix:
+
+```json
+{"name": "cronjob", "arguments": {
+  "name": "memory-compact",
+  "every": "24h",
+  "message": "#compact-memory"
+}}
+```
 
 ### X (Twitter)
 

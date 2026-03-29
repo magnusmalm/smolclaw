@@ -49,7 +49,7 @@ static void test_delegate_new(void)
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
 
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
     ASSERT_NOT_NULL(tool);
     ASSERT_STR_EQ(tool->name, "delegate");
     ASSERT_NOT_NULL(tool->description);
@@ -66,7 +66,7 @@ static void test_delegate_parameters_schema(void)
         make_target("a", "http://x", NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *schema = tool->parameters(tool);
     ASSERT_NOT_NULL(schema);
@@ -97,7 +97,7 @@ static void test_delegate_missing_target(void)
         make_target("a", "http://x", NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args(NULL, "do something", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -116,7 +116,7 @@ static void test_delegate_missing_task(void)
         make_target("a", "http://x", NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("a", NULL, NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -138,7 +138,7 @@ static void test_delegate_unknown_target(void)
         make_target("agent-b", "http://y", NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 2 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("nonexistent", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -159,7 +159,7 @@ static void test_delegate_empty_url(void)
         make_target("agent-a", "", NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("agent-a", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -178,7 +178,7 @@ static void test_delegate_null_url(void)
         make_target("agent-a", NULL, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("agent-a", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -210,7 +210,7 @@ static void test_delegate_success(void)
         make_target("helper", url, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("helper", "summarize this", "sess-123");
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -256,7 +256,7 @@ static void test_delegate_auto_session(void)
         make_target("helper", url, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     /* No session provided — should auto-generate one */
     cJSON *args = make_args("helper", "do it", NULL);
@@ -299,7 +299,7 @@ static void test_delegate_http_error(void)
         make_target("helper", url, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("helper", "fail please", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -333,7 +333,7 @@ static void test_delegate_json_no_response_field(void)
         make_target("helper", url, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("helper", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -368,7 +368,7 @@ static void test_delegate_plain_text_response(void)
         make_target("helper", url, NULL, 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("helper", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -400,7 +400,7 @@ static void test_delegate_bearer_token(void)
         make_target("helper", url, "secret-token-12345", 10),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("helper", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);
@@ -421,7 +421,7 @@ static void test_delegate_connection_refused(void)
         make_target("dead", "http://127.0.0.1:1/api/message", NULL, 2),
     };
     sc_delegation_config_t cfg = { .targets = targets, .target_count = 1 };
-    sc_tool_t *tool = sc_tool_delegate_new(&cfg);
+    sc_tool_t *tool = sc_tool_delegate_new(&cfg, NULL);
 
     cJSON *args = make_args("dead", "hello", NULL);
     sc_tool_result_t *r = tool->execute(tool, args, NULL);

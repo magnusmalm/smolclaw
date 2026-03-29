@@ -257,7 +257,7 @@ if(SC_ENABLE_VOICE)
 endif()
 
 if(SC_ENABLE_CRON)
-    list(APPEND SC_SOURCES src/tools/cron.c src/cron/service.c)
+    list(APPEND SC_SOURCES src/tools/cron.c src/cron/service.c src/memory_compact.c)
 endif()
 
 if(SC_ENABLE_SPAWN)
@@ -265,7 +265,7 @@ if(SC_ENABLE_SPAWN)
 endif()
 
 if(SC_ENABLE_DELEGATE)
-    list(APPEND SC_SOURCES src/tools/delegate.c)
+    list(APPEND SC_SOURCES src/tools/delegate.c src/tools/converse.c)
 endif()
 
 if(SC_ENABLE_HEARTBEAT)

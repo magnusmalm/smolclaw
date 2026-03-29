@@ -12,6 +12,7 @@
 
 #include "tools/delegate.h"
 #include "tools/types.h"
+#include "memory.h"
 #include "util/str.h"
 #include "util/uuid.h"
 #include "util/json_helpers.h"
@@ -24,6 +25,7 @@
 typedef struct {
     sc_delegate_target_t *targets;
     int target_count;
+    char *workspace;  /* for logging delegation results to local memory */
 } delegate_data_t;
 
 /* ---------- curl write callback ---------- */
@@ -78,7 +80,9 @@ static void curl_buf_free(curl_buf_t *buf)
 static void delegate_destroy(sc_tool_t *self)
 {
     if (!self) return;
-    free(self->data);
+    delegate_data_t *d = self->data;
+    if (d) free(d->workspace);
+    free(d);
     free(self);
 }
 
@@ -104,6 +108,13 @@ static cJSON *delegate_parameters(sc_tool_t *self)
     cJSON_AddStringToObject(session, "type", "string");
     cJSON_AddStringToObject(session, "description",
         "Optional session ID for conversation continuity");
+
+    cJSON *action = cJSON_AddObjectToObject(props, "action");
+    cJSON_AddStringToObject(action, "type", "string");
+    cJSON_AddStringToObject(action, "description",
+        "Optional action: 'memory_search' to search the target agent's "
+        "memory index directly (task becomes the search query). "
+        "Default is to send task as a message.");
 
     cJSON *req = cJSON_AddArrayToObject(schema, "required");
     cJSON_AddItemToArray(req, cJSON_CreateString("target"));
@@ -150,6 +161,90 @@ static sc_tool_result_t *delegate_execute(sc_tool_t *self, cJSON *args, void *ct
 
     if (!tgt->url || !tgt->url[0])
         return sc_tool_result_error("Delegation target has no URL configured");
+
+    /* Check for action dispatch */
+    const char *action = sc_json_get_string(args, "action", NULL);
+
+    /* memory_search: POST to /api/memory/search instead of /api/message */
+    if (action && strcmp(action, "memory_search") == 0) {
+        /* Derive search URL from target URL: replace /api/message with /api/memory/search */
+        sc_strbuf_t url_sb;
+        sc_strbuf_init(&url_sb);
+        const char *api_msg = strstr(tgt->url, "/api/message");
+        if (api_msg) {
+            sc_strbuf_appendf(&url_sb, "%.*s/api/memory/search",
+                              (int)(api_msg - tgt->url), tgt->url);
+        } else {
+            /* Fallback: append to base URL */
+            sc_strbuf_appendf(&url_sb, "%s/api/memory/search", tgt->url);
+        }
+        char *search_url = sc_strbuf_finish(&url_sb);
+
+        cJSON *body = cJSON_CreateObject();
+        cJSON_AddStringToObject(body, "query", task);
+        cJSON_AddNumberToObject(body, "max_results", 10);
+        char *body_str = cJSON_PrintUnformatted(body);
+        cJSON_Delete(body);
+
+        SC_LOG_INFO("delegate", "Memory search on %s: %s", target_name, task);
+
+        CURL *curl = sc_curl_init();
+        if (!curl) {
+            free(body_str);
+            free(search_url);
+            return sc_tool_result_error("Failed to initialize curl");
+        }
+
+        curl_buf_t buf;
+        curl_buf_init(&buf);
+
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        if (tgt->bearer_token && tgt->bearer_token[0]) {
+            sc_strbuf_t auth;
+            sc_strbuf_init(&auth);
+            sc_strbuf_appendf(&auth, "Authorization: Bearer %s", tgt->bearer_token);
+            char *auth_str = sc_strbuf_finish(&auth);
+            headers = curl_slist_append(headers, auth_str);
+            free(auth_str);
+        }
+
+        curl_easy_setopt(curl, CURLOPT_URL, search_url);
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_str);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+
+        CURLcode res = curl_easy_perform(curl);
+        long http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+        free(body_str);
+        free(search_url);
+
+        if (res != CURLE_OK) {
+            sc_strbuf_t err;
+            sc_strbuf_init(&err);
+            sc_strbuf_appendf(&err, "Memory search on %s failed: %s",
+                              target_name, curl_easy_strerror(res));
+            char *msg = sc_strbuf_finish(&err);
+            curl_buf_free(&buf);
+            sc_tool_result_t *r = sc_tool_result_error(msg);
+            free(msg);
+            return r;
+        }
+
+        sc_tool_result_t *result = buf.data && buf.len > 0
+            ? sc_tool_result_new(buf.data)
+            : sc_tool_result_new("No results");
+        curl_buf_free(&buf);
+        return result;
+    }
 
     /* Build JSON body: {"message": "<task>", "session": "<session_or_uuid>"} */
     cJSON *body = cJSON_CreateObject();
@@ -257,10 +352,37 @@ static sc_tool_result_t *delegate_execute(sc_tool_t *self, cJSON *args, void *ct
 
     curl_buf_free(&buf);
     SC_LOG_INFO("delegate", "Delegation to %s completed (HTTP %ld)", target_name, http_code);
+
+    /* Log delegation result to local daily notes */
+    if (d->workspace && result && result->for_llm) {
+        sc_memory_t *mem = sc_memory_new(d->workspace);
+        if (mem) {
+            /* Truncate result preview for the memory entry */
+            const char *preview = result->for_llm;
+            size_t plen = strlen(preview);
+            char truncated[256];
+            if (plen > 200) {
+                snprintf(truncated, sizeof(truncated), "%.200s...", preview);
+                preview = truncated;
+            }
+            sc_strbuf_t entry;
+            sc_strbuf_init(&entry);
+            sc_strbuf_appendf(&entry,
+                "[delegation] Delegated to **%s**: %.*s → %s",
+                target_name,
+                (int)(strlen(task) > 120 ? 120 : strlen(task)), task,
+                preview);
+            char *text = sc_strbuf_finish(&entry);
+            sc_memory_append_today(mem, text);
+            free(text);
+            sc_memory_free(mem);
+        }
+    }
+
     return result;
 }
 
-sc_tool_t *sc_tool_delegate_new(sc_delegation_config_t *cfg)
+sc_tool_t *sc_tool_delegate_new(sc_delegation_config_t *cfg, const char *workspace)
 {
     sc_tool_t *t = calloc(1, sizeof(*t));
     if (!t) return NULL;
@@ -269,6 +391,7 @@ sc_tool_t *sc_tool_delegate_new(sc_delegation_config_t *cfg)
     if (!d) { free(t); return NULL; }
     d->targets = cfg->targets;
     d->target_count = cfg->target_count;
+    d->workspace = sc_strdup(workspace);
 
     t->name = "delegate";
     t->description = "Delegate a task to another agent. Sends the task to the "

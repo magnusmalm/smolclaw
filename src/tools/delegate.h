@@ -4,6 +4,7 @@
 #include "tools/types.h"
 #include "config.h"
 
-sc_tool_t *sc_tool_delegate_new(sc_delegation_config_t *cfg);
+sc_tool_t *sc_tool_delegate_new(sc_delegation_config_t *cfg,
+                                const char *workspace);
 
 #endif /* SC_TOOL_DELEGATE_H */

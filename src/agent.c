@@ -39,6 +39,7 @@
 #endif
 #if SC_ENABLE_DELEGATE
 #include "tools/delegate.h"
+#include "tools/converse.h"
 #endif
 #if SC_ENABLE_BACKGROUND
 #include "tools/background.h"
@@ -434,11 +435,14 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     sc_tool_registry_register(agent->tools, sc_tool_spawn_new(agent));
 #endif
 
-    /* Delegate tool (agent-to-agent task routing) */
+    /* Delegate + converse tools (agent-to-agent task routing) */
 #if SC_ENABLE_DELEGATE
-    if (cfg->delegation.target_count > 0)
+    if (cfg->delegation.target_count > 0) {
         sc_tool_registry_register(agent->tools,
-                                   sc_tool_delegate_new(&cfg->delegation));
+                                   sc_tool_delegate_new(&cfg->delegation, workspace));
+        sc_tool_registry_register(agent->tools,
+                                   sc_tool_converse_new(&cfg->delegation, workspace));
+    }
 #endif
 
     /* Background process tools */
