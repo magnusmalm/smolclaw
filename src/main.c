@@ -1775,7 +1775,7 @@ static void gateway_event_loop(struct event_base *base,
             sc_cron_service_tick(svc->cron);
 #endif
 
-        sc_inbound_msg_t *msg = sc_bus_consume_inbound(bus);
+        sc_inbound_msg_t *msg = sc_bus_try_consume_inbound(bus);
         if (msg) {
             gateway_process_message(agent, ch_mgr, msg);
             sc_inbound_msg_free(msg);

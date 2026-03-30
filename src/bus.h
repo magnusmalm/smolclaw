@@ -68,6 +68,9 @@ void sc_bus_publish_outbound(sc_bus_t *bus, sc_outbound_msg_t *msg);
 /* Consume inbound (blocking, for agent loop thread) */
 sc_inbound_msg_t *sc_bus_consume_inbound(sc_bus_t *bus);
 
+/* Try to consume inbound (non-blocking, returns NULL if no message) */
+sc_inbound_msg_t *sc_bus_try_consume_inbound(sc_bus_t *bus);
+
 /* Set outbound handler (called by libevent when outbound messages arrive) */
 void sc_bus_set_outbound_handler(sc_bus_t *bus, sc_msg_handler_t handler, void *ctx);
 

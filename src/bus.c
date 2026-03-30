@@ -219,6 +219,22 @@ sc_inbound_msg_t *sc_bus_consume_inbound(sc_bus_t *bus)
     return queue_pop(&bus->inbound);
 }
 
+sc_inbound_msg_t *sc_bus_try_consume_inbound(sc_bus_t *bus)
+{
+    if (!bus) return NULL;
+
+    /* Ensure non-blocking (libevent may reset O_NONBLOCK) */
+    int flags = fcntl(bus->inbound_pipe[0], F_GETFL, 0);
+    if (flags >= 0 && !(flags & O_NONBLOCK))
+        fcntl(bus->inbound_pipe[0], F_SETFL, flags | O_NONBLOCK);
+
+    char c;
+    ssize_t n = read(bus->inbound_pipe[0], &c, 1);
+    if (n <= 0) return NULL;
+
+    return queue_pop(&bus->inbound);
+}
+
 void sc_bus_publish_outbound(sc_bus_t *bus, sc_outbound_msg_t *msg)
 {
     if (!bus || !msg) return;
