@@ -163,6 +163,7 @@ typedef struct {
     /* Agent defaults */
     char *workspace;
     int restrict_to_workspace;
+    int workspace_per_session;   /* Create per-session subdirs under workspace/tasks/ */
     char *provider;
     char *model;
     char **fallback_models;

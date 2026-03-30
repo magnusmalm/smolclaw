@@ -187,6 +187,15 @@ void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
     }
 }
 
+void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspace)
+{
+    if (!reg || !workspace) return;
+    for (int i = 0; i < reg->count; i++) {
+        if (reg->tools[i]->set_workspace)
+            reg->tools[i]->set_workspace(reg->tools[i], workspace);
+    }
+}
+
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name)
 {
     if (!reg || !name) return 0;

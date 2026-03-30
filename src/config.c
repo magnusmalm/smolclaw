@@ -834,6 +834,7 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
 
     cfg->restrict_to_workspace = sc_json_get_bool(defaults, "restrict_to_workspace",
                                                    cfg->restrict_to_workspace);
+    cfg->workspace_per_session = sc_json_get_bool(defaults, "workspace_per_session", 0);
     cfg->max_tokens          = sc_json_get_int(defaults, "max_tokens", cfg->max_tokens);
     cfg->context_window      = sc_json_get_int(defaults, "context_window", cfg->context_window);
     cfg->temperature         = sc_json_get_double(defaults, "temperature", cfg->temperature);

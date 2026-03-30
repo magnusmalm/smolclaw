@@ -432,6 +432,14 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
     return r;
 }
 
+static void git_set_workspace(sc_tool_t *self, const char *workspace)
+{
+    git_data_t *gd = self->data;
+    if (!gd || !workspace) return;
+    free(gd->working_dir);
+    gd->working_dir = sc_strdup(workspace);
+}
+
 static void git_destroy(sc_tool_t *self)
 {
     if (!self) return;
@@ -477,6 +485,7 @@ sc_tool_t *sc_tool_git_new(const char *working_dir, int restrict_to_workspace,
     t->parameters = git_parameters;
     t->execute = git_execute;
     t->set_context = NULL;
+    t->set_workspace = git_set_workspace;
     t->destroy = git_destroy;
     t->needs_confirm = 1; /* Individual subcommands checked at runtime */
     t->data = gd;

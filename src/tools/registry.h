@@ -97,6 +97,10 @@ void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
 /* Check if a tool is allowed by the allowlist */
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name);
 
+/* Switch workspace for all tools that support it.
+ * Calls set_workspace on each tool in the registry. */
+void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspace);
+
 /* Register pre-tool hook (called before execute, return non-zero to block).
  * name is borrowed (not copied). */
 void sc_tool_registry_add_pre_hook(sc_tool_registry_t *reg, const char *name,

@@ -50,6 +50,14 @@ static fs_tool_data_t *fs_data_new(const char *workspace, int restrict_to_ws)
     return d;
 }
 
+static void fs_set_workspace(sc_tool_t *self, const char *workspace)
+{
+    fs_tool_data_t *d = self->data;
+    if (!d || !workspace) return;
+    free(d->workspace);
+    d->workspace = sc_strdup(workspace);
+}
+
 static void fs_tool_destroy(sc_tool_t *self)
 {
     if (!self) return;
@@ -352,9 +360,11 @@ static sc_tool_result_t *read_file_execute(sc_tool_t *self, cJSON *args, void *c
 
 sc_tool_t *sc_tool_read_file_new(const char *workspace, int restrict_to_ws)
 {
-    return sc_tool_new_simple("read_file", "Read the contents of a file",
+    sc_tool_t *t = sc_tool_new_simple("read_file", "Read the contents of a file",
         read_file_parameters, read_file_execute, fs_tool_destroy, 0,
         fs_data_new(workspace, restrict_to_ws));
+    if (t) t->set_workspace = fs_set_workspace;
+    return t;
 }
 
 /* ========== write_file ========== */
@@ -425,9 +435,11 @@ static sc_tool_result_t *write_file_execute(sc_tool_t *self, cJSON *args, void *
 
 sc_tool_t *sc_tool_write_file_new(const char *workspace, int restrict_to_ws)
 {
-    return sc_tool_new_simple("write_file", "Write content to a file",
+    sc_tool_t *t = sc_tool_new_simple("write_file", "Write content to a file",
         write_file_parameters, write_file_execute, fs_tool_destroy, 1,
         fs_data_new(workspace, restrict_to_ws));
+    if (t) t->set_workspace = fs_set_workspace;
+    return t;
 }
 
 /* ========== gitignore filtering for list_dir ========== */
@@ -690,9 +702,11 @@ static sc_tool_result_t *list_dir_execute(sc_tool_t *self, cJSON *args, void *ct
 
 sc_tool_t *sc_tool_list_dir_new(const char *workspace, int restrict_to_ws)
 {
-    return sc_tool_new_simple("list_dir", "List files and directories in a path",
+    sc_tool_t *t = sc_tool_new_simple("list_dir", "List files and directories in a path",
         list_dir_parameters, list_dir_execute, fs_tool_destroy, 0,
         fs_data_new(workspace, restrict_to_ws));
+    if (t) t->set_workspace = fs_set_workspace;
+    return t;
 }
 
 /* ========== edit_file ========== */
@@ -838,10 +852,12 @@ static sc_tool_result_t *edit_file_execute(sc_tool_t *self, cJSON *args, void *c
 
 sc_tool_t *sc_tool_edit_file_new(const char *workspace, int restrict_to_ws)
 {
-    return sc_tool_new_simple("edit_file",
+    sc_tool_t *t = sc_tool_new_simple("edit_file",
         "Edit a file by replacing old_text with new_text. The old_text must exist exactly in the file.",
         edit_file_parameters, edit_file_execute, fs_tool_destroy, 1,
         fs_data_new(workspace, restrict_to_ws));
+    if (t) t->set_workspace = fs_set_workspace;
+    return t;
 }
 
 /* ========== append_file ========== */
@@ -907,7 +923,9 @@ static sc_tool_result_t *append_file_execute(sc_tool_t *self, cJSON *args, void 
 
 sc_tool_t *sc_tool_append_file_new(const char *workspace, int restrict_to_ws)
 {
-    return sc_tool_new_simple("append_file", "Append content to the end of a file",
+    sc_tool_t *t = sc_tool_new_simple("append_file", "Append content to the end of a file",
         append_file_parameters, append_file_execute, fs_tool_destroy, 1,
         fs_data_new(workspace, restrict_to_ws));
+    if (t) t->set_workspace = fs_set_workspace;
+    return t;
 }

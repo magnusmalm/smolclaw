@@ -290,6 +290,14 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
                                 d->max_output_chars);
 }
 
+static void shell_set_workspace(sc_tool_t *self, const char *workspace)
+{
+    shell_data_t *d = self->data;
+    if (!d || !workspace) return;
+    free(d->working_dir);
+    d->working_dir = sc_strdup(workspace);
+}
+
 sc_tool_t *sc_tool_exec_new(const char *working_dir, int restrict_to_workspace,
                             int max_output_chars, int timeout_secs)
 {
@@ -310,6 +318,7 @@ sc_tool_t *sc_tool_exec_new(const char *working_dir, int restrict_to_workspace,
     t->parameters = shell_parameters;
     t->execute = shell_execute;
     t->destroy = shell_destroy;
+    t->set_workspace = shell_set_workspace;
     t->needs_confirm = 1;
     t->data = d;
     return t;

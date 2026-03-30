@@ -650,6 +650,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->max_tokens_per_hour = cfg->max_tokens_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
+    agent->workspace_per_session = cfg->workspace_per_session;
     agent->verbose = cfg->verbose;
     agent->running = 0;
     agent->hourly_slots = calloc(SC_HOURLY_SLOTS, sizeof(sc_hourly_slot_t));
@@ -886,7 +887,38 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
     const char *sk = session_key ? session_key : "cli:default";
     const char *ch = channel ? channel : SC_CHANNEL_CLI;
     const char *cid = chat_id ? chat_id : "direct";
-    return run_agent_loop(agent, sk, ch, cid, content, 0);
+
+    /* Per-session workspace isolation: create a subdirectory under
+     * workspace/tasks/<short_session_id>/ and switch all tools to it.
+     * This prevents cross-task file pollution. */
+    char *task_ws = NULL;
+    if (agent->workspace_per_session && agent->workspace) {
+        /* Extract short ID from session key (last component after ':') */
+        const char *short_id = strrchr(sk, ':');
+        short_id = short_id ? short_id + 1 : sk;
+
+        size_t len = strlen(agent->workspace) + strlen(short_id) + 16;
+        task_ws = malloc(len);
+        if (task_ws) {
+            snprintf(task_ws, len, "%s/tasks/%s", agent->workspace, short_id);
+            /* Create tasks/ parent and task subdir */
+            char tasks_dir[1024];
+            snprintf(tasks_dir, sizeof(tasks_dir), "%s/tasks", agent->workspace);
+            mkdir(tasks_dir, 0700);
+            mkdir(task_ws, 0700);
+            sc_tool_registry_set_workspace(agent->tools, task_ws);
+        }
+    }
+
+    char *result = run_agent_loop(agent, sk, ch, cid, content, 0);
+
+    /* Restore original workspace */
+    if (task_ws) {
+        sc_tool_registry_set_workspace(agent->tools, agent->workspace);
+        free(task_ws);
+    }
+
+    return result;
 }
 
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,

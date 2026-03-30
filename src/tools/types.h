@@ -55,6 +55,10 @@ struct sc_tool {
     /* Set channel/chatID context (optional, can be NULL) */
     void (*set_context)(sc_tool_t *self, const char *channel, const char *chat_id);
 
+    /* Switch workspace directory (optional, can be NULL).
+     * Called per-session to isolate tasks into subdirectories. */
+    void (*set_workspace)(sc_tool_t *self, const char *workspace);
+
     /* Cleanup */
     void (*destroy)(sc_tool_t *self);
 

@@ -43,6 +43,7 @@ typedef struct sc_agent {
     int max_tool_calls_per_hour;
     int max_tokens_per_hour;
     int memory_consolidation;
+    int workspace_per_session;
     int verbose;
     sc_session_manager_t *sessions;
     sc_state_t *state;
