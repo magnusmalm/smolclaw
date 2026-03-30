@@ -39,6 +39,8 @@ static const struct {
     const char *name;
     int needs_confirm;
 } git_subcmds[] = {
+    { "init",     1 },
+    { "config",   1 },
     { "status",   0 },
     { "log",      0 },
     { "diff",     0 },
@@ -138,8 +140,8 @@ static cJSON *git_parameters(sc_tool_t *self)
     cJSON *subcmd = cJSON_AddObjectToObject(props, "subcommand");
     cJSON_AddStringToObject(subcmd, "type", "string");
     cJSON_AddStringToObject(subcmd, "description",
-        "Git subcommand (status, log, diff, show, blame, branch, tag, "
-        "remote, rev-parse, ls-files, add, commit, checkout, stash, "
+        "Git subcommand (init, config, status, log, diff, show, blame, branch, "
+        "tag, remote, rev-parse, ls-files, add, commit, checkout, stash, "
         "fetch, pull, push, merge, rebase, reset, clean, restore, switch)");
 
     cJSON *args = cJSON_AddObjectToObject(props, "args");
@@ -354,10 +356,10 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
     int cmd_needs_confirm = 0;
     if (!is_allowed_subcmd(subcmd, &cmd_needs_confirm))
         return sc_tool_result_error(
-            "Subcommand not allowed. Allowed: status, log, diff, show, "
-            "blame, branch, tag, remote, rev-parse, ls-files, add, commit, "
-            "checkout, stash, fetch, pull, push, merge, rebase, reset, clean, "
-            "restore, switch");
+            "Subcommand not allowed. Allowed: init, config, status, log, diff, "
+            "show, blame, branch, tag, remote, rev-parse, ls-files, add, "
+            "commit, checkout, stash, fetch, pull, push, merge, rebase, "
+            "reset, clean, restore, switch");
 
     /* Validate repo_path if provided */
     const char *repo_path = sc_json_get_string(args_json, "repo_path", NULL);
@@ -478,7 +480,7 @@ sc_tool_t *sc_tool_git_new(const char *working_dir, int restrict_to_workspace,
     }
 
     t->name = "git";
-    t->description = "Execute git commands safely. Supports: status, log, diff, "
+    t->description = "Execute git commands safely. Supports: init, config, status, log, diff, "
                      "show, blame, branch, tag, remote, rev-parse, ls-files, add, "
                      "commit, checkout, stash, fetch, pull, push, merge, rebase, "
                      "reset, clean, restore, switch. Uses fork+exec (no shell).";
