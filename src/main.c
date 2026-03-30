@@ -1737,6 +1737,7 @@ static void gateway_event_loop(struct event_base *base,
                                 sc_bus_t *bus,
                                 sc_agent_t *agent,
                                 sc_channel_manager_t *ch_mgr,
+                                gateway_services_t *svc,
                                 sc_config_t **cfg_ptr,
                                 const char *config_path)
 {
@@ -1758,6 +1759,12 @@ static void gateway_event_loop(struct event_base *base,
         }
 
         event_base_loop(base, EVLOOP_NONBLOCK);
+
+#if SC_ENABLE_CRON
+        /* Manual cron tick — EVLOOP_NONBLOCK doesn't dispatch timers */
+        if (svc->cron)
+            sc_cron_service_tick(svc->cron);
+#endif
 
         sc_inbound_msg_t *msg = sc_bus_consume_inbound(bus);
         if (msg) {
@@ -1899,7 +1906,7 @@ static void cmd_gateway(int argc, char **argv)
     printf("  Channels started\n");
     printf("\nPress Ctrl+C to stop\n\n");
 
-    gateway_event_loop(base, bus, agent, ch_mgr, &cfg, config_path);
+    gateway_event_loop(base, bus, agent, ch_mgr, &svc, &cfg, config_path);
     gateway_shutdown(ch_mgr, &svc, agent, bus, base, cfg, config_path, workspace);
 }
 

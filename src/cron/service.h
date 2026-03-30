@@ -62,6 +62,10 @@ void sc_cron_service_stop(sc_cron_service_t *cs);
 
 void sc_cron_service_set_handler(sc_cron_service_t *cs, sc_cron_handler_t handler, void *ctx);
 
+/* Manual tick — check and fire due jobs. Call from the main event loop
+ * when using EVLOOP_NONBLOCK (which doesn't dispatch timers). */
+void sc_cron_service_tick(sc_cron_service_t *cs);
+
 sc_cron_job_t *sc_cron_service_add_job(sc_cron_service_t *cs, const char *name,
                                         sc_cron_schedule_t schedule,
                                         const char *message, int deliver,

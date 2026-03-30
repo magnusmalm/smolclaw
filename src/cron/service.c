@@ -53,9 +53,14 @@ static void timer_callback(evutil_socket_t fd, short what, void *arg)
 {
     (void)fd; (void)what;
     sc_cron_service_t *cs = arg;
-    if (cs->running) {
+    if (cs->running)
         check_jobs(cs);
-    }
+}
+
+void sc_cron_service_tick(sc_cron_service_t *cs)
+{
+    if (cs && cs->running)
+        check_jobs(cs);
 }
 
 /* --- Public API --- */
