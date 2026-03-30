@@ -251,7 +251,9 @@ static void cmd_mcp_server(void)
 #endif
 
 #if SC_ENABLE_CRON
-/* Cron handler callback — dispatches based on job message prefix */
+/* Cron handler callback — dispatches via the bus to avoid blocking the
+ * event loop. The LLM call in sc_agent_process_heartbeat can take 10-60s,
+ * which would freeze the entire gateway if called synchronously here. */
 static char *cron_handler(sc_cron_job_t *job, void *ctx)
 {
     sc_agent_t *agent = ctx;
@@ -260,7 +262,7 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
     const char *msg = job->payload.message;
     if (!msg) return NULL;
 
-    /* #compact-memory — run AI-driven MEMORY.md compaction */
+    /* #compact-memory — run AI-driven MEMORY.md compaction (quick, ok to block) */
     if (strncmp(msg, "#compact-memory", 15) == 0) {
         SC_LOG_INFO("cron", "Running memory compaction job '%s'",
                     job->name ? job->name : job->id);
@@ -269,8 +271,15 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
         return sc_strdup(rc == 0 ? "ok" : "error");
     }
 
-    /* Default: treat as an agent turn (send message through processing) */
-    return sc_agent_process_heartbeat(agent, msg, SC_CHANNEL_CLI, "cron");
+    /* Dispatch via bus — the gateway_process_message handler will pick this
+     * up on the next event loop iteration and process it asynchronously. */
+    SC_LOG_INFO("cron", "Dispatching cron job '%s' via bus",
+                job->name ? job->name : job->id);
+    sc_inbound_msg_t *imsg = sc_inbound_msg_new(
+        SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol");
+    if (imsg)
+        sc_bus_publish_inbound(agent->bus, imsg);
+    return sc_strdup("dispatched");
 }
 #endif
 
