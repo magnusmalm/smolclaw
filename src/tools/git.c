@@ -30,6 +30,8 @@
 typedef struct {
     char *working_dir;
     int restrict_to_workspace;
+    char **push_allowed_remotes;
+    int push_allowed_remote_count;
 } git_data_t;
 
 /* Allowed subcommands with per-command confirmation requirement */
@@ -53,6 +55,7 @@ static const struct {
     { "stash",    1 },
     { "fetch",    0 },
     { "pull",     1 },
+    { "push",     1 },
     { "merge",    1 },
     { "rebase",   1 },
     { "reset",    1 },
@@ -137,7 +140,7 @@ static cJSON *git_parameters(sc_tool_t *self)
     cJSON_AddStringToObject(subcmd, "description",
         "Git subcommand (status, log, diff, show, blame, branch, tag, "
         "remote, rev-parse, ls-files, add, commit, checkout, stash, "
-        "fetch, pull, merge, rebase, reset, clean, restore, switch)");
+        "fetch, pull, push, merge, rebase, reset, clean, restore, switch)");
 
     cJSON *args = cJSON_AddObjectToObject(props, "args");
     cJSON_AddStringToObject(args, "type", "string");
@@ -281,6 +284,62 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
     return sc_strbuf_finish(&output);
 }
 
+/* Check if a push remote URL is allowed.
+ * Resolves the remote name to a URL via `git remote get-url`, then checks
+ * if the URL contains any of the allowed substrings. */
+static int is_push_remote_allowed(git_data_t *gd, const char *dir,
+                                   const char *args_str)
+{
+    if (!gd->push_allowed_remotes || gd->push_allowed_remote_count <= 0)
+        return 1;  /* no restrictions configured */
+
+    /* Extract remote name from push args (first non-flag arg, default "origin") */
+    const char *remote = "origin";
+    char *parsed_args[GIT_MAX_ARGS];
+    int nargs = 0;
+    if (args_str && args_str[0])
+        nargs = split_args(args_str, parsed_args, GIT_MAX_ARGS);
+    for (int i = 0; i < nargs; i++) {
+        if (parsed_args[i][0] != '-') {
+            remote = parsed_args[i];
+            break;
+        }
+    }
+
+    /* Resolve remote URL via git */
+    char *argv[] = {"git", "-C", (char *)dir, "remote", "get-url",
+                    (char *)remote, NULL};
+    int status = 0, timed_out = 0;
+    char *url = git_run_subprocess(argv, &status, &timed_out);
+
+    for (int i = 0; i < nargs; i++) free(parsed_args[i]);
+
+    if (!url || timed_out || (WIFEXITED(status) && WEXITSTATUS(status) != 0)) {
+        free(url);
+        return 0;  /* can't resolve remote — deny */
+    }
+
+    /* Trim trailing newline */
+    size_t ulen = strlen(url);
+    while (ulen > 0 && (url[ulen-1] == '\n' || url[ulen-1] == '\r'))
+        url[--ulen] = '\0';
+
+    /* Check URL against allowlist */
+    int allowed = 0;
+    for (int i = 0; i < gd->push_allowed_remote_count; i++) {
+        if (strstr(url, gd->push_allowed_remotes[i])) {
+            allowed = 1;
+            break;
+        }
+    }
+
+    if (!allowed)
+        SC_LOG_WARN(GIT_TAG, "push blocked: remote '%s' URL '%s' not in allowlist",
+                    remote, url);
+    free(url);
+    return allowed;
+}
+
 static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
                                       void *ctx)
 {
@@ -297,7 +356,7 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
         return sc_tool_result_error(
             "Subcommand not allowed. Allowed: status, log, diff, show, "
             "blame, branch, tag, remote, rev-parse, ls-files, add, commit, "
-            "checkout, stash, fetch, pull, merge, rebase, reset, clean, "
+            "checkout, stash, fetch, pull, push, merge, rebase, reset, clean, "
             "restore, switch");
 
     /* Validate repo_path if provided */
@@ -331,6 +390,16 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
         for (int j = 0; j < extra_count; j++) free(extra_args[j]);
         free(resolved_repo);
         return sc_tool_result_error("Dangerous git flag blocked");
+    }
+
+    /* For push: validate remote URL against allowlist */
+    if (strcmp(subcmd, "push") == 0 &&
+        !is_push_remote_allowed(gd, use_dir, args_str)) {
+        for (int j = 0; j < extra_count; j++) free(extra_args[j]);
+        free(resolved_repo);
+        return sc_tool_result_error(
+            "Push blocked: remote URL not in git_push_allowed_remotes. "
+            "Check your config or use the gitea tool to manage repositories.");
     }
 
     /* Fork + exec */
@@ -369,12 +438,17 @@ static void git_destroy(sc_tool_t *self)
     git_data_t *gd = self->data;
     if (gd) {
         free(gd->working_dir);
+        for (int i = 0; i < gd->push_allowed_remote_count; i++)
+            free(gd->push_allowed_remotes[i]);
+        free(gd->push_allowed_remotes);
         free(gd);
     }
     free(self);
 }
 
-sc_tool_t *sc_tool_git_new(const char *working_dir, int restrict_to_workspace)
+sc_tool_t *sc_tool_git_new(const char *working_dir, int restrict_to_workspace,
+                            const char **push_allowed_remotes,
+                            int push_allowed_remote_count)
 {
     sc_tool_t *t = calloc(1, sizeof(*t));
     if (!t) return NULL;
@@ -385,11 +459,21 @@ sc_tool_t *sc_tool_git_new(const char *working_dir, int restrict_to_workspace)
     gd->working_dir = sc_strdup(working_dir ? working_dir : ".");
     gd->restrict_to_workspace = restrict_to_workspace;
 
+    if (push_allowed_remotes && push_allowed_remote_count > 0) {
+        gd->push_allowed_remotes = calloc((size_t)push_allowed_remote_count,
+                                           sizeof(char *));
+        if (gd->push_allowed_remotes) {
+            for (int i = 0; i < push_allowed_remote_count; i++)
+                gd->push_allowed_remotes[i] = sc_strdup(push_allowed_remotes[i]);
+            gd->push_allowed_remote_count = push_allowed_remote_count;
+        }
+    }
+
     t->name = "git";
     t->description = "Execute git commands safely. Supports: status, log, diff, "
                      "show, blame, branch, tag, remote, rev-parse, ls-files, add, "
-                     "commit, checkout, stash, fetch, pull, merge, rebase, reset, "
-                     "clean, restore, switch. Uses fork+exec (no shell).";
+                     "commit, checkout, stash, fetch, pull, push, merge, rebase, "
+                     "reset, clean, restore, switch. Uses fork+exec (no shell).";
     t->parameters = git_parameters;
     t->execute = git_execute;
     t->set_context = NULL;

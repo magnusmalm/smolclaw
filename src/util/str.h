@@ -61,4 +61,10 @@ int sc_timing_safe_cmp(const char *a, const char *b);
  * Returns newly allocated string. Caller owns result. */
 char *sc_xml_escape_attr(const char *s);
 
+/* Strip ANSI escape sequences and non-printable control characters from
+ * tool output before sending to LLM context. Preserves \n, \r, \t.
+ * Truncates at 32KB with a marker to prevent blown context windows.
+ * Returns newly allocated string. Caller owns result. */
+char *sc_sanitize_tool_output(const char *s);
+
 #endif /* SC_STR_H */

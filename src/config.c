@@ -1194,6 +1194,31 @@ sc_config_t *sc_config_load(const char *path)
         }
     }
 
+    /* git tool settings */
+    const cJSON *git_sec = sc_json_get_object(root, "git");
+    if (git_sec) {
+        const cJSON *par = cJSON_GetObjectItem(git_sec, "push_allowed_remotes");
+        if (par && cJSON_IsArray(par)) {
+            int n = cJSON_GetArraySize(par);
+            if (n > 0) {
+                /* Free old list */
+                for (int i = 0; i < cfg->git.push_allowed_remote_count; i++)
+                    free(cfg->git.push_allowed_remotes[i]);
+                free(cfg->git.push_allowed_remotes);
+                cfg->git.push_allowed_remotes = calloc((size_t)n, sizeof(char *));
+                cfg->git.push_allowed_remote_count = 0;
+                if (cfg->git.push_allowed_remotes) {
+                    const cJSON *item;
+                    cJSON_ArrayForEach(item, par) {
+                        if (cJSON_IsString(item) && item->valuestring)
+                            cfg->git.push_allowed_remotes[cfg->git.push_allowed_remote_count++] =
+                                sc_strdup(item->valuestring);
+                    }
+                }
+            }
+        }
+    }
+
     /* gitea */
     const cJSON *gitea = sc_json_get_object(root, "gitea");
     if (gitea) {
@@ -1721,6 +1746,10 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->web_tools.brave_api_key);
     free(cfg->web_tools.brave_base_url);
     free(cfg->web_tools.searxng_base_url);
+
+    for (int i = 0; i < cfg->git.push_allowed_remote_count; i++)
+        free(cfg->git.push_allowed_remotes[i]);
+    free(cfg->git.push_allowed_remotes);
 
     free(cfg->gitea.url);
     free(cfg->gitea.token);

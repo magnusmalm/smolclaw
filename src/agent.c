@@ -233,7 +233,9 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
     /* Git tool */
 #if SC_ENABLE_GIT
     sc_tool_registry_register(reg,
-                               sc_tool_git_new(workspace, restrict_ws));
+                               sc_tool_git_new(workspace, restrict_ws,
+                                   (const char **)cfg->git.push_allowed_remotes,
+                                   cfg->git.push_allowed_remote_count));
 #endif
 
     /* Code graph tool */
@@ -407,7 +409,9 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     /* Git tool */
 #if SC_ENABLE_GIT
     sc_tool_registry_register(agent->tools,
-                               sc_tool_git_new(workspace, restrict_ws));
+                               sc_tool_git_new(workspace, restrict_ws,
+                                   (const char **)cfg->git.push_allowed_remotes,
+                                   cfg->git.push_allowed_remote_count));
 #endif
 
     /* Code graph tool */

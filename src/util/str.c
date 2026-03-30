@@ -423,6 +423,67 @@ char *sc_xml_escape_attr(const char *s)
     return sc_strbuf_finish(&sb);
 }
 
+/* Max size for tool output sent to LLM context. Prevents blown context
+ * windows from causing unpredictable model behavior. */
+#define SC_TOOL_OUTPUT_MAX (32 * 1024)
+
+char *sc_sanitize_tool_output(const char *s)
+{
+    if (!s) return NULL;
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    const char *p = s;
+
+    while (*p) {
+        /* Truncate at size cap */
+        if (sb.len >= SC_TOOL_OUTPUT_MAX) {
+            sc_strbuf_append(&sb,
+                "\n[output truncated at 32KB]");
+            break;
+        }
+
+        /* Detect ANSI escape sequences: ESC [ ... (letter) or ESC ] ... ST */
+        if (*p == '\033') {
+            p++;
+            if (*p == '[') {
+                /* CSI sequence: ESC [ params... final_byte */
+                p++;
+                while (*p && !((*p >= '@' && *p <= '~'))) p++;
+                if (*p) p++;  /* skip final byte */
+                continue;
+            }
+            if (*p == ']') {
+                /* OSC sequence: ESC ] ... (ST or BEL) */
+                p++;
+                while (*p && *p != '\007' && !(*p == '\033' && *(p+1) == '\\')) p++;
+                if (*p == '\007') p++;
+                else if (*p == '\033' && *(p+1) == '\\') p += 2;
+                continue;
+            }
+            /* Other ESC sequences: skip ESC + next char */
+            if (*p) p++;
+            continue;
+        }
+
+        /* Strip control chars except \n, \r, \t */
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+            p++;
+            continue;
+        }
+        if (c == 0x7f) { /* DEL */
+            p++;
+            continue;
+        }
+
+        sc_strbuf_append_char(&sb, *p);
+        p++;
+    }
+
+    return sc_strbuf_finish(&sb);
+}
+
 char *sc_sanitize_filename(const char *key)
 {
     if (!key)

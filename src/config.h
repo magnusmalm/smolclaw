@@ -259,6 +259,12 @@ typedef struct {
     /* Tools */
     sc_web_tools_config_t web_tools;
 
+    /* Git tool settings */
+    struct {
+        char **push_allowed_remotes;  /* URL substrings for push allowlist */
+        int push_allowed_remote_count;
+    } git;
+
     /* Gitea */
     struct {
         char *url;          /* Base URL, e.g. "http://192.168.1.118:3000" */

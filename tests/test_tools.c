@@ -1388,7 +1388,7 @@ static void test_git_blocks_config_flag(void)
     snprintf(cmd, sizeof(cmd), "git init %s >/dev/null 2>&1", tmpdir);
     system(cmd);
 
-    sc_tool_t *tool = sc_tool_git_new(tmpdir, 0);
+    sc_tool_t *tool = sc_tool_git_new(tmpdir, 0, NULL, 0);
     ASSERT_NOT_NULL(tool);
 
     /* -c flag should be blocked */

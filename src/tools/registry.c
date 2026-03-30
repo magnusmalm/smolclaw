@@ -41,7 +41,7 @@ sc_tool_result_t *sc_tool_result_new(const char *for_llm)
 {
     sc_tool_result_t *r = calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->for_llm = sc_strdup(for_llm);
+    r->for_llm = sc_sanitize_tool_output(for_llm);
     return r;
 }
 
@@ -49,7 +49,7 @@ sc_tool_result_t *sc_tool_result_silent(const char *for_llm)
 {
     sc_tool_result_t *r = calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->for_llm = sc_strdup(for_llm);
+    r->for_llm = sc_sanitize_tool_output(for_llm);
     r->silent = 1;
     return r;
 }
@@ -58,7 +58,7 @@ sc_tool_result_t *sc_tool_result_error(const char *message)
 {
     sc_tool_result_t *r = calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->for_llm = sc_strdup(message);
+    r->for_llm = sc_sanitize_tool_output(message);
     r->is_error = 1;
     return r;
 }
@@ -67,8 +67,8 @@ sc_tool_result_t *sc_tool_result_user(const char *content)
 {
     sc_tool_result_t *r = calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->for_llm = sc_strdup(content);
-    r->for_user = sc_strdup(content);
+    r->for_llm = sc_sanitize_tool_output(content);
+    r->for_user = sc_strdup(content);  /* user sees raw output */
     return r;
 }
 
@@ -76,7 +76,7 @@ sc_tool_result_t *sc_tool_result_async(const char *for_llm)
 {
     sc_tool_result_t *r = calloc(1, sizeof(*r));
     if (!r) return NULL;
-    r->for_llm = sc_strdup(for_llm);
+    r->for_llm = sc_sanitize_tool_output(for_llm);
     r->async = 1;
     return r;
 }
