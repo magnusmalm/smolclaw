@@ -23,6 +23,8 @@
 #include "util/str.h"
 #include "util/secrets.h"
 #include "util/prompt_guard.h"
+#include "util/curl_common.h"
+#include <curl/curl.h>
 #include "cost.h"
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
@@ -1170,6 +1172,57 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
     return ret;
 }
 
+/* ---------- Smolchat cost reporting ---------- */
+
+/* Fire-and-forget POST to smolchat /api/cost. Non-critical — errors are
+ * silently ignored so they never block the agent loop. */
+static void report_cost_to_smolchat(const char *model, int prompt_tokens,
+                                      int completion_tokens)
+{
+    const char *url = getenv("SMOLCHAT_URL");
+    const char *token = getenv("SMOLCHAT_TOKEN");
+    if (!url || !token || !url[0] || !token[0]) return;
+
+    /* Derive agent name from SMOLCLAW_HOME (last path component) */
+    const char *home = getenv("SMOLCLAW_HOME");
+    const char *agent_name = "unknown";
+    if (home) {
+        const char *last = strrchr(home, '/');
+        if (last && last[1]) agent_name = last + 1;
+    }
+
+    char endpoint[512];
+    snprintf(endpoint, sizeof(endpoint), "%s/api/cost", url);
+
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "agent", agent_name);
+    cJSON_AddStringToObject(body, "model", model ? model : "unknown");
+    cJSON_AddNumberToObject(body, "input_tokens", prompt_tokens);
+    cJSON_AddNumberToObject(body, "output_tokens", completion_tokens);
+    char *json = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    if (!json) return;
+
+    CURL *curl = sc_curl_init();
+    if (curl) {
+        char auth[256];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", token);
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, auth);
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 3L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+        curl_easy_perform(curl);  /* ignore result */
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+    free(json);
+}
+
 /* ---------- Turn summary logging ---------- */
 
 static void log_turn_summary(sc_agent_t *agent, const char *model,
@@ -1192,6 +1245,9 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
     if (agent->cost_tracker)
         sc_cost_tracker_record(agent->cost_tracker, model, tc->session_key,
                                 tc->prompt_tokens, tc->completion_tokens);
+
+    /* Report cost to smolchat for fleet-wide tracking */
+    report_cost_to_smolchat(model, tc->prompt_tokens, tc->completion_tokens);
 
     /* Record tokens in hourly budget tracker */
     if (agent->max_tokens_per_hour > 0)
