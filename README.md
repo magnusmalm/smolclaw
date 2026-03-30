@@ -19,11 +19,11 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
 | **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
-| **Tools**       | File read/write/edit/append/list, shell exec, git, web search/fetch, X read tools, memory read/write/log/search, context search, code graph, message, cron, spawn, delegate (remote agent), background processes (up to 23 built-in) |
-| **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation from session summaries, full-text search (SQLite FTS5)                                                  |
-| **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense      |
-| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override, typing indicators                                                               |
-| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote agent delegation via REST API, multi-turn agent dialogue (converse tool), cross-agent memory search, per-agent isolated workspaces via `SMOLCLAW_HOME` |
+| **Tools**       | File read/write/edit/append/list, shell exec, git (init/config/push/pull + remote allowlist), gitea (repos/issues/PRs), web search/fetch, X read, memory read/write/log/search, context search, code graph, message, cron, spawn, delegate, converse, notify, background processes (up to 25 built-in) |
+| **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search (SQLite FTS5), cross-agent memory API                                                 |
+| **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense, tool output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API |
+| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost reporting to smolchat |
+| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote delegation via REST, multi-turn dialogue (converse tool), cross-agent memory search, per-session workspace isolation (`workspace_per_session` with auto-prune), per-agent workspaces via `SMOLCLAW_HOME` |
 | **Services**    | Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics                                                                                               |
 
 ## Quickstart
