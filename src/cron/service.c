@@ -75,7 +75,7 @@ sc_cron_service_t *sc_cron_service_new(const char *store_path, struct event_base
     cs->running = 0;
     cs->timer_event = NULL;
 
-    /* Load existing jobs */
+    /* Load existing jobs (read-only at this stage — start() will reload) */
     load_store(cs);
 
     return cs;
@@ -100,6 +100,12 @@ int sc_cron_service_start(sc_cron_service_t *cs)
 {
     if (!cs || cs->running) return 0;
 
+    /* Clear and reload from disk to avoid duplicates */
+    for (int i = 0; i < cs->job_count; i++) {
+        free_job(cs->jobs[i]);
+        free(cs->jobs[i]);
+    }
+    cs->job_count = 0;
     load_store(cs);
     recompute_next_runs(cs);
     save_store(cs);
