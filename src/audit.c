@@ -259,3 +259,68 @@ void sc_audit_set_model(const char *model)
     audit_model = model ? sc_strdup(model) : NULL;
     pthread_mutex_unlock(&audit_lock);
 }
+
+const char *sc_audit_get_path(void)
+{
+    return audit_path;
+}
+
+char *sc_audit_read_recent(int limit, double since_ts)
+{
+    pthread_mutex_lock(&audit_lock);
+    const char *path = audit_path;
+    pthread_mutex_unlock(&audit_lock);
+    if (!path) return NULL;
+
+    FILE *f = fopen(path, "r");
+    if (!f) return NULL;
+
+    /* Read all lines into a circular buffer of last N lines */
+    if (limit <= 0) limit = 50;
+    if (limit > 500) limit = 500;
+
+    char **lines = calloc((size_t)limit, sizeof(char *));
+    if (!lines) { fclose(f); return NULL; }
+    int idx = 0, total = 0;
+    char buf[4096];
+
+    while (fgets(buf, sizeof(buf), f)) {
+        /* If filtering by timestamp, check "ts": field */
+        if (since_ts > 0) {
+            const char *ts = strstr(buf, "\"ts\":");
+            if (ts) {
+                double t = strtod(ts + 5, NULL);
+                if (t < since_ts) continue;
+            }
+        }
+        free(lines[idx % limit]);
+        lines[idx % limit] = sc_strdup(buf);
+        idx++;
+        total++;
+    }
+    fclose(f);
+
+    /* Build output from circular buffer in order */
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_append(&sb, "[");
+
+    int count = total < limit ? total : limit;
+    int start = total < limit ? 0 : (idx % limit);
+    for (int i = 0; i < count; i++) {
+        int pos = (start + i) % limit;
+        if (!lines[pos]) continue;
+        if (i > 0) sc_strbuf_append(&sb, ",");
+        /* Trim trailing newline */
+        size_t len = strlen(lines[pos]);
+        if (len > 0 && lines[pos][len-1] == '\n')
+            lines[pos][len-1] = '\0';
+        sc_strbuf_append(&sb, lines[pos]);
+    }
+    sc_strbuf_append(&sb, "]");
+
+    for (int i = 0; i < limit; i++) free(lines[i]);
+    free(lines);
+
+    return sc_strbuf_finish(&sb);
+}

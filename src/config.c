@@ -1285,6 +1285,48 @@ sc_config_t *sc_config_load(const char *path)
 
     SC_LOG_INFO(LOG_TAG, "loaded config from %s", path);
     sc_audit_log_ext("config", path, 0, 0, NULL, NULL, "config_load");
+
+    /* Verify config integrity against deploy-time hash if available */
+    {
+        char hash_path[1024];
+        snprintf(hash_path, sizeof(hash_path), "%s.sha256", path);
+        FILE *hf = fopen(hash_path, "r");
+        char expected[128] = {0};
+        if (hf) {
+            if (!fgets(expected, sizeof(expected), hf))
+                expected[0] = '\0';
+            fclose(hf);
+        }
+        if (expected[0]) {
+            /* Trim whitespace */
+            size_t elen = strlen(expected);
+            while (elen > 0 && (expected[elen-1] == '\n' || expected[elen-1] == '\r'
+                   || expected[elen-1] == ' '))
+                expected[--elen] = '\0';
+            (void)elen;
+
+            /* Compute actual hash via sha256sum */
+            char cmd[1024];
+            snprintf(cmd, sizeof(cmd), "sha256sum '%s' 2>/dev/null", path);
+            FILE *fp = popen(cmd, "r");
+            if (fp) {
+                char actual[128] = {0};
+                if (fgets(actual, sizeof(actual), fp)) {
+                    char *sp = strchr(actual, ' ');
+                    if (sp) *sp = '\0';
+                    if (elen > 0 && strlen(actual) > 0 &&
+                        strcmp(actual, expected) != 0) {
+                        SC_LOG_WARN(LOG_TAG,
+                            "CONFIG INTEGRITY MISMATCH: %s may have been "
+                            "tampered with (expected %.12s..., got %.12s...)",
+                            path, expected, actual);
+                    }
+                }
+                pclose(fp);
+            }
+        }
+    }
+
     return cfg;
 }
 

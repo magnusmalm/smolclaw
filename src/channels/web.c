@@ -28,6 +28,7 @@
 #include <event2/event.h>
 #include <event2/http.h>
 #include <event2/buffer.h>
+#include <event2/keyvalq_struct.h>
 
 #if SC_HAVE_EVENT_OPENSSL
 #include <event2/bufferevent_ssl.h>
@@ -47,6 +48,7 @@
 #include "util/uuid.h"
 #include "util/json_helpers.h"
 #include "util/sha256.h"
+#include "audit.h"
 
 #define WEB_TAG "web"
 #define WEB_REQUEST_TIMEOUT 600  /* seconds — must cover multi-step delegation chains */
@@ -403,6 +405,40 @@ static void handle_message(struct evhttp_request *req, void *arg)
             free_pending(wp);
         }
     }
+}
+
+/* Handle GET /api/audit — return recent audit log entries as JSON array */
+static void handle_audit(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    /* Parse query params */
+    struct evkeyvalq params;
+    const char *uri = evhttp_request_get_uri(req);
+    evhttp_parse_query(uri, &params);
+    const char *limit_str = evhttp_find_header(&params, "limit");
+    const char *since_str = evhttp_find_header(&params, "since");
+    int limit = limit_str ? atoi(limit_str) : 50;
+    double since_ts = since_str ? strtod(since_str, NULL) : 0;
+    evhttp_clear_headers(&params);
+
+    char *json = sc_audit_read_recent(limit, since_ts);
+    if (!json) json = sc_strdup("[]");
+
+    struct evbuffer *buf = evbuffer_new();
+    evbuffer_add(buf, json, strlen(json));
+    free(json);
+
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
 }
 
 /* Handle GET /api/health */
@@ -780,6 +816,7 @@ static int web_start(sc_channel_t *self)
 #if SC_ENABLE_MEMORY_SEARCH
     evhttp_set_cb(wd->http, "/api/memory/search", handle_memory_search, self);
 #endif
+    evhttp_set_cb(wd->http, "/api/audit", handle_audit, self);
     evhttp_set_cb(wd->http, "/api/health", handle_health, self);
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
