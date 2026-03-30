@@ -142,6 +142,20 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
         if (!(avail & SC_SANDBOX_SECCOMP))
             SC_LOG_WARN("agent", "seccomp-bpf not available — exec children will run without syscall filter");
     }
+    /* Block commands that have dedicated tools */
+    {
+        const char *covered[4];
+        int nc = 0;
+#if SC_ENABLE_GIT
+        covered[nc++] = "git";
+#endif
+#if SC_ENABLE_GITEA
+        if (cfg->gitea.url && cfg->gitea.token)
+            covered[nc++] = "curl";
+#endif
+        if (nc > 0)
+            sc_tool_exec_set_tool_covered(exec_tool, covered, nc);
+    }
     sc_tool_registry_register(reg, exec_tool);
 
     /* Web tools */
@@ -291,6 +305,20 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
             SC_LOG_WARN("agent", "Landlock not available — exec children will run without filesystem sandbox");
         if (!(avail & SC_SANDBOX_SECCOMP))
             SC_LOG_WARN("agent", "seccomp-bpf not available — exec children will run without syscall filter");
+    }
+    /* Block commands that have dedicated tools */
+    {
+        const char *covered[4];
+        int nc = 0;
+#if SC_ENABLE_GIT
+        covered[nc++] = "git";
+#endif
+#if SC_ENABLE_GITEA
+        if (cfg->gitea.url && cfg->gitea.token)
+            covered[nc++] = "curl";
+#endif
+        if (nc > 0)
+            sc_tool_exec_set_tool_covered(exec_tool, covered, nc);
     }
 #if SC_ENABLE_TEE
     if (cfg->tee_enabled) {

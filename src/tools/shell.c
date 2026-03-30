@@ -43,6 +43,8 @@ typedef struct {
     char **allowed_commands;
     int allowed_count;
     int sandbox_enabled;
+    char **tool_covered_cmds;   /* commands blocked because a dedicated tool exists */
+    int tool_covered_count;
 #if SC_ENABLE_TEE
     sc_tee_config_t *tee_cfg;
 #endif
@@ -55,6 +57,9 @@ static void shell_destroy(sc_tool_t *self)
     if (!self) return;
     shell_data_t *d = self->data;
     if (d) {
+        for (int i = 0; i < d->tool_covered_count; i++)
+            free(d->tool_covered_cmds[i]);
+        free(d->tool_covered_cmds);
         sc_exec_data_free(&d->deny, d->allowed_commands,
                           d->allowed_count, d->working_dir);
         free(d);
@@ -203,6 +208,26 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
     if (guard_err)
         return sc_tool_result_error(guard_err);
 
+    /* Block commands that have dedicated tools.
+     * Extracts the base command (first word) and checks against the list. */
+    if (d->tool_covered_cmds && d->tool_covered_count > 0) {
+        const char *cmd = command;
+        while (*cmd == ' ' || *cmd == '\t') cmd++;
+        for (int i = 0; i < d->tool_covered_count; i++) {
+            const char *blocked = d->tool_covered_cmds[i];
+            size_t blen = strlen(blocked);
+            if (strncmp(cmd, blocked, blen) == 0 &&
+                (cmd[blen] == '\0' || cmd[blen] == ' ' || cmd[blen] == '\t')) {
+                char err[256];
+                snprintf(err, sizeof(err),
+                    "Command '%s' is blocked — use the '%s' tool instead. "
+                    "The exec tool cannot run commands that have dedicated tools.",
+                    blocked, blocked);
+                return sc_tool_result_error(err);
+            }
+        }
+    }
+
     /* Create pipe for stdout+stderr */
     int pipefd[2];
     if (pipe(pipefd) != 0)
@@ -338,6 +363,23 @@ void sc_tool_exec_set_sandbox(sc_tool_t *t, int enabled)
     if (!t || !t->data) return;
     shell_data_t *d = t->data;
     d->sandbox_enabled = enabled;
+}
+
+void sc_tool_exec_set_tool_covered(sc_tool_t *t,
+                                     const char **cmds, int count)
+{
+    if (!t || !t->data || !cmds || count <= 0) return;
+    shell_data_t *d = t->data;
+    /* Free old list */
+    for (int i = 0; i < d->tool_covered_count; i++)
+        free(d->tool_covered_cmds[i]);
+    free(d->tool_covered_cmds);
+    d->tool_covered_cmds = calloc((size_t)count, sizeof(char *));
+    d->tool_covered_count = 0;
+    if (d->tool_covered_cmds) {
+        for (int i = 0; i < count; i++)
+            d->tool_covered_cmds[d->tool_covered_count++] = sc_strdup(cmds[i]);
+    }
 }
 
 void sc_tool_exec_set_tee(sc_tool_t *t, struct sc_tee_config *tee_cfg)

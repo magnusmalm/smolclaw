@@ -14,6 +14,11 @@ void sc_tool_exec_set_allowlist(sc_tool_t *t, int use_allowlist,
 /* Enable/disable OS-level sandbox (Landlock + seccomp) for exec children */
 void sc_tool_exec_set_sandbox(sc_tool_t *t, int enabled);
 
+/* Block commands that have dedicated tools (e.g. "git" when git tool exists).
+ * The exec tool returns an error directing the model to use the right tool. */
+void sc_tool_exec_set_tool_covered(sc_tool_t *t,
+                                     const char **cmds, int count);
+
 /* Forward declaration for tee config */
 struct sc_tee_config;
 
