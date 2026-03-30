@@ -8,6 +8,7 @@
 #include "agent_internal.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -880,6 +881,81 @@ char *sc_agent_process_direct(sc_agent_t *agent, const char *content,
     return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0);
 }
 
+/* Remove a directory tree recursively (rm -rf equivalent). */
+static void remove_tree(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) { unlink(path); return; }
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        char child[1024];
+        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+        struct stat st;
+        if (lstat(child, &st) == 0 && S_ISDIR(st.st_mode))
+            remove_tree(child);
+        else
+            unlink(child);
+    }
+    closedir(d);
+    rmdir(path);
+}
+
+/* Prune old task directories, keeping the most recent `keep` entries.
+ * Directories are sorted by mtime (oldest first). */
+#define TASK_WORKSPACE_KEEP 5
+
+static void prune_task_workspaces(const char *workspace)
+{
+    char tasks_dir[1024];
+    snprintf(tasks_dir, sizeof(tasks_dir), "%s/tasks", workspace);
+
+    DIR *d = opendir(tasks_dir);
+    if (!d) return;
+
+    /* Collect entries with mtime */
+    struct { char name[256]; time_t mtime; } entries[512];
+    int count = 0;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL && count < 512) {
+        if (ent->d_name[0] == '.') continue;
+        char full[1024];
+        snprintf(full, sizeof(full), "%s/%s", tasks_dir, ent->d_name);
+        struct stat st;
+        if (stat(full, &st) == 0 && S_ISDIR(st.st_mode)) {
+            snprintf(entries[count].name, sizeof(entries[count].name),
+                     "%s", ent->d_name);
+            entries[count].mtime = st.st_mtime;
+            count++;
+        }
+    }
+    closedir(d);
+
+    if (count <= TASK_WORKSPACE_KEEP) return;
+
+    /* Sort by mtime ascending (oldest first) */
+    for (int i = 0; i < count - 1; i++)
+        for (int j = i + 1; j < count; j++)
+            if (entries[j].mtime < entries[i].mtime) {
+                char tmp_name[256];
+                time_t tmp_mt = entries[i].mtime;
+                memcpy(tmp_name, entries[i].name, sizeof(tmp_name));
+                memcpy(entries[i].name, entries[j].name, sizeof(tmp_name));
+                entries[i].mtime = entries[j].mtime;
+                memcpy(entries[j].name, tmp_name, sizeof(tmp_name));
+                entries[j].mtime = tmp_mt;
+            }
+
+    /* Remove oldest entries */
+    int to_remove = count - TASK_WORKSPACE_KEEP;
+    for (int i = 0; i < to_remove; i++) {
+        char full[1024];
+        snprintf(full, sizeof(full), "%s/%s", tasks_dir, entries[i].name);
+        remove_tree(full);
+    }
+}
+
 char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
                                 const char *session_key,
                                 const char *channel, const char *chat_id)
@@ -912,10 +988,11 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
 
     char *result = run_agent_loop(agent, sk, ch, cid, content, 0);
 
-    /* Restore original workspace */
+    /* Restore original workspace and prune old task dirs */
     if (task_ws) {
         sc_tool_registry_set_workspace(agent->tools, agent->workspace);
         free(task_ws);
+        prune_task_workspaces(agent->workspace);
     }
 
     return result;
