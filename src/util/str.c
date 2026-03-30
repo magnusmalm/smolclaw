@@ -438,8 +438,9 @@ char *sc_sanitize_tool_output(const char *s)
     while (*p) {
         /* Truncate at size cap */
         if (sb.len >= SC_TOOL_OUTPUT_MAX) {
-            sc_strbuf_append(&sb,
-                "\n[output truncated at 32KB]");
+            sc_strbuf_appendf(&sb,
+                "\n[output truncated at %dKB]",
+                SC_TOOL_OUTPUT_MAX / 1024);
             break;
         }
 
