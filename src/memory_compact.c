@@ -36,7 +36,13 @@ static const char COMPACT_SYSTEM_PROMPT[] =
     "5. If an older entry is referenced by a recent entry, keep enough context "
     "for the reference to make sense.\n"
     "6. Output ONLY the compacted MEMORY.md content. No commentary.\n"
-    "7. If the file is already compact enough, return it unchanged.";
+    "7. If the file is already compact enough, return it unchanged.\n"
+    "8. REMOVE anything derivable from code, git history, or external APIs. "
+    "Do not persist file paths, function names, code structure, or debugging "
+    "findings — the agent can rediscover these by reading the code. Only keep "
+    "decisions, surprises, non-obvious context, and user preferences.\n"
+    "9. Convert all relative dates to absolute dates (e.g., 'yesterday' to "
+    "'2026-03-30') so entries remain interpretable over time.";
 
 int sc_memory_compact(const char *workspace, sc_provider_t *provider,
                        const char *model, size_t threshold_bytes)

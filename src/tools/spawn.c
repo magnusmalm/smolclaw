@@ -12,6 +12,7 @@
 
 #include "tools/spawn.h"
 #include "tools/types.h"
+#include "tools/registry.h"
 #include "agent.h"
 #include "constants.h"
 #include "util/str.h"
@@ -55,6 +56,35 @@ static cJSON *spawn_parameters(sc_tool_t *self)
 }
 
 static _Thread_local int spawn_depth = 0;
+
+int sc_spawn_get_depth(void) { return spawn_depth; }
+
+/* Tools denied at spawn depth >= 1 (subagents can't escalate) */
+static const char *depth1_denied[] = {
+    "spawn", "delegate", "cron"
+};
+/* Additional denials at depth >= 2 */
+static const char *depth2_denied[] = {
+    "spawn", "delegate", "cron", "notify", "converse", "background"
+};
+
+/* Pre-hook: block escalation-prone tools inside subagents */
+static int spawn_depth_guard(const char *tool_name, const cJSON *args,
+                              const char *channel, const char *chat_id,
+                              void *userdata)
+{
+    (void)args; (void)channel; (void)chat_id; (void)userdata;
+    if (spawn_depth < 1) return 0;  /* top-level: allow all */
+
+    const char **denied = (spawn_depth >= 2) ? depth2_denied : depth1_denied;
+    int count = (spawn_depth >= 2) ? 6 : 3;
+
+    for (int i = 0; i < count; i++) {
+        if (strcmp(tool_name, denied[i]) == 0)
+            return 1;  /* blocked */
+    }
+    return 0;
+}
 
 static sc_tool_result_t *spawn_execute(sc_tool_t *self, cJSON *args, void *ctx)
 {
@@ -122,5 +152,11 @@ sc_tool_t *sc_tool_spawn_new(sc_agent_t *parent_agent)
     t->execute = spawn_execute;
     t->destroy = spawn_destroy;
     t->data = d;
+
+    /* Register depth guard so subagents can't use escalation-prone tools */
+    if (parent_agent && parent_agent->tools)
+        sc_tool_registry_add_pre_hook(parent_agent->tools, "spawn_depth_guard",
+                                       spawn_depth_guard, NULL);
+
     return t;
 }

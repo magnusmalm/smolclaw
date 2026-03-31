@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include "bus.h"
+#include "util/task.h"
 #include "config.h"
 #include "context.h"
 #include "session.h"
@@ -75,10 +76,8 @@ typedef struct sc_agent {
     void *analytics;
     /* Cross-turn hourly rate tracking (defined in agent_internal.h) */
     void *hourly_slots;
-    /* Async summarization thread */
-    pthread_t summarize_thread;
-    atomic_int summarize_thread_active;
-    void *summarize_pending_args;  /* sc_summarize_args_t *, written by thread */
+    /* Async summarization task (NULL when idle) */
+    sc_task_t *summarize_task;
     /* Context transform chain (invoked between context build and LLM call) */
     sc_context_transform_t *transforms;
     int transform_count;

@@ -648,6 +648,38 @@ static void load_channel_tools(sc_agent_t *agent, const sc_config_t *cfg)
     add_channel_tools(agent, "x", cfg->x.tools, cfg->x.tool_count);
 }
 
+/* Context transform: compress old tool results to free context tokens.
+ * Tool results older than the last 4 messages with content > 10KB are
+ * replaced with a truncated preview. */
+#define COMPRESS_KEEP_RECENT 4
+#define COMPRESS_THRESHOLD   10000
+#define COMPRESS_PREVIEW     500
+
+static int compress_old_tool_results(sc_context_snap_t *snap, void *userdata)
+{
+    (void)userdata;
+    int count = *snap->msg_count;
+    int cutoff = count > COMPRESS_KEEP_RECENT ? count - COMPRESS_KEEP_RECENT : 0;
+
+    for (int i = 0; i < cutoff; i++) {
+        sc_llm_message_t *msg = &(*snap->msgs)[i];
+        if (!msg->tool_call_id) continue;  /* not a tool result */
+        if (!msg->content) continue;
+        size_t len = strlen(msg->content);
+        if (len <= COMPRESS_THRESHOLD) continue;
+
+        /* Replace with compressed version */
+        char *replacement = NULL;
+        if (asprintf(&replacement,
+                     "[Compressed tool result — %zu chars. First %d chars:]\n%.*s",
+                     len, COMPRESS_PREVIEW, COMPRESS_PREVIEW, msg->content) < 0)
+            continue;
+        free(msg->content);
+        msg->content = replacement;
+    }
+    return 0;
+}
+
 /* ======================================================================
  * Public API
  * ====================================================================== */
@@ -728,6 +760,10 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 
     /* Per-channel tool allowlists */
     load_channel_tools(agent, cfg);
+
+    /* Context transform: compress old tool results to save tokens */
+    sc_agent_add_transform(agent, "compress_old_results",
+                           compress_old_tool_results, NULL);
 
     return agent;
 }

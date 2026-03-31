@@ -243,6 +243,72 @@ static void cache_store(sc_turn_ctx_t *tc, uint32_t key,
     tc->tool_cache[i].result_for_llm = sc_strdup(result->for_llm);
 }
 
+/* ---------- Provider health tracking ---------- */
+
+#define SC_PROVIDER_HEALTH_SLOTS 8
+
+typedef enum {
+    SC_PROVIDER_HEALTHY,
+    SC_PROVIDER_RATE_LIMITED,
+    SC_PROVIDER_UNREACHABLE,
+} sc_provider_status_t;
+
+static struct {
+    const char *name;         /* borrowed pointer (provider->name is static) */
+    sc_provider_status_t status;
+    time_t retry_after;       /* absolute time when retry is allowed */
+} s_provider_health[SC_PROVIDER_HEALTH_SLOTS];
+static int s_provider_health_count;
+
+static void provider_health_update(const char *name, int http_status,
+                                    int retry_after_secs)
+{
+    /* Find or allocate slot */
+    int slot = -1;
+    for (int i = 0; i < s_provider_health_count; i++) {
+        if (s_provider_health[i].name == name ||
+            (s_provider_health[i].name && strcmp(s_provider_health[i].name, name) == 0)) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        if (s_provider_health_count >= SC_PROVIDER_HEALTH_SLOTS) return;
+        slot = s_provider_health_count++;
+        s_provider_health[slot].name = name;
+    }
+
+    if (http_status == 200) {
+        s_provider_health[slot].status = SC_PROVIDER_HEALTHY;
+        s_provider_health[slot].retry_after = 0;
+    } else if (http_status == 429 || http_status == 529) {
+        s_provider_health[slot].status = SC_PROVIDER_RATE_LIMITED;
+        int wait = retry_after_secs > 0 ? retry_after_secs : 60;
+        s_provider_health[slot].retry_after = time(NULL) + wait;
+    } else if (http_status == 0) {
+        s_provider_health[slot].status = SC_PROVIDER_UNREACHABLE;
+        s_provider_health[slot].retry_after = time(NULL) + 120;
+    }
+}
+
+static int provider_health_ok(const char *name)
+{
+    for (int i = 0; i < s_provider_health_count; i++) {
+        if (s_provider_health[i].name == name ||
+            (s_provider_health[i].name && strcmp(s_provider_health[i].name, name) == 0)) {
+            if (s_provider_health[i].status == SC_PROVIDER_HEALTHY)
+                return 1;
+            if (time(NULL) >= s_provider_health[i].retry_after) {
+                /* Cooldown expired — allow retry */
+                s_provider_health[i].status = SC_PROVIDER_HEALTHY;
+                return 1;
+            }
+            return 0;
+        }
+    }
+    return 1;  /* unknown = assume healthy */
+}
+
 /* ---------- Helpers ---------- */
 
 static int is_valid_response(const sc_llm_response_t *resp)
@@ -284,13 +350,18 @@ static sc_llm_response_t *call_provider_with_retry(
 
         if (!resp) return NULL;
 
-        if (is_valid_response(resp)) return resp;
+        if (is_valid_response(resp)) {
+            provider_health_update(provider->name, 200, 0);
+            return resp;
+        }
 
         int status = resp->http_status;
         int retry_after = resp->retry_after_secs;
 
-        if (!is_transient_error(status) || attempt == SC_LLM_MAX_RETRIES)
+        if (!is_transient_error(status) || attempt == SC_LLM_MAX_RETRIES) {
+            provider_health_update(provider->name, status, retry_after);
             return resp;
+        }
 
         SC_LOG_WARN("agent", "Transient LLM error (HTTP %d), will retry", status);
         sc_llm_response_free(resp);
@@ -721,6 +792,12 @@ static sc_llm_response_t *call_llm_with_fallback(
 
     int fallback_http[8] = {0};
     for (int f = 0; f < agent->fallback_count; f++) {
+        /* Skip providers known to be unhealthy (rate-limited/unreachable) */
+        if (!provider_health_ok(agent->fallback_providers[f]->name)) {
+            SC_LOG_INFO("agent", "Skipping fallback '%s' (unhealthy, cooldown active)",
+                        agent->fallback_models[f]);
+            continue;
+        }
         SC_LOG_INFO("agent", "Calling fallback LLM '%s'...",
                     agent->fallback_models[f]);
         struct timespec fb_t0, fb_t1;
@@ -1360,6 +1437,19 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     while (iteration < agent->max_iterations) {
         iteration++;
 
+        /* Token-aware auto-compaction: if last prompt used >85% of context
+         * window, summarize now to free space before the next call. */
+        if (iteration > 1 && tc.prompt_tokens > 0 &&
+            agent->context_window > 0 &&
+            tc.prompt_tokens > agent->context_window * 85 / 100) {
+            SC_LOG_INFO("agent", "Auto-compacting: %d tokens / %d window (%.0f%%)",
+                        tc.prompt_tokens, agent->context_window,
+                        100.0 * tc.prompt_tokens / agent->context_window);
+            sc_maybe_summarize(agent, session_key);
+            /* Note: summarization may run async. The message count reduction
+             * takes effect on the next context build cycle. */
+        }
+
         SC_LOG_DEBUG("agent", "LLM iteration %d/%d (messages=%d, tools=%d)",
                      iteration, agent->max_iterations, tc.msgs_len, tool_count);
 
@@ -1371,6 +1461,23 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             tool_defs, tool_count, &tc, iteration);
 
         if (!resp) break;
+
+        /* Reactive compaction: if the API rejects with a context-length error,
+         * force summarization so the NEXT turn starts with a shorter context.
+         * We can't retry this turn because tc.msgs is already built. */
+        if (resp->http_status == 400 && resp->content &&
+            (strstr(resp->content, "context") ||
+             strstr(resp->content, "token") ||
+             strstr(resp->content, "length"))) {
+            SC_LOG_WARN("agent", "Context overflow (HTTP 400) — forcing summarization");
+            sc_llm_response_free(resp);
+            sc_drain_summarize(agent);
+            sc_maybe_summarize(agent, session_key);
+            sc_drain_summarize(agent);
+            final_content = sc_strdup(
+                "Context window full. Session has been summarized — please retry.");
+            break;
+        }
 
         /* Some models return tool calls as text — extract them */
         extract_text_tool_calls(resp, tool_defs, tool_count);

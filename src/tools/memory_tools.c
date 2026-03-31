@@ -152,9 +152,18 @@ static sc_tool_result_t *memory_write_execute(sc_tool_t *self, cJSON *args, void
     if (rc != 0)
         return sc_tool_result_error("Failed to write long-term memory");
 
+    /* Count lines and warn if MEMORY.md is too large for an index */
+    int lines = 1;
+    for (const char *p = content; *p; p++)
+        if (*p == '\n') lines++;
+
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-    sc_strbuf_appendf(&sb, "Memory updated (%d bytes).", (int)strlen(content));
+    sc_strbuf_appendf(&sb, "Memory updated (%d bytes, %d lines).", (int)strlen(content), lines);
+    if (lines > 200)
+        sc_strbuf_append(&sb, " WARNING: MEMORY.md exceeds 200 lines. "
+            "It should be a concise index of pointers, not detailed storage. "
+            "Consider moving detailed content to topic files or daily notes.");
     char *msg = sc_strbuf_finish(&sb);
     sc_tool_result_t *r = sc_tool_result_new(msg);
     free(msg);
@@ -167,7 +176,9 @@ sc_tool_t *sc_tool_memory_write_new(const char *workspace)
     if (!d) return NULL;
     return sc_tool_new_simple("memory_write",
         "Overwrite the agent's long-term memory (MEMORY.md). "
-        "Use to update or restructure stored knowledge. "
+        "MEMORY.md should be an INDEX of pointers, not storage. "
+        "Each line should be under 150 characters, pointing to a topic. "
+        "For detailed knowledge, use memory_log or write topic files. "
         "Replaces the entire file — read first to preserve existing content.",
         memory_write_parameters, memory_write_execute, mem_tool_destroy, 1, d);
 }

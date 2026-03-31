@@ -14,6 +14,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include "util/task.h"
 #include <string.h>
 #include <time.h>
 
@@ -172,25 +173,25 @@ static void do_summarize(sc_summarize_args_t *args)
         do_consolidate(args, args->result_summary);
 }
 
-/* Worker thread function for async summarization */
-static void *summarize_thread_fn(void *arg)
+/* Task function for async summarization (sc_task_fn signature) */
+static void *summarize_task_fn(void *arg, volatile atomic_int *cancel)
 {
+    (void)cancel;  /* LLM call is atomic, not cancellable mid-flight */
     sc_summarize_args_t *args = arg;
     do_summarize(args);
-    /* args stays alive — main thread reads result_summary and frees */
-    return NULL;
+    return args;  /* result read by main thread */
 }
 
-/* Apply deferred summarization result from the worker thread.
+/* Apply deferred summarization result from the task.
  * Called from main thread only. */
 static void apply_summarize_result(sc_agent_t *agent)
 {
-    if (!atomic_load(&agent->summarize_thread_active)) return;
-    pthread_join(agent->summarize_thread, NULL);
-    atomic_store(&agent->summarize_thread_active, 0);
+    if (!agent->summarize_task) return;
+    if (!sc_task_poll(agent->summarize_task)) return;
 
-    sc_summarize_args_t *args = agent->summarize_pending_args;
-    agent->summarize_pending_args = NULL;
+    sc_summarize_args_t *args = sc_task_join(agent->summarize_task, 0);
+    sc_task_free(agent->summarize_task);
+    agent->summarize_task = NULL;
 
     if (args && args->result_summary) {
         sc_session_set_summary(agent->sessions, args->session_key,
@@ -225,7 +226,22 @@ static void summarize_sync(sc_agent_t *agent, sc_summarize_args_t *args)
 
 void sc_drain_summarize(sc_agent_t *agent)
 {
-    apply_summarize_result(agent);
+    if (!agent->summarize_task) return;
+
+    /* Block until the task completes (with 10s timeout) */
+    sc_summarize_args_t *args = sc_task_join(agent->summarize_task, 10000);
+    sc_task_free(agent->summarize_task);
+    agent->summarize_task = NULL;
+
+    if (args && args->result_summary) {
+        sc_session_set_summary(agent->sessions, args->session_key,
+                               args->result_summary);
+        sc_session_truncate(agent->sessions, args->session_key,
+                            args->session_keep_last);
+        sc_session_save(agent->sessions, args->session_key);
+    }
+
+    free_summarize_args(args);
 }
 
 /* Score message information density for smart chunking.
@@ -369,19 +385,13 @@ build_done:
         return;
     }
 
-    /* Launch worker thread — set active flag *before* create so that
-     * sc_agent_free cannot skip the join if it races with us. */
-    agent->summarize_pending_args = args;
-    atomic_store(&agent->summarize_thread_active, 1);
-
-    if (pthread_create(&agent->summarize_thread, NULL,
-                        summarize_thread_fn, args) != 0) {
-        SC_LOG_WARN("agent", "Failed to create summarization thread, running synchronously");
-        atomic_store(&agent->summarize_thread_active, 0);
-        agent->summarize_pending_args = NULL;
+    /* Launch summarization task */
+    agent->summarize_task = sc_task_spawn(summarize_task_fn, args);
+    if (!agent->summarize_task) {
+        SC_LOG_WARN("agent", "Failed to spawn summarization task, running synchronously");
         summarize_sync(agent, args);
         return;
     }
 
-    SC_LOG_DEBUG("agent", "Summarization thread launched for session %s", session_key);
+    SC_LOG_DEBUG("agent", "Summarization task spawned for session %s", session_key);
 }

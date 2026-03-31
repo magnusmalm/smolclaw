@@ -188,6 +188,7 @@ set(SC_SOURCES
     src/util/str.c
     src/util/json_helpers.c
     src/util/uuid.c
+    src/util/task.c
     src/util/base64.c
     src/util/secrets.c
     src/util/curl_common.c

@@ -276,7 +276,22 @@ char *sc_memory_get_context(const sc_memory_t *mem)
 
     if (long_term) {
         sc_strbuf_append(&sb, "## Long-term Memory\n\n");
-        sc_strbuf_append(&sb, long_term);
+        /* Truncate to first 200 lines to prevent context pollution.
+         * MEMORY.md should be a concise index, not detailed storage. */
+        int lines = 0;
+        char *cutoff = long_term;
+        while (*cutoff && lines < 200) {
+            if (*cutoff == '\n') lines++;
+            cutoff++;
+        }
+        if (*cutoff) {
+            *cutoff = '\0';
+            sc_strbuf_append(&sb, long_term);
+            sc_strbuf_appendf(&sb,
+                "\n[...truncated at 200 lines — use memory_read for full content]");
+        } else {
+            sc_strbuf_append(&sb, long_term);
+        }
         free(long_term);
     }
 

@@ -50,6 +50,7 @@ typedef struct sc_tool_registry {
     sc_post_tool_hook_t *post_hooks;
     int post_hook_count;
     int post_hook_cap;
+    char *workspace;  /* current workspace path (owned, for oversized output persistence) */
 } sc_tool_registry_t;
 
 /* Create/destroy */

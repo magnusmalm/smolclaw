@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 
 #include "tools/registry.h"
 #include "tools/types.h"
@@ -116,6 +117,7 @@ void sc_tool_registry_free(sc_tool_registry_t *reg)
     free(reg->allowed_tools);
     free(reg->pre_hooks);
     free(reg->post_hooks);
+    free(reg->workspace);
     free(reg);
 }
 
@@ -190,6 +192,8 @@ void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
 void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspace)
 {
     if (!reg || !workspace) return;
+    free(reg->workspace);
+    reg->workspace = sc_strdup(workspace);
     for (int i = 0; i < reg->count; i++) {
         if (reg->tools[i]->set_workspace)
             reg->tools[i]->set_workspace(reg->tools[i], workspace);
@@ -327,6 +331,45 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     for (int i = 0; i < reg->post_hook_count; i++) {
         reg->post_hooks[i].fn(name, result, channel, chat_id,
                                reg->post_hooks[i].userdata);
+    }
+
+    /* Persist oversized output to disk before sanitization truncates it.
+     * The LLM gets a preview + file path it can read with file_read. */
+#define SC_RESULT_PERSIST_THRESHOLD 50000
+#define SC_RESULT_PREVIEW_SIZE      2000
+    if (!result->is_error && result->for_llm && reg->workspace &&
+        strlen(result->for_llm) > SC_RESULT_PERSIST_THRESHOLD) {
+        size_t full_len = strlen(result->for_llm);
+
+        /* Ensure tool_outputs directory exists */
+        char dir[512];
+        snprintf(dir, sizeof(dir), "%s/tool_outputs", reg->workspace);
+        mkdir(dir, 0755);
+
+        /* Write full output to file */
+        char path[512];
+        snprintf(path, sizeof(path), "%s/%s_%ld.txt", dir, name, (long)time(NULL));
+        FILE *f = fopen(path, "w");
+        if (f) {
+            fwrite(result->for_llm, 1, full_len, f);
+            fclose(f);
+
+            /* Replace for_llm with preview + path reference */
+            sc_strbuf_t buf;
+            sc_strbuf_init(&buf);
+            sc_strbuf_appendf(&buf,
+                "[Truncated: %zu chars. Full output saved to %s. "
+                "Use file_read to access specific sections.]\n",
+                full_len, path);
+            sc_strbuf_appendf(&buf, "%.*s",
+                              SC_RESULT_PREVIEW_SIZE, result->for_llm);
+            sc_strbuf_append(&buf, "\n...");
+            free(result->for_llm);
+            result->for_llm = sc_strbuf_finish(&buf);
+
+            SC_LOG_INFO("tool", "Persisted oversized output (%zu bytes) to %s",
+                        full_len, path);
+        }
     }
 
     if (result->is_error) {
