@@ -1074,6 +1074,20 @@ static void load_mcp_config(sc_config_t *cfg, const cJSON *root)
             }
         }
 
+        /* capabilities object (optional per-server sandbox overrides) */
+        const cJSON *caps = sc_json_get_object(srv, "capabilities");
+        if (caps) {
+            const cJSON *fs_r = cJSON_GetObjectItem(caps, "fs_read");
+            s->caps.fs_read = sc_json_parse_string_list(
+                fs_r, &s->caps.fs_read_count);
+            const cJSON *fs_w = cJSON_GetObjectItem(caps, "fs_write");
+            s->caps.fs_write = sc_json_parse_string_list(
+                fs_w, &s->caps.fs_write_count);
+            const cJSON *proc = cJSON_GetObjectItem(caps, "process");
+            if (proc && cJSON_IsArray(proc) && cJSON_GetArraySize(proc) == 0)
+                s->caps.no_process = 1;  /* empty array = deny */
+        }
+
         cfg->mcp.server_count++;
     }
 }

@@ -19,6 +19,7 @@
 #include <sys/wait.h>
 
 #include "cJSON.h"
+#include "config.h"
 #include "constants.h"
 #include "logger.h"
 #include "util/str.h"
@@ -234,7 +235,8 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
                                       char **command, int command_count,
                                       char **env_keys, char **env_values,
                                       int env_count,
-                                      const char *workspace)
+                                      const char *workspace,
+                                      const void *caps)
 {
     if (!name || !command || command_count < 1) return NULL;
 
@@ -339,7 +341,9 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             close(fd);
 
         /* Apply OS-level sandbox (Landlock + seccomp) — restrict MCP
-         * server to workspace + per-process tmpdir (C-3, L-5) */
+         * server to workspace + per-process tmpdir (C-3, L-5).
+         * If per-server capabilities are set, use them instead of
+         * blanket workspace access. */
         if (workspace) {
             const char *tmpdir = mcp_tmpdir ? mcp_tmpdir : "/tmp";
             sc_sandbox_opts_t sandbox_opts = {
@@ -347,6 +351,19 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
                 .tmpdir = tmpdir,
                 .bin_dir = bin_dir,
             };
+
+            /* Apply capability overrides if provided */
+            const sc_mcp_capabilities_t *mcaps = caps;
+            if (mcaps && (mcaps->fs_read_count > 0 || mcaps->fs_write_count > 0)) {
+                sandbox_opts.cap_fs_read = (const char **)mcaps->fs_read;
+                sandbox_opts.cap_fs_read_count = mcaps->fs_read_count;
+                sandbox_opts.cap_fs_write = (const char **)mcaps->fs_write;
+                sandbox_opts.cap_fs_write_count = mcaps->fs_write_count;
+                sandbox_opts.workspace = NULL; /* disable blanket access */
+            }
+            if (mcaps && mcaps->no_process)
+                sandbox_opts.cap_no_process = 1;
+
             sc_sandbox_apply(&sandbox_opts);
             setenv("TMPDIR", tmpdir, 1);
         }
@@ -415,8 +432,8 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
     /* Initialize handshake */
     cJSON *init_params = cJSON_CreateObject();
     cJSON_AddStringToObject(init_params, "protocolVersion", SC_MCP_PROTOCOL_VERSION);
-    cJSON *caps = cJSON_AddObjectToObject(init_params, "capabilities");
-    (void)caps; /* empty capabilities object */
+    cJSON *init_caps = cJSON_AddObjectToObject(init_params, "capabilities");
+    (void)init_caps; /* empty capabilities object */
     cJSON *client_info = cJSON_AddObjectToObject(init_params, "clientInfo");
     cJSON_AddStringToObject(client_info, "name", SC_NAME);
     cJSON_AddStringToObject(client_info, "version", SC_VERSION);

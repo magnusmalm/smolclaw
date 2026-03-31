@@ -180,9 +180,18 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
     uint64_t dev_rw = LL_ACCESS_DEV_RW & all_access;
     uint64_t dev_ro = LL_ACCESS_DEV_RO & all_access;
 
-    /* Workspace: full rw */
-    if (opts->workspace)
+    /* Workspace access: if per-server capabilities are set, use them
+     * instead of blanket workspace rw. Otherwise default to full workspace. */
+    if (opts->cap_fs_read_count > 0 || opts->cap_fs_write_count > 0) {
+        /* Capability mode: explicit paths only */
+        for (int i = 0; i < opts->cap_fs_read_count; i++)
+            ll_add_path_rule(ruleset_fd, opts->cap_fs_read[i], ro);
+        for (int i = 0; i < opts->cap_fs_write_count; i++)
+            ll_add_path_rule(ruleset_fd, opts->cap_fs_write[i], rw);
+    } else if (opts->workspace) {
+        /* Default: blanket workspace rw */
         ll_add_path_rule(ruleset_fd, opts->workspace, rw);
+    }
 
     /* Temp dir: full rw */
     const char *tmpdir = opts->tmpdir ? opts->tmpdir : "/tmp";

@@ -119,6 +119,17 @@ typedef struct {
     int interval; /* minutes */
 } sc_heartbeat_config_t;
 
+/* MCP server capabilities — fine-grained sandbox per-server.
+ * If fs_read_count > 0 or fs_write_count > 0, replaces the blanket
+ * workspace sandbox with per-path rules. NULL/0 = default sandbox. */
+typedef struct {
+    char **fs_read;       /* paths with read-only access */
+    int    fs_read_count;
+    char **fs_write;      /* paths with read-write access */
+    int    fs_write_count;
+    int    no_process;    /* 1 = block execve/fork in seccomp */
+} sc_mcp_capabilities_t;
+
 /* MCP server config */
 typedef struct {
     char *name;
@@ -127,6 +138,7 @@ typedef struct {
     char **env_keys;
     char **env_values;
     int env_count;
+    sc_mcp_capabilities_t caps;
 } sc_mcp_server_config_t;
 
 /* MCP config */

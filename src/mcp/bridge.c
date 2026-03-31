@@ -139,10 +139,15 @@ sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
 
         SC_LOG_INFO(LOG_TAG, "Starting MCP server '%s' (%s)", srv->name, srv->command[0]);
 
+        /* Pass per-server capabilities if configured */
+        const void *caps = (srv->caps.fs_read_count > 0 ||
+                            srv->caps.fs_write_count > 0 ||
+                            srv->caps.no_process) ? &srv->caps : NULL;
+
         sc_mcp_client_t *client = sc_mcp_client_start(
             srv->name, srv->command, srv->command_count,
             srv->env_keys, srv->env_values, srv->env_count,
-            workspace);
+            workspace, caps);
 
         if (!client) {
             SC_LOG_WARN(LOG_TAG, "Failed to start MCP server '%s', skipping", srv->name);
