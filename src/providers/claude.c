@@ -43,6 +43,7 @@ typedef struct {
 static cJSON *build_system_blocks(sc_llm_message_t *msgs, int msg_count)
 {
     cJSON *sys_arr = NULL;
+    int block_idx = 0;
 
     for (int i = 0; i < msg_count; i++) {
         if (msgs[i].role && strcmp(msgs[i].role, "system") == 0 && msgs[i].content) {
@@ -50,7 +51,19 @@ static cJSON *build_system_blocks(sc_llm_message_t *msgs, int msg_count)
             cJSON *block = cJSON_CreateObject();
             cJSON_AddStringToObject(block, "type", "text");
             cJSON_AddStringToObject(block, "text", msgs[i].content);
+
+            /* Prompt caching: mark the first system block as a cache
+             * breakpoint. The Anthropic API caches all content up to
+             * and including this block, saving ~90% of system prompt
+             * tokens on subsequent turns in the same session. */
+            if (block_idx == 0) {
+                cJSON *cc = cJSON_CreateObject();
+                cJSON_AddStringToObject(cc, "type", "ephemeral");
+                cJSON_AddItemToObject(block, "cache_control", cc);
+            }
+
             cJSON_AddItemToArray(sys_arr, block);
+            block_idx++;
         }
     }
 
@@ -181,6 +194,15 @@ static cJSON *build_tools_json(sc_tool_definition_t *tools, int tool_count)
             cJSON_AddStringToObject(schema, "type", "object");
             cJSON_AddItemToObject(schema, "properties", cJSON_CreateObject());
             cJSON_AddItemToObject(tool_obj, "input_schema", schema);
+        }
+
+        /* Prompt caching: mark the last tool as a cache breakpoint.
+         * Combined with the system block breakpoint, this caches the
+         * entire static prefix (system prompt + tool definitions). */
+        if (i == tool_count - 1) {
+            cJSON *cc = cJSON_CreateObject();
+            cJSON_AddStringToObject(cc, "type", "ephemeral");
+            cJSON_AddItemToObject(tool_obj, "cache_control", cc);
         }
 
         cJSON_AddItemToArray(arr, tool_obj);
