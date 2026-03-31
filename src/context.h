@@ -24,12 +24,15 @@ typedef struct sc_context_builder sc_context_builder_t;
  *
  * Return 0 on success. Non-zero skips subsequent transforms.
  */
+typedef struct sc_arena sc_arena_t;  /* forward decl */
+
 typedef struct {
     sc_llm_message_t **msgs;   /* pointer to message array (mutable) */
     int *msg_count;            /* pointer to count (mutable) */
     int *msg_cap;              /* pointer to capacity (mutable) */
     const char *channel;
     const char *session_key;
+    sc_arena_t *arena;         /* per-turn arena (optional, may be NULL) */
 } sc_context_snap_t;
 
 typedef int (*sc_context_transform_fn)(sc_context_snap_t *snap, void *userdata);

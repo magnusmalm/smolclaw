@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include "bus.h"
+#include "util/arena.h"
 #include "util/task.h"
 #include "config.h"
 #include "context.h"
@@ -78,6 +79,8 @@ typedef struct sc_agent {
     void *hourly_slots;
     /* Async summarization task (NULL when idle) */
     sc_task_t *summarize_task;
+    /* Per-turn arena allocator (reset between turns) */
+    sc_arena_t *arena;
     /* Context transform chain (invoked between context build and LLM call) */
     sc_context_transform_t *transforms;
     int transform_count;

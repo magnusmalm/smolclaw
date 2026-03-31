@@ -668,12 +668,29 @@ static int compress_old_tool_results(sc_context_snap_t *snap, void *userdata)
         size_t len = strlen(msg->content);
         if (len <= COMPRESS_THRESHOLD) continue;
 
-        /* Replace with compressed version */
+        /* Replace with compressed version (arena if available, else heap) */
         char *replacement = NULL;
-        if (asprintf(&replacement,
-                     "[Compressed tool result — %zu chars. First %d chars:]\n%.*s",
-                     len, COMPRESS_PREVIEW, COMPRESS_PREVIEW, msg->content) < 0)
-            continue;
+        if (snap->arena) {
+            /* Arena allocation — freed automatically at turn end */
+            char header[128];
+            int hlen = snprintf(header, sizeof(header),
+                "[Compressed tool result — %zu chars. First %d chars:]\n",
+                len, COMPRESS_PREVIEW);
+            size_t total = (size_t)hlen + COMPRESS_PREVIEW + 1;
+            replacement = sc_arena_alloc(snap->arena, total);
+            if (replacement) {
+                memcpy(replacement, header, (size_t)hlen);
+                memcpy(replacement + hlen, msg->content,
+                       COMPRESS_PREVIEW < (int)len ? COMPRESS_PREVIEW : (int)len);
+                replacement[hlen + (COMPRESS_PREVIEW < (int)len ? COMPRESS_PREVIEW : (int)len)] = '\0';
+            }
+        } else {
+            if (asprintf(&replacement,
+                         "[Compressed tool result — %zu chars. First %d chars:]\n%.*s",
+                         len, COMPRESS_PREVIEW, COMPRESS_PREVIEW, msg->content) < 0)
+                continue;
+        }
+        if (!replacement) continue;
         free(msg->content);
         msg->content = replacement;
     }
@@ -735,6 +752,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->context_builder = sc_context_builder_new(workspace);
     sc_context_builder_set_tools(agent->context_builder, agent->tools);
 
+    /* Per-turn arena allocator (64KB initial, grows as needed) */
+    agent->arena = sc_arena_new(0);
+
     /* Audit log */
     {
         sc_strbuf_t ab;
@@ -773,6 +793,7 @@ void sc_agent_free(sc_agent_t *agent)
     if (!agent) return;
     /* Drain outstanding summarization thread before freeing resources */
     sc_drain_summarize(agent);
+    sc_arena_free(agent->arena);
     sc_cost_tracker_free(agent->cost_tracker);
 #if SC_ENABLE_ANALYTICS
     if (agent->analytics)
@@ -1197,6 +1218,10 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
                             const char *user_message, int no_history)
 {
+    /* Reset per-turn arena — all previous arena allocations are invalid */
+    if (agent->arena)
+        sc_arena_reset(agent->arena);
+
     /* Record last channel for heartbeat routing (skip internal channels) */
     if (channel && chat_id && !sc_is_internal_channel(channel)) {
         sc_strbuf_t ck;
@@ -1262,6 +1287,7 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                 .msg_cap = &msg_cap,
                 .channel = channel,
                 .session_key = session_key,
+                .arena = agent->arena,
             };
             for (int i = 0; i < agent->transform_count; i++) {
                 SC_LOG_DEBUG("agent", "Running context transform: %s",
