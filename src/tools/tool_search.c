@@ -16,6 +16,19 @@
 #include <strings.h>
 #include <ctype.h>
 
+/* Portable case-insensitive substring search (ci_strstr is GNU extension) */
+static const char *ci_strstr(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle) return NULL;
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return haystack;
+    for (; *haystack; haystack++) {
+        if (strncasecmp(haystack, needle, nlen) == 0)
+            return haystack;
+    }
+    return NULL;
+}
+
 #include "tools/tool_search.h"
 #include "tools/types.h"
 #include "tools/registry.h"
@@ -83,15 +96,15 @@ static int score_tool(const char *term, const sc_tool_t *t)
     int score = 0;
 
     /* Name exact match (case-insensitive) */
-    if (strcasestr(t->name, term)) {
+    if (ci_strstr(t->name, term)) {
         /* Check if it's a full segment match (between __ or _) */
-        const char *p = strcasestr(t->name, term);
+        const char *p = ci_strstr(t->name, term);
         int at_boundary = (p == t->name || *(p - 1) == '_');
         score += at_boundary ? 10 : 5;
     }
 
     /* Description match */
-    if (t->description && strcasestr(t->description, term))
+    if (t->description && ci_strstr(t->description, term))
         score += 2;
 
     return score;
