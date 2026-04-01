@@ -306,7 +306,7 @@ if(SC_ENABLE_X_TOOLS)
 endif()
 
 if(SC_ENABLE_MCP)
-    list(APPEND SC_SOURCES src/mcp/client.c src/mcp/bridge.c)
+    list(APPEND SC_SOURCES src/mcp/client.c src/mcp/bridge.c src/tools/tool_search.c)
 endif()
 
 if(SC_ENABLE_MCP_SERVER)

@@ -63,6 +63,7 @@ struct sc_tool {
     void (*destroy)(sc_tool_t *self);
 
     int needs_confirm; /* requires user approval before execute */
+    int deferred;      /* 1 = name-only in system prompt, fetch schema via tool_search */
 
     void *data; /* Tool-specific state */
 };

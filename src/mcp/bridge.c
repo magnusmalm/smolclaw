@@ -204,6 +204,7 @@ sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
             proxy->execute = proxy_execute;
             proxy->set_context = NULL;
             proxy->destroy = proxy_destroy;
+            proxy->deferred = 1;  /* MCP tools deferred by default */
             proxy->data = data;
 
             sc_tool_registry_register(registry, proxy);

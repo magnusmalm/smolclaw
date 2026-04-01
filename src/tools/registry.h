@@ -51,7 +51,24 @@ typedef struct sc_tool_registry {
     int post_hook_count;
     int post_hook_cap;
     char *workspace;  /* current workspace path (owned, for oversized output persistence) */
+    /* Deferred tool discovery tracking */
+    char **discovered_tools;  /* tools fetched via tool_search (owned names) */
+    int    discovered_count;
+    int    discovered_cap;
 } sc_tool_registry_t;
+
+/* Mark a tool as discovered (fetched via tool_search). */
+void sc_tool_registry_mark_discovered(sc_tool_registry_t *reg, const char *name);
+
+/* Check if a deferred tool has been discovered. */
+int sc_tool_registry_is_discovered(sc_tool_registry_t *reg, const char *name);
+
+/* Clear discovered set (e.g. on session compact). */
+void sc_tool_registry_clear_discovered(sc_tool_registry_t *reg);
+
+/* Get list of deferred tool names + descriptions for system prompt.
+ * Caller owns result. */
+char *sc_tool_registry_deferred_listing(sc_tool_registry_t *reg);
 
 /* Create/destroy */
 sc_tool_registry_t *sc_tool_registry_new(void);

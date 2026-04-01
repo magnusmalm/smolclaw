@@ -118,6 +118,9 @@ void sc_tool_registry_free(sc_tool_registry_t *reg)
     free(reg->pre_hooks);
     free(reg->post_hooks);
     free(reg->workspace);
+    for (int i = 0; i < reg->discovered_count; i++)
+        free(reg->discovered_tools[i]);
+    free(reg->discovered_tools);
     free(reg);
 }
 
@@ -442,6 +445,9 @@ sc_tool_definition_t *sc_tool_registry_to_defs_filtered(
         if (channel_tools && channel_tool_count > 0 &&
             !is_in_channel_list(t->name, channel_tools, channel_tool_count))
             continue;
+        /* Skip deferred tools unless they've been discovered via tool_search */
+        if (t->deferred && !sc_tool_registry_is_discovered(reg, t->name))
+            continue;
         defs[n].name = sc_strdup(t->name);
         defs[n].description = sc_strdup(t->description);
         defs[n].parameters = t->parameters ? t->parameters(t) : NULL;
@@ -484,4 +490,79 @@ char *sc_tool_registry_get_summaries(sc_tool_registry_t *reg)
 int sc_tool_registry_count(sc_tool_registry_t *reg)
 {
     return reg ? reg->count : 0;
+}
+
+/* --- Deferred tool discovery --- */
+
+void sc_tool_registry_mark_discovered(sc_tool_registry_t *reg, const char *name)
+{
+    if (!reg || !name) return;
+    /* Already discovered? */
+    if (sc_tool_registry_is_discovered(reg, name)) return;
+
+    if (reg->discovered_count >= reg->discovered_cap) {
+        int new_cap = reg->discovered_cap ? reg->discovered_cap * 2 : 8;
+        char **new_arr = realloc(reg->discovered_tools,
+                                  (size_t)new_cap * sizeof(char *));
+        if (!new_arr) return;
+        reg->discovered_tools = new_arr;
+        reg->discovered_cap = new_cap;
+    }
+    reg->discovered_tools[reg->discovered_count++] = sc_strdup(name);
+}
+
+int sc_tool_registry_is_discovered(sc_tool_registry_t *reg, const char *name)
+{
+    if (!reg || !name) return 0;
+    for (int i = 0; i < reg->discovered_count; i++) {
+        if (strcmp(reg->discovered_tools[i], name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+void sc_tool_registry_clear_discovered(sc_tool_registry_t *reg)
+{
+    if (!reg) return;
+    for (int i = 0; i < reg->discovered_count; i++)
+        free(reg->discovered_tools[i]);
+    reg->discovered_count = 0;
+}
+
+char *sc_tool_registry_deferred_listing(sc_tool_registry_t *reg)
+{
+    if (!reg) return NULL;
+
+    int has_deferred = 0;
+    for (int i = 0; i < reg->count; i++) {
+        if (reg->tools[i]->deferred && sc_tool_registry_is_allowed(reg, reg->tools[i]->name)
+            && !sc_tool_registry_is_discovered(reg, reg->tools[i]->name)) {
+            has_deferred = 1;
+            break;
+        }
+    }
+    if (!has_deferred) return NULL;
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_append(&sb,
+        "\nThe following deferred tools are available via the tool_search tool. "
+        "Use tool_search to fetch their full schemas before calling them:\n");
+
+    for (int i = 0; i < reg->count; i++) {
+        sc_tool_t *t = reg->tools[i];
+        if (!t->deferred) continue;
+        if (!sc_tool_registry_is_allowed(reg, t->name)) continue;
+        if (sc_tool_registry_is_discovered(reg, t->name)) continue;
+        /* Truncate description to ~100 chars for compact listing */
+        if (t->description) {
+            char desc[104];
+            snprintf(desc, sizeof(desc), "%.100s", t->description);
+            sc_strbuf_appendf(&sb, "- %s — %s\n", t->name, desc);
+        } else {
+            sc_strbuf_appendf(&sb, "- %s\n", t->name);
+        }
+    }
+
+    return sc_strbuf_finish(&sb);
 }

@@ -197,6 +197,16 @@ char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
         free(mem_ctx);
     }
 
+    /* Deferred tool listing (if any MCP tools are deferred) */
+    if (cb->tools) {
+        char *deferred = sc_tool_registry_deferred_listing(cb->tools);
+        if (deferred) {
+            sc_strbuf_append(&sb, "\n\n");
+            sc_strbuf_append(&sb, deferred);
+            free(deferred);
+        }
+    }
+
     return sc_strbuf_finish(&sb);
 }
 

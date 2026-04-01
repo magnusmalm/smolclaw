@@ -47,6 +47,7 @@
 #endif
 #if SC_ENABLE_MCP
 #include "mcp/bridge.h"
+#include "tools/tool_search.h"
 #endif
 #if SC_ENABLE_GIT
 #include "tools/git.h"
@@ -499,9 +500,19 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
 
     /* MCP external tool servers */
 #if SC_ENABLE_MCP
-    if (cfg->mcp.enabled && cfg->mcp.server_count > 0)
+    if (cfg->mcp.enabled && cfg->mcp.server_count > 0) {
         agent->mcp_bridge = sc_mcp_bridge_start(&cfg->mcp, agent->tools,
                                                  agent->workspace);
+        /* Register tool_search if any deferred tools exist */
+        int has_deferred = 0;
+        for (int i = 0; i < agent->tools->count; i++) {
+            if (agent->tools->tools[i]->deferred) { has_deferred = 1; break; }
+        }
+        if (has_deferred) {
+            sc_tool_t *ts = sc_tool_search_new(agent->tools);
+            if (ts) sc_tool_registry_register(agent->tools, ts);
+        }
+    }
 #endif
 }
 
