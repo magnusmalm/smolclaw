@@ -18,6 +18,7 @@
 
 #include "constants.h"
 #include "logger.h"
+#include "skill.h"
 #include "tools/registry.h"
 #include "util/str.h"
 #include "util/secrets.h"
@@ -26,6 +27,7 @@ struct sc_context_builder {
     char *workspace;
     sc_memory_t *memory;
     sc_tool_registry_t *tools;
+    sc_skill_registry_t *skills;  /* borrowed */
 };
 
 sc_context_builder_t *sc_context_builder_new(const char *workspace)
@@ -52,6 +54,11 @@ void sc_context_builder_free(sc_context_builder_t *cb)
 void sc_context_builder_set_tools(sc_context_builder_t *cb, sc_tool_registry_t *tools)
 {
     if (cb) cb->tools = tools;
+}
+
+void sc_context_builder_set_skills(sc_context_builder_t *cb, void *skills)
+{
+    if (cb) cb->skills = skills;
 }
 
 /* Build identity section of system prompt */
@@ -195,6 +202,16 @@ char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
             free(redacted);
         }
         free(mem_ctx);
+    }
+
+    /* Skill listing */
+    if (cb->skills) {
+        char *skill_list = sc_skill_registry_listing(cb->skills);
+        if (skill_list) {
+            sc_strbuf_append(&sb, "\n\n");
+            sc_strbuf_append(&sb, skill_list);
+            free(skill_list);
+        }
     }
 
     /* Deferred tool listing (if any MCP tools are deferred) */

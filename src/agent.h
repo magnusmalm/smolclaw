@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include "bus.h"
+#include "skill.h"
 #include "util/arena.h"
 #include "util/task.h"
 #include "config.h"
@@ -83,6 +84,8 @@ typedef struct sc_agent {
     sc_arena_t *arena;
     /* Compaction circuit breaker: disable after consecutive failures */
     int compact_consecutive_failures;
+    /* Skills registry (user-defined prompt templates) */
+    sc_skill_registry_t *skills;
     /* Context transform chain (invoked between context build and LLM call) */
     sc_context_transform_t *transforms;
     int transform_count;

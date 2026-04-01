@@ -51,6 +51,9 @@ void sc_context_builder_free(sc_context_builder_t *cb);
 /* Set tools registry for dynamic tool summaries */
 void sc_context_builder_set_tools(sc_context_builder_t *cb, sc_tool_registry_t *tools);
 
+/* Set skills registry for system prompt listing (pass sc_skill_registry_t *) */
+void sc_context_builder_set_skills(sc_context_builder_t *cb, void *skills);
+
 /* Build complete system prompt. Caller owns result. */
 char *sc_context_build_system_prompt(const sc_context_builder_t *cb);
 

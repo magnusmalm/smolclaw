@@ -204,6 +204,8 @@ set(SC_SOURCES
     src/session.c
     src/state.c
     src/memory.c
+    src/skill.c
+    src/tools/skill_tool.c
     src/context.c
     src/agent.c
     src/agent_turn.c

@@ -49,6 +49,7 @@
 #include "mcp/bridge.h"
 #include "tools/tool_search.h"
 #endif
+#include "tools/skill_tool.h"
 #if SC_ENABLE_GIT
 #include "tools/git.h"
 #endif
@@ -796,6 +797,31 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     sc_agent_add_transform(agent, "compress_old_results",
                            compress_old_tool_results, NULL);
 
+    /* Load skills from standard directories */
+    agent->skills = sc_skill_registry_new();
+    if (agent->skills) {
+        /* User skills: ~/.smolclaw/skills/ */
+        const char *home = getenv("HOME");
+        if (home) {
+            char user_skills[512];
+            snprintf(user_skills, sizeof(user_skills), "%s/.smolclaw/skills", home);
+            sc_skill_registry_load_dir(agent->skills, user_skills);
+        }
+        /* Project skills: workspace/.claude/skills/ */
+        if (workspace) {
+            char proj_skills[512];
+            snprintf(proj_skills, sizeof(proj_skills), "%s/.claude/skills", workspace);
+            sc_skill_registry_load_dir(agent->skills, proj_skills);
+        }
+        /* Register skill tool if any skills loaded */
+        if (agent->skills->count > 0) {
+            sc_tool_t *st = sc_tool_skill_new(agent->skills, agent);
+            if (st) sc_tool_registry_register(agent->tools, st);
+            /* Make skills visible in system prompt */
+            sc_context_builder_set_skills(agent->context_builder, agent->skills);
+        }
+    }
+
     return agent;
 }
 
@@ -805,6 +831,7 @@ void sc_agent_free(sc_agent_t *agent)
     /* Drain outstanding summarization thread before freeing resources */
     sc_drain_summarize(agent);
     sc_arena_free(agent->arena);
+    sc_skill_registry_free(agent->skills);
     sc_cost_tracker_free(agent->cost_tracker);
 #if SC_ENABLE_ANALYTICS
     if (agent->analytics)
@@ -1111,8 +1138,38 @@ static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg)
                 msg->channel, msg->sender_id, preview ? preview : "");
     free(preview);
 
-    return run_agent_loop(agent, msg->session_key, msg->channel, msg->chat_id,
-                          msg->content, 0);
+    /* Slash command: /skill-name args → expand skill and send as user message */
+    const char *content = msg->content;
+    char *expanded = NULL;
+    if (content && content[0] == '/' && agent->skills && agent->skills->count > 0) {
+        /* Parse "/name args" */
+        const char *p = content + 1;
+        const char *space = strchr(p, ' ');
+        char name[65];
+        if (space) {
+            size_t nlen = (size_t)(space - p);
+            if (nlen > 64) nlen = 64;
+            memcpy(name, p, nlen);
+            name[nlen] = '\0';
+        } else {
+            snprintf(name, sizeof(name), "%s", p);
+        }
+        sc_skill_t *skill = sc_skill_registry_find(agent->skills, name);
+        if (skill && skill->user_invocable) {
+            const char *args = space ? space + 1 : "";
+            expanded = sc_skill_expand(skill, args);
+            if (expanded) {
+                SC_LOG_INFO("agent", "Slash command: /%s → skill expanded (%zu bytes)",
+                            name, strlen(expanded));
+                content = expanded;
+            }
+        }
+    }
+
+    char *result = run_agent_loop(agent, msg->session_key, msg->channel,
+                                   msg->chat_id, content, 0);
+    free(expanded);
+    return result;
 }
 
 /*
