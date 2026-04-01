@@ -406,6 +406,13 @@ static cJSON *build_chat_body(const char *model,
             cJSON *opts = cJSON_AddObjectToObject(body, "options");
             cJSON_AddNumberToObject(opts, "num_ctx", num_ctx);
         }
+
+        /* Structured output: pass response_format with JSON schema.
+         * Works with OpenAI, DeepSeek, Groq, XAI, OpenRouter. */
+        cJSON *rf = cJSON_GetObjectItem(options, "response_format");
+        if (rf && cJSON_IsObject(rf))
+            cJSON_AddItemToObject(body, "response_format",
+                                  cJSON_Duplicate(rf, 1));
     }
 
     return body;

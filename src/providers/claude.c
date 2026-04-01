@@ -347,8 +347,39 @@ static sc_llm_response_t *claude_chat(sc_provider_t *self,
         }
     }
 
+    /* Structured output: use tool_use trick — add synthetic tool with
+     * the desired schema and force the model to call it. */
+    int structured_output = 0;
+    cJSON *response_schema = NULL;
+    if (options) {
+        cJSON *rf = cJSON_GetObjectItem(options, "response_format");
+        if (rf && cJSON_IsObject(rf)) {
+            cJSON *schema = cJSON_GetObjectItem(rf, "json_schema");
+            if (schema) {
+                response_schema = cJSON_Duplicate(schema, 1);
+                structured_output = 1;
+            }
+        }
+    }
+
     /* Tools */
-    if (tools && tool_count > 0) {
+    if (structured_output && response_schema) {
+        /* Build tools array with synthetic _structured_output tool */
+        cJSON *tools_arr = (tools && tool_count > 0)
+            ? build_tools_json(tools, tool_count) : cJSON_CreateArray();
+        cJSON *synth = cJSON_CreateObject();
+        cJSON_AddStringToObject(synth, "name", "_structured_output");
+        cJSON_AddStringToObject(synth, "description",
+            "Output your response using this structured format.");
+        cJSON_AddItemToObject(synth, "input_schema", response_schema);
+        cJSON_AddItemToArray(tools_arr, synth);
+        cJSON_AddItemToObject(body, "tools", tools_arr);
+        /* Force the model to use this specific tool */
+        cJSON *tc_obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(tc_obj, "type", "tool");
+        cJSON_AddStringToObject(tc_obj, "name", "_structured_output");
+        cJSON_AddItemToObject(body, "tool_choice", tc_obj);
+    } else if (tools && tool_count > 0) {
         cJSON_AddItemToObject(body, "tools",
                               build_tools_json(tools, tool_count));
     }
@@ -599,7 +630,32 @@ static sc_llm_response_t *claude_chat_stream(sc_provider_t *self,
         if (temp >= 0.0) cJSON_AddNumberToObject(body, "temperature", temp);
     }
 
-    if (tools && tool_count > 0) {
+    /* Structured output (same tool_use trick as non-streaming) */
+    int structured_output_s = 0;
+    if (options) {
+        cJSON *rf = cJSON_GetObjectItem(options, "response_format");
+        if (rf && cJSON_IsObject(rf)) {
+            cJSON *schema = cJSON_GetObjectItem(rf, "json_schema");
+            if (schema) {
+                cJSON *tools_arr = (tools && tool_count > 0)
+                    ? build_tools_json(tools, tool_count) : cJSON_CreateArray();
+                cJSON *synth = cJSON_CreateObject();
+                cJSON_AddStringToObject(synth, "name", "_structured_output");
+                cJSON_AddStringToObject(synth, "description",
+                    "Output your response using this structured format.");
+                cJSON_AddItemToObject(synth, "input_schema",
+                                      cJSON_Duplicate(schema, 1));
+                cJSON_AddItemToArray(tools_arr, synth);
+                cJSON_AddItemToObject(body, "tools", tools_arr);
+                cJSON *tc_obj = cJSON_CreateObject();
+                cJSON_AddStringToObject(tc_obj, "type", "tool");
+                cJSON_AddStringToObject(tc_obj, "name", "_structured_output");
+                cJSON_AddItemToObject(body, "tool_choice", tc_obj);
+                structured_output_s = 1;
+            }
+        }
+    }
+    if (!structured_output_s && tools && tool_count > 0) {
         cJSON_AddItemToObject(body, "tools", build_tools_json(tools, tool_count));
     }
 
