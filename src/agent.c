@@ -52,6 +52,7 @@
 #include "tools/skill_tool.h"
 #if SC_ENABLE_GIT
 #include "tools/git.h"
+#include "tools/worktree.h"
 #endif
 #if SC_ENABLE_GITEA
 #include "tools/gitea.h"
@@ -437,12 +438,14 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     }
 #endif
 
-    /* Git tool */
+    /* Git tool + worktree isolation */
 #if SC_ENABLE_GIT
     sc_tool_registry_register(agent->tools,
                                sc_tool_git_new(workspace, restrict_ws,
                                    (const char **)cfg->git.push_allowed_remotes,
                                    cfg->git.push_allowed_remote_count));
+    sc_tool_registry_register(agent->tools, sc_tool_worktree_enter_new(agent));
+    sc_tool_registry_register(agent->tools, sc_tool_worktree_exit_new(agent));
 #endif
 
     /* Code graph tool */

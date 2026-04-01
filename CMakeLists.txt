@@ -233,7 +233,7 @@ set(SC_SOURCES
 )
 
 if(SC_ENABLE_GIT)
-    list(APPEND SC_SOURCES src/tools/git.c)
+    list(APPEND SC_SOURCES src/tools/git.c src/tools/worktree.c)
 endif()
 
 if(SC_ENABLE_GITEA)
