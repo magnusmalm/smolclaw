@@ -17,3 +17,6 @@ deps/musl-cross-make/
 .env
 .env.*
 code-analysis-report.md
+CLAUDE.md
+CLAUDE.md.bak
+Testing/

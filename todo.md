@@ -11,6 +11,22 @@ Remaining items from the deep code audit (AUDIT_REPORT.md). All low severity.
 - **#32** Cost tracker `fsync` on every turn (`cost.c:132-177`). Ensures cost data survives crashes. The I/O cost is negligible on modern SSDs and happens once per turn (not per tool call). Correctness over performance here.
 - **#34** CDATA wrap byte-by-byte append around `]]>` (`str.c:383-386`). No length-bounded `sc_strbuf_append` exists; adding one or using malloc is worse than the loop. Trivial cost relative to I/O.
 
+## Notification tool enhancements
+
+The `notify` tool (`src/tools/notify.c`) currently supports Discord,
+Telegram, and generic JSON webhooks. Potential additions:
+
+- **Slack webhook** (`slack://hook-url`) — POST to Slack incoming webhook
+- **ntfy** (`ntfy://host/topic`) — POST to ntfy.sh or self-hosted instance
+- **Post-tool hook integration** — auto-notify on task completion via
+  the pre/post tool hook chain, similar to HolyClaude's Stop hook pattern.
+  Would allow headless agents to ping on session end without explicit
+  tool calls.
+
+Low priority — the current 3 backends cover the main use cases.
+
+---
+
 ## Port conflict logging
 
 When the web channel fails to bind, the error could be more helpful.
