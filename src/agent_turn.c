@@ -1069,15 +1069,27 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
 
         int stuck = check_stuck_loop(call, tc, iteration);
         if (stuck == 2) {
-            *out_content = sc_strdup("Stopped: repeated tool call detected.");
+            /* Escalation level 2: abort turn */
+            SC_LOG_ERROR("agent", "Escalation: aborting turn after %d repeated calls to %s",
+                         5, call->name);
+            *out_content = sc_strdup(
+                "Stopped: repeated tool call detected. "
+                "The same approach has been tried multiple times without progress. "
+                "Please rephrase or simplify the request.");
             free(slots);
             return 1;
         }
         if (stuck == 1) {
+            /* Escalation level 1: inject step-back prompt */
+            SC_LOG_WARN("agent", "Escalation: injecting step-back prompt for %s", call->name);
             sc_llm_message_t hint_msg = sc_msg_tool_result(call->id,
                 "Error: You have called this tool with identical arguments "
-                "multiple times and it keeps failing. Try a different "
-                "approach or different parameters.");
+                "multiple times. STOP and reconsider your approach entirely. "
+                "Do NOT retry the same command. Instead:\n"
+                "1. Read the error output carefully\n"
+                "2. Try a fundamentally different strategy\n"
+                "3. If the tool doesn't support what you need, use a different tool\n"
+                "4. If stuck, ask the user for clarification");
             if (tc->msgs_len + 1 > tc->msgs_cap) {
                 int new_cap = tc->msgs_cap + 16;
                 sc_llm_message_t *new_msgs = sc_safe_realloc(tc->msgs,

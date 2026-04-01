@@ -389,10 +389,23 @@ static void handle_message(struct evhttp_request *req, void *arg)
         sc_strbuf_appendf(&sk, "web:%s", sess_name);
     char *session_key = sc_strbuf_finish(&sk);
 
+    /* If context was provided (from delegate tool), prepend it */
+    const char *delegate_ctx = sc_json_get_string(json, "context", NULL);
+    char *full_message = NULL;
+    if (delegate_ctx && delegate_ctx[0]) {
+        sc_strbuf_t cm;
+        sc_strbuf_init(&cm);
+        sc_strbuf_appendf(&cm, "[Context from dispatcher]\n%s\n\n%s",
+                          delegate_ctx, message);
+        full_message = sc_strbuf_finish(&cm);
+    }
+
     /* Publish inbound message to bus.
      * sender_id = "web" (no user auth), chat_id = request_id for response routing */
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
-        SC_CHANNEL_WEB, "web", request_id, message, session_key);
+        SC_CHANNEL_WEB, "web", request_id,
+        full_message ? full_message : message, session_key);
+    free(full_message);
     free(session_key);
     cJSON_Delete(json);
 

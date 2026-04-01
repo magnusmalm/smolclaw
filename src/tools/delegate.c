@@ -116,6 +116,13 @@ static cJSON *delegate_parameters(sc_tool_t *self)
         "memory index directly (task becomes the search query). "
         "Default is to send task as a message.");
 
+    cJSON *context = cJSON_AddObjectToObject(props, "context");
+    cJSON_AddStringToObject(context, "type", "string");
+    cJSON_AddStringToObject(context, "description",
+        "Optional conversation context or summary to give the target agent "
+        "background. Include relevant prior findings, user preferences, or "
+        "constraints so the worker doesn't start from zero.");
+
     cJSON *req = cJSON_AddArrayToObject(schema, "required");
     cJSON_AddItemToArray(req, cJSON_CreateString("target"));
     cJSON_AddItemToArray(req, cJSON_CreateString("task"));
@@ -246,7 +253,9 @@ static sc_tool_result_t *delegate_execute(sc_tool_t *self, cJSON *args, void *ct
         return result;
     }
 
-    /* Build JSON body: {"message": "<task>", "session": "<session_or_uuid>"} */
+    /* Build JSON body */
+    const char *context_str = sc_json_get_string(args, "context", NULL);
+
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "message", task);
     if (session && session[0]) {
@@ -256,6 +265,8 @@ static sc_tool_result_t *delegate_execute(sc_tool_t *self, cJSON *args, void *ct
         cJSON_AddStringToObject(body, "session", uuid);
         free(uuid);
     }
+    if (context_str && context_str[0])
+        cJSON_AddStringToObject(body, "context", context_str);
     char *body_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
     if (!body_str)
