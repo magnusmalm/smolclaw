@@ -81,6 +81,8 @@ typedef struct sc_agent {
     sc_task_t *summarize_task;
     /* Per-turn arena allocator (reset between turns) */
     sc_arena_t *arena;
+    /* Compaction circuit breaker: disable after consecutive failures */
+    int compact_consecutive_failures;
     /* Context transform chain (invoked between context build and LLM call) */
     sc_context_transform_t *transforms;
     int transform_count;

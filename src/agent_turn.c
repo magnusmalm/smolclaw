@@ -1438,16 +1438,22 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         iteration++;
 
         /* Token-aware auto-compaction: if last prompt used >85% of context
-         * window, summarize now to free space before the next call. */
+         * window, summarize now to free space before the next call.
+         * Circuit breaker: skip after 3 consecutive compaction failures. */
         if (iteration > 1 && tc.prompt_tokens > 0 &&
             agent->context_window > 0 &&
-            tc.prompt_tokens > agent->context_window * 85 / 100) {
+            tc.prompt_tokens > agent->context_window * 85 / 100 &&
+            agent->compact_consecutive_failures < 3) {
             SC_LOG_INFO("agent", "Auto-compacting: %d tokens / %d window (%.0f%%)",
                         tc.prompt_tokens, agent->context_window,
                         100.0 * tc.prompt_tokens / agent->context_window);
             sc_maybe_summarize(agent, session_key);
-            /* Note: summarization may run async. The message count reduction
-             * takes effect on the next context build cycle. */
+        } else if (agent->compact_consecutive_failures >= 3 &&
+                   iteration > 1 && tc.prompt_tokens > 0 &&
+                   agent->context_window > 0 &&
+                   tc.prompt_tokens > agent->context_window * 85 / 100) {
+            SC_LOG_WARN("agent", "Auto-compact disabled (circuit breaker: %d consecutive failures)",
+                        agent->compact_consecutive_failures);
         }
 
         SC_LOG_DEBUG("agent", "LLM iteration %d/%d (messages=%d, tools=%d)",
@@ -1462,21 +1468,70 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
         if (!resp) break;
 
-        /* Reactive compaction: if the API rejects with a context-length error,
-         * force summarization so the NEXT turn starts with a shorter context.
-         * We can't retry this turn because tc.msgs is already built. */
+        /* Reactive compaction via grouped truncation: if the API rejects
+         * with a context-length error, drop the oldest message group
+         * (bounded by assistant responses) and retry up to 3 times. */
         if (resp->http_status == 400 && resp->content &&
             (strstr(resp->content, "context") ||
              strstr(resp->content, "token") ||
              strstr(resp->content, "length"))) {
-            SC_LOG_WARN("agent", "Context overflow (HTTP 400) — forcing summarization");
             sc_llm_response_free(resp);
-            sc_drain_summarize(agent);
-            sc_maybe_summarize(agent, session_key);
-            sc_drain_summarize(agent);
-            final_content = sc_strdup(
-                "Context window full. Session has been summarized — please retry.");
-            break;
+            resp = NULL;
+
+            int retries = 0;
+            while (retries < 3 && tc.msgs_len > 2) {
+                /* Find the first assistant message boundary after system msgs.
+                 * A "group" is system → first assistant response boundary. */
+                int drop_end = 1;  /* skip system message at [0] */
+                for (int m = 1; m < tc.msgs_len - 1; m++) {
+                    if (tc.msgs[m].role &&
+                        strcmp(tc.msgs[m].role, "assistant") == 0 &&
+                        tc.msgs[m].tool_call_count == 0) {
+                        drop_end = m + 1;  /* drop through this assistant msg */
+                        break;
+                    }
+                    drop_end = m + 1;
+                }
+                if (drop_end >= tc.msgs_len - 1)
+                    break;  /* can't drop more without losing everything */
+
+                /* Free dropped messages and shift remaining */
+                for (int m = 1; m < drop_end; m++)
+                    sc_llm_message_free_fields(&tc.msgs[m]);
+                int remaining = tc.msgs_len - drop_end;
+                memmove(&tc.msgs[1], &tc.msgs[drop_end],
+                        (size_t)remaining * sizeof(sc_llm_message_t));
+                tc.msgs_len = 1 + remaining;
+
+                SC_LOG_WARN("agent", "Grouped truncation: dropped %d msgs, "
+                            "%d remaining (retry %d/3)",
+                            drop_end - 1, tc.msgs_len, retries + 1);
+
+                resp = call_llm_with_fallback(
+                    agent, provider, model, tc.msgs, tc.msgs_len,
+                    tool_defs, tool_count, &tc, iteration);
+                if (!resp) break;
+                if (resp->http_status == 200) break;
+
+                /* Still too large — drop another group */
+                if (resp->http_status == 400) {
+                    sc_llm_response_free(resp);
+                    resp = NULL;
+                    retries++;
+                    continue;
+                }
+                break;  /* non-context error */
+            }
+
+            if (!resp) break;
+            if (resp->http_status != 200) {
+                SC_LOG_ERROR("agent", "Grouped truncation exhausted (%d retries)", retries);
+                sc_llm_response_free(resp);
+                final_content = sc_strdup(
+                    "Context window full after truncation. Please start a new session.");
+                break;
+            }
+            /* Fall through to normal response handling */
         }
 
         /* Some models return tool calls as text — extract them */

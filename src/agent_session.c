@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "constants.h"
 #include "logger.h"
+#include "context.h"
 #include "session.h"
 #include "memory.h"
 #include "util/str.h"
@@ -199,6 +200,9 @@ static void apply_summarize_result(sc_agent_t *agent)
         sc_session_truncate(agent->sessions, args->session_key,
                             args->session_keep_last);
         sc_session_save(agent->sessions, args->session_key);
+        agent->compact_consecutive_failures = 0;
+    } else {
+        agent->compact_consecutive_failures++;
     }
 
     free_summarize_args(args);
@@ -238,7 +242,64 @@ void sc_drain_summarize(sc_agent_t *agent)
                                args->result_summary);
         sc_session_truncate(agent->sessions, args->session_key,
                             args->session_keep_last);
+
+        /* Post-compact re-injection: inject a boundary message with
+         * refreshed context so the agent doesn't lose workspace awareness
+         * after compaction drops old messages. */
+        {
+            sc_strbuf_t reinject;
+            sc_strbuf_init(&reinject);
+            sc_strbuf_append(&reinject,
+                "[Session compacted. Key context re-injected below.]\n\n");
+
+            /* Re-read long-term memory */
+            sc_memory_t *mem = sc_memory_new(args->workspace);
+            if (mem) {
+                char *memory = sc_memory_read_long_term(mem);
+                if (memory && memory[0]) {
+                    sc_strbuf_append(&reinject, "## Memory\n");
+                    /* Cap at 2KB to avoid bloating the re-injection */
+                    if (strlen(memory) > 2048) {
+                        sc_strbuf_appendf(&reinject, "%.2048s\n[...truncated]\n", memory);
+                    } else {
+                        sc_strbuf_appendf(&reinject, "%s\n", memory);
+                    }
+                }
+                free(memory);
+                sc_memory_free(mem);
+            }
+
+            /* Re-read bootstrap files (AGENTS.md, SOUL.md) */
+            if (agent->context_builder) {
+                char *bootstrap = sc_context_load_bootstrap(agent->context_builder);
+                if (bootstrap && bootstrap[0]) {
+                    sc_strbuf_append(&reinject, "\n## Bootstrap Context\n");
+                    if (strlen(bootstrap) > 2048)
+                        sc_strbuf_appendf(&reinject, "%.2048s\n[...truncated]\n", bootstrap);
+                    else
+                        sc_strbuf_appendf(&reinject, "%s\n", bootstrap);
+                }
+                free(bootstrap);
+            }
+
+            char *reinject_text = sc_strbuf_finish(&reinject);
+            if (reinject_text && reinject_text[0]) {
+                sc_llm_message_t boundary = sc_msg_user(reinject_text);
+                sc_session_add_full_message(agent->sessions,
+                                             args->session_key, &boundary);
+                sc_llm_message_free_fields(&boundary);
+                SC_LOG_INFO("agent", "Post-compact re-injection: %zu bytes",
+                            strlen(reinject_text));
+            }
+            free(reinject_text);
+        }
+
         sc_session_save(agent->sessions, args->session_key);
+        agent->compact_consecutive_failures = 0;
+    } else {
+        agent->compact_consecutive_failures++;
+        SC_LOG_WARN("agent", "Compaction failed (%d consecutive)",
+                    agent->compact_consecutive_failures);
     }
 
     free_summarize_args(args);
