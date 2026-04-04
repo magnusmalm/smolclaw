@@ -283,6 +283,19 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
         free(args_preview);
     }
 
+    /* Reject oversized arguments (prevent DoS via huge LLM output) */
+    if (args) {
+        char *raw = cJSON_PrintUnformatted(args);
+        if (raw) {
+            size_t arg_len = strlen(raw);
+            free(raw);
+            if (arg_len > 256 * 1024) {  /* 256 KB max */
+                SC_LOG_WARN("tool", "Tool %s: args too large (%zu bytes)", name, arg_len);
+                return sc_tool_result_error("tool arguments too large");
+            }
+        }
+    }
+
     /* Validate arguments against tool's JSON Schema */
     if (tool->parameters) {
         cJSON *schema = tool->parameters(tool);

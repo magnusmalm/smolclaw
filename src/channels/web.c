@@ -243,13 +243,8 @@ static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
 static int add_pending(web_data_t *wd, const char *request_id,
                          struct evhttp_request *req)
 {
-    pthread_mutex_lock(&wd->pending_lock);
-    if (wd->pending_count >= WEB_MAX_PENDING) {
-        pthread_mutex_unlock(&wd->pending_lock);
-        return -1;
-    }
-    pthread_mutex_unlock(&wd->pending_lock);
-
+    /* Allocate outside lock, then re-check count under lock to close
+     * the TOCTOU window between capacity check and insertion. */
     web_pending_t *wp = calloc(1, sizeof(*wp));
     if (!wp) return -1;
 
@@ -264,6 +259,13 @@ static int add_pending(web_data_t *wd, const char *request_id,
         event_add(wp->timeout_ev, &tv);
 
     pthread_mutex_lock(&wd->pending_lock);
+    if (wd->pending_count >= WEB_MAX_PENDING) {
+        pthread_mutex_unlock(&wd->pending_lock);
+        if (wp->timeout_ev) event_free(wp->timeout_ev);
+        free(wp->request_id);
+        free(wp);
+        return -1;
+    }
     wp->next = wd->pending_head;
     wd->pending_head = wp;
     wd->pending_count++;
