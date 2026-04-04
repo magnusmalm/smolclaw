@@ -1373,12 +1373,38 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
     }
 
     const char *env_pw = getenv("SMOLCLAW_VAULT_PASSWORD");
+    char *loaded_pw = NULL;
+    if (!env_pw || env_pw[0] == '\0') {
+        /* Try reading from $SMOLCLAW_HOME/env file (set by vault provision) */
+        const char *home = getenv("SMOLCLAW_HOME");
+        if (home && home[0]) {
+            char env_path[512];
+            snprintf(env_path, sizeof(env_path), "%s/env", home);
+            FILE *ef = fopen(env_path, "r");
+            if (ef) {
+                char line[512];
+                while (fgets(line, sizeof(line), ef)) {
+                    if (strncmp(line, "SMOLCLAW_VAULT_PASSWORD=", 24) == 0) {
+                        char *val = line + 24;
+                        size_t vlen = strlen(val);
+                        if (vlen > 0 && val[vlen - 1] == '\n')
+                            val[vlen - 1] = '\0';
+                        loaded_pw = sc_strdup(val);
+                        env_pw = loaded_pw;
+                        break;
+                    }
+                }
+                fclose(ef);
+            }
+        }
+    }
     if (!env_pw || env_pw[0] == '\0') {
         DOC_FAIL(fail, "Vault: SMOLCLAW_VAULT_PASSWORD not set — cannot verify %d key%s",
                  ref_count, ref_count > 1 ? "s" : "");
         sc_vault_free(vault);
         for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
         free(ref_keys);
+        free(loaded_pw);
         return;
     }
 
@@ -1387,6 +1413,7 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
         sc_vault_free(vault);
         for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
         free(ref_keys);
+        free(loaded_pw);
         return;
     }
 
@@ -1403,6 +1430,7 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
     }
     free(ref_keys);
     sc_vault_free(vault);
+    free(loaded_pw);
 }
 #endif
 
