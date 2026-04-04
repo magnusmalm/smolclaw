@@ -43,7 +43,7 @@ sc_rate_limiter_t *sc_rate_limiter_new(int max_per_minute)
 static bucket_t *find_bucket(sc_rate_limiter_t *rl, const char *key)
 {
     for (int i = 0; i < rl->count; i++) {
-        if (strncmp(rl->buckets[i].key, key, KEY_MAX - 1) == 0)
+        if (strncmp(rl->buckets[i].key, key, KEY_MAX) == 0)
             return &rl->buckets[i];
     }
     return NULL;

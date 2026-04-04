@@ -1781,7 +1781,7 @@ static void gateway_event_loop(struct event_base *base,
             sc_inbound_msg_free(msg);
         }
 
-        usleep(10000);
+        usleep(100000);  /* 100ms — saves ~90% idle CPU vs 10ms */
     }
 }
 

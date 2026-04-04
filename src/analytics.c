@@ -88,6 +88,7 @@ sc_analytics_t *sc_analytics_new(const char *workspace)
     /* WAL mode for better concurrent performance */
     sqlite3_exec(a->db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
     sqlite3_exec(a->db, "PRAGMA synchronous=NORMAL", NULL, NULL, NULL);
+    sqlite3_exec(a->db, "PRAGMA wal_autocheckpoint=1000", NULL, NULL, NULL);
 
     /* Run schema migrations */
     int nmig = (int)(sizeof(ANALYTICS_MIGRATIONS) / sizeof(ANALYTICS_MIGRATIONS[0]));

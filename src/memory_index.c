@@ -176,6 +176,7 @@ sc_memory_index_t *sc_memory_index_new(const char *db_path)
 
     /* WAL mode for crash safety and concurrent reads */
     sqlite3_exec(idx->db, "PRAGMA journal_mode=WAL", NULL, NULL, NULL);
+    sqlite3_exec(idx->db, "PRAGMA wal_autocheckpoint=1000", NULL, NULL, NULL);
 
     /* Run schema migrations (arrays defined at file scope) */
     int nmig = (int)(sizeof(MEMORY_MIGRATIONS) / sizeof(MEMORY_MIGRATIONS[0]));
