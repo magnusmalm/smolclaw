@@ -45,6 +45,11 @@ static const sc_pricing_entry_t DEFAULT_PRICING[] = {
     {"deepseek",             0.27,   1.10},
     {"x-ai/grok",            3.0,   15.0},
     {"google/gemini",        1.25,   5.0},
+    /* Raw model names (as returned by provider APIs) */
+    {"gemini",               1.25,   5.0},
+    {"glm",                  0.14,   0.14},
+    {"kimi",                 0.14,   0.28},
+    {"grok",                 3.0,   15.0},
     /* Sentinel */
     {NULL, 0, 0}
 };
