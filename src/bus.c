@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #define LOG_TAG "bus"
-#define SC_BUS_MAX_QUEUE_DEPTH 256
+#define SC_BUS_MAX_QUEUE_DEPTH 1024
 
 /* ---- Queue helpers ---- */
 

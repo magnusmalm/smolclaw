@@ -262,7 +262,9 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
     const char *msg = job->payload.message;
     if (!msg) return NULL;
 
-    /* #compact-memory — run AI-driven MEMORY.md compaction (quick, ok to block) */
+    /* #compact-memory — AI-driven MEMORY.md compaction.
+     * Runs synchronously (blocks event loop 2-10s for LLM call).
+     * Acceptable because cron jobs run between user turns, not during. */
     if (strncmp(msg, "#compact-memory", 15) == 0) {
         SC_LOG_INFO("cron", "Running memory compaction job '%s'",
                     job->name ? job->name : job->id);
