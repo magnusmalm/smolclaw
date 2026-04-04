@@ -465,6 +465,13 @@ static int irc_connect(irc_data_t *id)
     SC_LOG_INFO(IRC_TAG, "TCP connected to %s:%d", id->hostname, id->port);
 
     /* TLS handshake */
+    /* Set socket timeouts to prevent blocking forever on TLS reads/writes */
+    {
+        struct timeval tv = { .tv_sec = 120, .tv_usec = 0 };
+        setsockopt(id->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(id->sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    }
+
     if (id->use_tls) {
         id->ssl_ctx = SSL_CTX_new(TLS_client_method());
         if (!id->ssl_ctx) {

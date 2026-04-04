@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <errno.h>
+#include <unistd.h>
 
 #define LOG_TAG "session"
 #define INITIAL_NODE_CAP  16
@@ -242,11 +243,18 @@ static sc_session_node_t node_from_json(const cJSON *obj)
 /* Write session as JSONL: header line + one line per node */
 static int session_write_jsonl(const sc_session_t *s, const char *path)
 {
-    FILE *f = fopen(path, "w");
+    /* Atomic write: temp file + fsync + rename to prevent corruption
+     * on disk full or crash during write */
+    char tmp[1024];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+
+    FILE *f = fopen(tmp, "w");
     if (!f) {
-        SC_LOG_ERROR(LOG_TAG, "Failed to open %s for writing: %s", path, strerror(errno));
+        SC_LOG_ERROR(LOG_TAG, "Failed to open %s for writing: %s", tmp, strerror(errno));
         return -1;
     }
+
+    int ok = 1;
 
     /* Header line: metadata */
     cJSON *hdr = cJSON_CreateObject();
@@ -258,19 +266,34 @@ static int session_write_jsonl(const sc_session_t *s, const char *path)
     cJSON_AddNumberToObject(hdr, "active_leaf", s->active_leaf);
     char *line = cJSON_PrintUnformatted(hdr);
     cJSON_Delete(hdr);
-    if (line) { fprintf(f, "%s\n", line); free(line); }
+    if (line) { if (fprintf(f, "%s\n", line) < 0) ok = 0; free(line); }
 
     /* One line per node */
-    for (int i = 0; i < s->node_count; i++) {
+    for (int i = 0; i < s->node_count && ok; i++) {
         cJSON *nj = node_to_json(&s->nodes[i]);
         if (nj) {
             line = cJSON_PrintUnformatted(nj);
             cJSON_Delete(nj);
-            if (line) { fprintf(f, "%s\n", line); free(line); }
+            if (line) { if (fprintf(f, "%s\n", line) < 0) ok = 0; free(line); }
         }
     }
 
+    if (ok) ok = (fflush(f) == 0);
+    if (ok) ok = (fsync(fileno(f)) == 0);
     fclose(f);
+
+    if (!ok) {
+        SC_LOG_ERROR(LOG_TAG, "Write error for session %s, keeping old file", s->key);
+        unlink(tmp);
+        return -1;
+    }
+
+    if (rename(tmp, path) != 0) {
+        SC_LOG_ERROR(LOG_TAG, "Failed to rename %s -> %s: %s", tmp, path, strerror(errno));
+        unlink(tmp);
+        return -1;
+    }
+
     return 0;
 }
 
@@ -281,9 +304,10 @@ static sc_session_t *session_read_jsonl(const char *path)
     if (!f) return NULL;
 
     sc_session_t *s = NULL;
-    char buf[65536];
+    char *buf = malloc(65536);
+    if (!buf) { fclose(f); return NULL; }
 
-    while (fgets(buf, sizeof(buf), f)) {
+    while (fgets(buf, 65536, f)) {
         /* Strip trailing newline */
         size_t len = strlen(buf);
         while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r'))
@@ -325,6 +349,7 @@ static sc_session_t *session_read_jsonl(const char *path)
         s->branch_dirty = 1;
     }
 
+    free(buf);
     return s;
 }
 

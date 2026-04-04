@@ -177,9 +177,10 @@ sc_ws_t *sc_ws_connect(const char *url)
     }
     freeaddrinfo(res);
 
-    /* Read timeout — prevents SSL_read from blocking indefinitely */
+    /* Socket timeouts — prevent SSL_read/SSL_write from blocking forever */
     struct timeval tv = { .tv_sec = 30, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     /* TLS handshake */
     SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
@@ -251,10 +252,11 @@ sc_ws_t *sc_ws_connect(const char *url)
     }
     resp_buf[resp_len] = '\0';
 
-    if (strstr(resp_buf, "101") == NULL) {
-        int ws_status = 0;
-        if (resp_len > 12)
-            sscanf(resp_buf, "HTTP/%*d.%*d %d", &ws_status);
+    /* Parse HTTP status code properly (not string search) */
+    int ws_status = 0;
+    if (resp_len > 12)
+        sscanf(resp_buf, "HTTP/%*d.%*d %d", &ws_status);
+    if (ws_status != 101) {
         SC_LOG_ERROR(WS_TAG, "WebSocket upgrade rejected (HTTP %d)", ws_status);
         SSL_free(ssl);
         SSL_CTX_free(ssl_ctx);
