@@ -38,7 +38,7 @@ static char *get_backup_root(void)
     size_t len = strlen(base);
     char *path = malloc(len + 1 + sizeof(BACKUP_DIR));
     if (!path) { free(base); return NULL; }
-    sprintf(path, "%s/%s", base, BACKUP_DIR);
+    snprintf(path, len + 1 + sizeof(BACKUP_DIR), "%s/%s", base, BACKUP_DIR);
     free(base);
     return path;
 }

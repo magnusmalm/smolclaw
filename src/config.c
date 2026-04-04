@@ -142,7 +142,7 @@ static char *sc_resolve_file_ref(const char *value, const char *workspace)
         /* Append trailing slash for prefix check */
         char *dir_slash = malloc(dir_len + 2);
         if (dir_slash) {
-            sprintf(dir_slash, "%s/", smolclaw_dir);
+            snprintf(dir_slash, dir_len + 2, "%s/", smolclaw_dir);
             if (strncmp(path, dir_slash, strlen(dir_slash)) == 0) {
                 SC_LOG_WARN(LOG_TAG, "secret file is inside %s (%s) — "
                             "agent reads memory/sessions from here",
@@ -1706,7 +1706,7 @@ char *sc_config_get_path(void)
     size_t len = strlen(home);
     char *path = malloc(len + sizeof("/config.json"));
     if (!path) { free(home); return NULL; }
-    sprintf(path, "%s/config.json", home);
+    snprintf(path, len + sizeof("/config.json"), "%s/config.json", home);
     free(home);
     return path;
 }

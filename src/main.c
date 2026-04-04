@@ -439,7 +439,7 @@ static void cmd_pairing(int argc, char **argv)
     }
     char *store_dir = malloc(strlen(home) + sizeof("/pairing"));
     if (!store_dir) { free(home); return; }
-    sprintf(store_dir, "%s/pairing", home);
+    snprintf(store_dir, strlen(home) + sizeof("/pairing"), "%s/pairing", home);
     free(home);
     sc_pairing_store_t *ps = sc_pairing_store_new(channel, store_dir);
     free(store_dir);

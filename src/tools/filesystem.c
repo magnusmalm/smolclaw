@@ -65,8 +65,10 @@ static void fs_tool_destroy(sc_tool_t *self)
     free(self);
 }
 
-/* Check if path is a symlink (before realpath resolves it).
- * Handles relative paths by prepending workspace. */
+/* Pre-check if path is a symlink for a clear error message.
+ * This is an advisory check only — the real enforcement is O_NOFOLLOW
+ * in fs_open_nofollow(), which atomically rejects symlinks at open time
+ * and eliminates the TOCTOU race window. */
 static int is_symlink_path(const char *path, const char *workspace)
 {
     if (!path) return 0;

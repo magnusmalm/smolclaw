@@ -38,7 +38,7 @@ void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
         if (home) {
             size_t hlen = strlen(home);
             dir = malloc(hlen + sizeof("/pairing"));
-            if (dir) sprintf(dir, "%s/pairing", home);
+            if (dir) snprintf(dir, hlen + sizeof("/pairing"), "%s/pairing", home);
             free(home);
         }
         ch->pairing_store = sc_pairing_store_new(channel_name, dir);

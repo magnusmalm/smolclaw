@@ -532,7 +532,7 @@ char *sc_vault_get_path(void)
     size_t len = strlen(home);
     char *path = malloc(len + sizeof("/vault.enc"));
     if (!path) { free(home); return NULL; }
-    sprintf(path, "%s/vault.enc", home);
+    snprintf(path, len + sizeof("/vault.enc"), "%s/vault.enc", home);
     free(home);
     return path;
 }
