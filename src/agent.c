@@ -726,6 +726,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->provider = provider;
     agent->workspace = workspace;
     agent->model = sc_strdup(sc_model_strip_prefix(cfg->model));
+    agent->max_tokens = cfg->max_tokens;
     agent->context_window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
     agent->provider_ctx_window = cfg->context_window;
     agent->temperature = cfg->temperature;
@@ -974,6 +975,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_output_chars = cfg->max_output_chars;
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
+    agent->max_tokens = cfg->max_tokens;
     agent->context_window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
     agent->provider_ctx_window = cfg->context_window;
 

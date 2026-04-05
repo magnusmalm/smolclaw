@@ -749,7 +749,7 @@ static sc_llm_response_t *call_llm_with_fallback(
     sc_turn_ctx_t *tc, int iteration)
 {
     cJSON *options = cJSON_CreateObject();
-    cJSON_AddNumberToObject(options, "max_tokens", agent->context_window);
+    cJSON_AddNumberToObject(options, "max_tokens", agent->max_tokens);
     cJSON_AddNumberToObject(options, "temperature", agent->temperature);
     if (agent->provider_ctx_window > 0)
         cJSON_AddNumberToObject(options, "num_ctx", agent->provider_ctx_window);
