@@ -1134,6 +1134,65 @@ static void doctor_check_workspace(const sc_config_t *cfg, int *pass, int *fail)
     free(workspace);
 }
 
+/* Try to load vault password from env var or $SMOLCLAW_HOME/env file.
+ * Returns malloc'd string or NULL. Caller must free. */
+#if SC_ENABLE_VAULT
+static char *doctor_load_vault_password(void)
+{
+    const char *env_pw = getenv("SMOLCLAW_VAULT_PASSWORD");
+    if (env_pw && env_pw[0])
+        return sc_strdup(env_pw);
+
+    const char *home = getenv("SMOLCLAW_HOME");
+    if (!home || !home[0]) return NULL;
+
+    char env_path[512];
+    snprintf(env_path, sizeof(env_path), "%s/env", home);
+    FILE *ef = fopen(env_path, "r");
+    if (!ef) return NULL;
+
+    char *pw = NULL;
+    char line[512];
+    while (fgets(line, sizeof(line), ef)) {
+        if (strncmp(line, "SMOLCLAW_VAULT_PASSWORD=", 24) == 0) {
+            char *val = line + 24;
+            size_t vlen = strlen(val);
+            if (vlen > 0 && val[vlen - 1] == '\n')
+                val[vlen - 1] = '\0';
+            pw = sc_strdup(val);
+            break;
+        }
+    }
+    fclose(ef);
+    return pw;
+}
+
+/* Try to resolve a vault:// key. Returns 1 if key exists, 0 otherwise. */
+static int doctor_vault_key_exists(const char *key_name)
+{
+    char *vault_path = sc_vault_get_path();
+    if (!vault_path || !sc_vault_exists(vault_path)) {
+        free(vault_path);
+        return 0;
+    }
+    sc_vault_t *vault = sc_vault_new(vault_path);
+    free(vault_path);
+    if (!vault) return 0;
+
+    char *pw = doctor_load_vault_password();
+    if (!pw) { sc_vault_free(vault); return 0; }
+
+    int found = 0;
+    if (sc_vault_unlock(vault, pw) == 0) {
+        const char *val = sc_vault_get(vault, key_name);
+        found = (val && val[0]);
+    }
+    sc_vault_free(vault);
+    free(pw);
+    return found;
+}
+#endif
+
 /* Check API key for the configured provider */
 static void doctor_check_provider(const sc_config_t *cfg, int *pass, int *fail)
 {
@@ -1155,8 +1214,12 @@ static void doctor_check_provider(const sc_config_t *cfg, int *pass, int *fail)
     if (api_key && api_key[0]) {
         if (strncmp(api_key, "vault://", 8) == 0) {
 #if SC_ENABLE_VAULT
-            DOC_FAIL(fail, "API key: %s — vault ref '%s' unresolved "
-                     "(check vault password and vault key)", provider, api_key + 8);
+            const char *key_name = api_key + 8;
+            if (doctor_vault_key_exists(key_name))
+                DOC_PASS(pass, "API key: %s (vault, verified)", provider);
+            else
+                DOC_FAIL(fail, "API key: %s — vault ref '%s' unresolved "
+                         "(check vault password and vault key)", provider, key_name);
 #else
             DOC_FAIL(fail, "API key: %s — vault:// ref but vault feature disabled "
                      "(rebuild with SC_ENABLE_VAULT=ON or use literal key)", provider);
@@ -1372,33 +1435,8 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
         return;
     }
 
-    const char *env_pw = getenv("SMOLCLAW_VAULT_PASSWORD");
-    char *loaded_pw = NULL;
-    if (!env_pw || env_pw[0] == '\0') {
-        /* Try reading from $SMOLCLAW_HOME/env file (set by vault provision) */
-        const char *home = getenv("SMOLCLAW_HOME");
-        if (home && home[0]) {
-            char env_path[512];
-            snprintf(env_path, sizeof(env_path), "%s/env", home);
-            FILE *ef = fopen(env_path, "r");
-            if (ef) {
-                char line[512];
-                while (fgets(line, sizeof(line), ef)) {
-                    if (strncmp(line, "SMOLCLAW_VAULT_PASSWORD=", 24) == 0) {
-                        char *val = line + 24;
-                        size_t vlen = strlen(val);
-                        if (vlen > 0 && val[vlen - 1] == '\n')
-                            val[vlen - 1] = '\0';
-                        loaded_pw = sc_strdup(val);
-                        env_pw = loaded_pw;
-                        break;
-                    }
-                }
-                fclose(ef);
-            }
-        }
-    }
-    if (!env_pw || env_pw[0] == '\0') {
+    char *loaded_pw = doctor_load_vault_password();
+    if (!loaded_pw) {
         DOC_FAIL(fail, "Vault: SMOLCLAW_VAULT_PASSWORD not set — cannot verify %d key%s",
                  ref_count, ref_count > 1 ? "s" : "");
         sc_vault_free(vault);
@@ -1408,7 +1446,7 @@ static void doctor_check_vault(const sc_config_t *cfg, int *pass, int *fail)
         return;
     }
 
-    if (sc_vault_unlock(vault, env_pw) != 0) {
+    if (sc_vault_unlock(vault, loaded_pw) != 0) {
         DOC_FAIL(fail, "Vault: unlock failed (wrong password or corrupted)");
         sc_vault_free(vault);
         for (int i = 0; i < ref_count; i++) free(ref_keys[i]);
