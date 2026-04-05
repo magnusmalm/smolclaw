@@ -39,6 +39,7 @@ static const struct {
     const char *name;
     int needs_confirm;
 } git_subcmds[] = {
+    { "clone",    1 },
     { "init",     1 },
     { "config",   1 },
     { "status",   0 },
@@ -356,9 +357,9 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
     int cmd_needs_confirm = 0;
     if (!is_allowed_subcmd(subcmd, &cmd_needs_confirm))
         return sc_tool_result_error(
-            "Subcommand not allowed. Allowed: init, config, status, log, diff, "
-            "show, blame, branch, tag, remote, rev-parse, ls-files, add, "
-            "commit, checkout, stash, fetch, pull, push, merge, rebase, "
+            "Subcommand not allowed. Allowed: clone, init, config, status, log, "
+            "diff, show, blame, branch, tag, remote, rev-parse, ls-files, "
+            "add, commit, checkout, stash, fetch, pull, push, merge, rebase, "
             "reset, clean, restore, switch");
 
     /* Validate repo_path if provided */
