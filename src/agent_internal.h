@@ -89,6 +89,10 @@ typedef struct {
 
     /* LLM failure tracking — populated when all providers fail */
     char *failure_reason;  /* malloc'd, freed by caller */
+
+    /* Per-channel tool allowlist (borrowed, not owned) */
+    char **ch_tools;
+    int ch_tool_count;
 } sc_turn_ctx_t;
 
 /* ---------- agent_turn.c ---------- */

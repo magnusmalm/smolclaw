@@ -1055,6 +1055,27 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
         SC_LOG_INFO("agent", "Tool call: %s", call->name);
         emit_progress(agent, tc, "  -> %s ...", call->name);
 
+        /* Enforce channel tool allowlist at execution time.
+         * The LLM only sees filtered tool definitions, but may
+         * hallucinate tool names from prior sessions or training. */
+        if (tc->ch_tool_count > 0) {
+            int allowed = 0;
+            for (int a = 0; a < tc->ch_tool_count; a++) {
+                if (strcmp(tc->ch_tools[a], call->name) == 0) {
+                    allowed = 1;
+                    break;
+                }
+            }
+            if (!allowed) {
+                SC_LOG_WARN("agent", "Tool '%s' blocked by channel allowlist",
+                            call->name);
+                s->result = sc_tool_result_error(
+                    "Tool not available in this channel");
+                s->state = SLOT_CACHED;  /* skip execution */
+                continue;
+            }
+        }
+
         s->cacheable = is_read_only_tool(call->name);
 
         if (s->cacheable) {
@@ -1441,6 +1462,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             break;
         }
     }
+
+    tc.ch_tools = ch_tools;
+    tc.ch_tool_count = ch_tool_count;
 
     int tool_count = 0;
     sc_tool_definition_t *tool_defs = sc_tool_registry_to_defs_filtered(
