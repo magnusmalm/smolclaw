@@ -362,20 +362,35 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
             "add, commit, checkout, stash, fetch, pull, push, merge, rebase, "
             "reset, clean, restore, switch");
 
-    /* Validate repo_path if provided */
+    /* Validate repo_path if provided.
+     * For clone, the target directory may not exist yet (must_exist=0). */
     const char *repo_path = sc_json_get_string(args_json, "repo_path", NULL);
     char *resolved_repo = NULL;
+    int is_clone = (strcmp(subcmd, "clone") == 0);
     if (repo_path && repo_path[0]) {
         if (gd->restrict_to_workspace) {
-            char *validated = sc_validate_path(repo_path, gd->working_dir, 1);
+            char *validated = sc_validate_path(repo_path, gd->working_dir,
+                                               is_clone ? 0 : 1);
             if (!validated)
                 return sc_tool_result_error(
                     "repo_path is outside the workspace");
             resolved_repo = validated;
         } else {
-            resolved_repo = realpath(repo_path, NULL);
-            if (!resolved_repo)
-                return sc_tool_result_error("repo_path does not exist");
+            if (is_clone) {
+                /* For clone: construct absolute path without requiring existence */
+                if (repo_path[0] == '/') {
+                    resolved_repo = sc_strdup(repo_path);
+                } else {
+                    sc_strbuf_t sb;
+                    sc_strbuf_init(&sb);
+                    sc_strbuf_appendf(&sb, "%s/%s", gd->working_dir, repo_path);
+                    resolved_repo = sc_strbuf_finish(&sb);
+                }
+            } else {
+                resolved_repo = realpath(repo_path, NULL);
+                if (!resolved_repo)
+                    return sc_tool_result_error("repo_path does not exist");
+            }
         }
     }
 
