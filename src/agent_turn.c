@@ -1002,6 +1002,79 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
         }
     }
 
+    /* Auto-append to action log — survives compaction via system prompt
+     * injection.  Keeps a rolling log of tool actions so the agent knows
+     * what it already did even after context summarization. */
+    if (agent->workspace && call->name) {
+        char log_path[1024];
+        snprintf(log_path, sizeof(log_path),
+                 "%s/state/action_log.txt", agent->workspace);
+
+        /* Extract compact arg summary (first string value) */
+        const char *arg_preview = "";
+        char arg_buf[80];
+        if (call->arguments) {
+            static const char *keys[] = {"path","file","command","query",
+                                         "subcommand","repo_path","url",NULL};
+            for (int k = 0; keys[k]; k++) {
+                cJSON *v = cJSON_GetObjectItem(call->arguments, keys[k]);
+                if (v && cJSON_IsString(v) && v->valuestring) {
+                    snprintf(arg_buf, sizeof(arg_buf), "%s", v->valuestring);
+                    arg_preview = arg_buf;
+                    break;
+                }
+            }
+        }
+
+        const char *status = (result && result->is_error) ? "ERROR" : "ok";
+        int result_len = (result && result->for_llm)
+            ? (int)strlen(result->for_llm) : 0;
+
+        char line[256];
+        int llen = snprintf(line, sizeof(line), "[iter %d] %s(%s) -> %s",
+                            iteration, call->name, arg_preview, status);
+        if (result_len > 0)
+            llen += snprintf(line + llen, sizeof(line) - llen,
+                             " (%d bytes)", result_len);
+        snprintf(line + llen, sizeof(line) - llen, "\n");
+
+        /* Append to log, cap at 2KB by truncating from head */
+        FILE *lf = fopen(log_path, "a");
+        if (lf) {
+            fputs(line, lf);
+            long pos = ftell(lf);
+            fclose(lf);
+
+            /* If file > 2KB, keep only the last 1.5KB */
+            if (pos > 2048) {
+                FILE *rf = fopen(log_path, "r");
+                if (rf) {
+                    fseek(rf, pos - 1536, SEEK_SET);
+                    /* Skip to next newline for clean line boundary */
+                    int c;
+                    while ((c = fgetc(rf)) != EOF && c != '\n') {}
+                    long keep_start = ftell(rf);
+                    long keep_len = pos - keep_start;
+                    char *buf = malloc(keep_len + 1);
+                    if (buf) {
+                        size_t n = fread(buf, 1, keep_len, rf);
+                        buf[n] = '\0';
+                        fclose(rf);
+                        FILE *wf = fopen(log_path, "w");
+                        if (wf) {
+                            fputs("[...truncated]\n", wf);
+                            fwrite(buf, 1, n, wf);
+                            fclose(wf);
+                        }
+                        free(buf);
+                    } else {
+                        fclose(rf);
+                    }
+                }
+            }
+        }
+    }
+
     if (append_tool_msg(agent, tc, call, result, iteration)) {
         *out_content = NULL;
         return 1;

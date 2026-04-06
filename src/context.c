@@ -278,6 +278,30 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
             }
             close(sp_fd);
         }
+
+        /* Action log: auto-appended tool execution history */
+        char al_path[PATH_MAX];
+        snprintf(al_path, sizeof(al_path),
+                 "%s/state/action_log.txt", cb->workspace);
+        int al_fd = open(al_path, O_RDONLY | O_NOFOLLOW);
+        if (al_fd >= 0) {
+            struct stat al_st;
+            if (fstat(al_fd, &al_st) == 0 && S_ISREG(al_st.st_mode) &&
+                al_st.st_size > 0) {
+                char *al = malloc(al_st.st_size + 1);
+                if (al) {
+                    ssize_t n = read(al_fd, al, al_st.st_size);
+                    if (n > 0) {
+                        al[n] = '\0';
+                        sc_strbuf_append(&prompt_buf,
+                            "\n\n## Action Log (auto-recorded)\n\n");
+                        sc_strbuf_append(&prompt_buf, al);
+                    }
+                    free(al);
+                }
+            }
+            close(al_fd);
+        }
     }
 
     char *final_prompt = sc_strbuf_finish(&prompt_buf);
