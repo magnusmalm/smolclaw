@@ -218,6 +218,7 @@ set(SC_SOURCES
     src/tools/shell.c
     src/tools/message.c
     src/tools/memory_tools.c
+    src/tools/scratchpad.c
     src/tools/notify.c
     src/providers/provider_common.c
     src/providers/http.c

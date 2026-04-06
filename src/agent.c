@@ -26,6 +26,7 @@
 #include "tools/shell.h"
 #include "tools/message.h"
 #include "tools/memory_tools.h"
+#include "tools/scratchpad.h"
 #include "providers/factory.h"
 #include "memory.h"
 #include "util/str.h"
@@ -200,6 +201,9 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
     sc_tool_registry_register(reg, sc_tool_memory_read_new(workspace));
     sc_tool_registry_register(reg, sc_tool_memory_write_new(workspace));
     sc_tool_registry_register(reg, sc_tool_memory_log_new(workspace));
+
+    /* Scratchpad: persistent working notes that survive compaction */
+    sc_tool_registry_register(reg, sc_tool_scratchpad_new(workspace));
 
     /* Memory search (FTS5 index) — standalone mode */
 #if SC_ENABLE_MEMORY_SEARCH
@@ -385,6 +389,9 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     sc_tool_registry_register(agent->tools, sc_tool_memory_read_new(workspace));
     sc_tool_registry_register(agent->tools, mem_write_tool);
     sc_tool_registry_register(agent->tools, mem_log_tool);
+
+    /* Scratchpad: persistent working notes that survive compaction */
+    sc_tool_registry_register(agent->tools, sc_tool_scratchpad_new(workspace));
 
     /* Memory search (FTS5 index) */
 #if SC_ENABLE_MEMORY_SEARCH
@@ -663,47 +670,93 @@ static void load_channel_tools(sc_agent_t *agent, const sc_config_t *cfg)
     add_channel_tools(agent, "x", cfg->x.tools, cfg->x.tool_count);
 }
 
-/* Context transform: compress old tool results to free context tokens.
- * Tool results older than the last 4 messages with content > 10KB are
- * replaced with a truncated preview. */
-#define COMPRESS_KEEP_RECENT 4
-#define COMPRESS_THRESHOLD   10000
-#define COMPRESS_PREVIEW     500
+/* Context transform: observation masking.
+ * Replace old tool results with structured placeholders that preserve the
+ * action chain (what the agent did) while discarding bulky tool output
+ * (what the tool returned).  Short results (<200 bytes) are kept intact
+ * since they're cheap and often contain error messages or confirmations.
+ * Recent results (last 6 messages) are always kept in full. */
+#define MASK_KEEP_RECENT  6
+#define MASK_SIZE_EXEMPT  200
 
-static int compress_old_tool_results(sc_context_snap_t *snap, void *userdata)
+/* Find the tool call metadata for a given tool_call_id by scanning backward
+ * from position `from` in the message array.  Returns NULL if not found. */
+static const sc_tool_call_t *
+find_tool_call_for_id(sc_llm_message_t *msgs, int from, const char *id)
+{
+    if (!id) return NULL;
+    for (int i = from - 1; i >= 0; i--) {
+        for (int j = 0; j < msgs[i].tool_call_count; j++) {
+            if (msgs[i].tool_calls[j].id &&
+                strcmp(msgs[i].tool_calls[j].id, id) == 0)
+                return &msgs[i].tool_calls[j];
+        }
+    }
+    return NULL;
+}
+
+/* Extract a compact label from tool arguments (first string value). */
+static const char *
+summarize_tool_arg(const sc_tool_call_t *tc, char *buf, size_t bufsz)
+{
+    if (!tc || !tc->arguments) return "";
+    /* Try common single-value keys: path, file, command, query, url */
+    static const char *keys[] = {"path","file","command","query","url",
+                                 "subcommand","repo_path","content",NULL};
+    for (int k = 0; keys[k]; k++) {
+        cJSON *v = cJSON_GetObjectItem(tc->arguments, keys[k]);
+        if (v && cJSON_IsString(v) && v->valuestring) {
+            snprintf(buf, bufsz, "\"%.*s\"",
+                     (int)(bufsz - 4), v->valuestring);
+            return buf;
+        }
+    }
+    return "";
+}
+
+static int mask_old_observations(sc_context_snap_t *snap, void *userdata)
 {
     (void)userdata;
     int count = *snap->msg_count;
-    int cutoff = count > COMPRESS_KEEP_RECENT ? count - COMPRESS_KEEP_RECENT : 0;
+    int cutoff = count > MASK_KEEP_RECENT ? count - MASK_KEEP_RECENT : 0;
+    sc_llm_message_t *msgs = *snap->msgs;
 
     for (int i = 0; i < cutoff; i++) {
-        sc_llm_message_t *msg = &(*snap->msgs)[i];
-        if (!msg->tool_call_id) continue;  /* not a tool result */
+        sc_llm_message_t *msg = &msgs[i];
+        if (!msg->tool_call_id) continue;   /* not a tool result */
         if (!msg->content) continue;
         size_t len = strlen(msg->content);
-        if (len <= COMPRESS_THRESHOLD) continue;
+        if (len <= MASK_SIZE_EXEMPT) continue;  /* short results kept */
 
-        /* Replace with compressed version (arena if available, else heap) */
+        /* Find the matching tool call to get name + args */
+        const sc_tool_call_t *tc = find_tool_call_for_id(msgs, i, msg->tool_call_id);
+        const char *tool_name = tc ? tc->name : "unknown";
+        char arg_buf[80];
+        const char *arg_summary = summarize_tool_arg(tc, arg_buf, sizeof(arg_buf));
+
+        /* Count lines for metadata */
+        int lines = 1;
+        for (const char *p = msg->content; *p; p++)
+            if (*p == '\n') lines++;
+
+        int is_error = (strstr(msg->content, "ERROR") ||
+                        strstr(msg->content, "error:") ||
+                        strstr(msg->content, "failed"));
+
+        /* Build replacement placeholder */
+        char placeholder[256];
+        snprintf(placeholder, sizeof(placeholder),
+                 "[tool_result: %s(%s) -> %s, %zu bytes, %d lines]",
+                 tool_name, arg_summary,
+                 is_error ? "ERROR" : "ok", len, lines);
+
         char *replacement = NULL;
         if (snap->arena) {
-            /* Arena allocation — freed automatically at turn end */
-            char header[128];
-            int hlen = snprintf(header, sizeof(header),
-                "[Compressed tool result — %zu chars. First %d chars:]\n",
-                len, COMPRESS_PREVIEW);
-            size_t total = (size_t)hlen + COMPRESS_PREVIEW + 1;
-            replacement = sc_arena_alloc(snap->arena, total);
-            if (replacement) {
-                memcpy(replacement, header, (size_t)hlen);
-                memcpy(replacement + hlen, msg->content,
-                       COMPRESS_PREVIEW < (int)len ? COMPRESS_PREVIEW : (int)len);
-                replacement[hlen + (COMPRESS_PREVIEW < (int)len ? COMPRESS_PREVIEW : (int)len)] = '\0';
-            }
+            size_t plen = strlen(placeholder) + 1;
+            replacement = sc_arena_alloc(snap->arena, plen);
+            if (replacement) memcpy(replacement, placeholder, plen);
         } else {
-            if (asprintf(&replacement,
-                         "[Compressed tool result — %zu chars. First %d chars:]\n%.*s",
-                         len, COMPRESS_PREVIEW, COMPRESS_PREVIEW, msg->content) < 0)
-                continue;
+            replacement = sc_strdup(placeholder);
         }
         if (!replacement) continue;
         free(msg->content);
@@ -797,9 +850,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     /* Per-channel tool allowlists */
     load_channel_tools(agent, cfg);
 
-    /* Context transform: compress old tool results to save tokens */
-    sc_agent_add_transform(agent, "compress_old_results",
-                           compress_old_tool_results, NULL);
+    /* Context transform: mask old tool results to save tokens */
+    sc_agent_add_transform(agent, "mask_old_observations",
+                           mask_old_observations, NULL);
 
     /* Load skills from standard directories */
     agent->skills = sc_skill_registry_new();

@@ -253,6 +253,33 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
         sc_strbuf_append(&prompt_buf, summary);
     }
 
+    /* Scratchpad: persistent working notes that survive compaction.
+     * Read fresh from disk on every LLM call. */
+    if (cb->workspace) {
+        char sp_path[PATH_MAX];
+        snprintf(sp_path, sizeof(sp_path),
+                 "%s/state/scratchpad.md", cb->workspace);
+        int sp_fd = open(sp_path, O_RDONLY | O_NOFOLLOW);
+        if (sp_fd >= 0) {
+            struct stat sp_st;
+            if (fstat(sp_fd, &sp_st) == 0 && S_ISREG(sp_st.st_mode) &&
+                sp_st.st_size > 0) {
+                char *sp = malloc(sp_st.st_size + 1);
+                if (sp) {
+                    ssize_t n = read(sp_fd, sp, sp_st.st_size);
+                    if (n > 0) {
+                        sp[n] = '\0';
+                        sc_strbuf_append(&prompt_buf,
+                            "\n\n## Working Notes (Scratchpad)\n\n");
+                        sc_strbuf_append(&prompt_buf, sp);
+                    }
+                    free(sp);
+                }
+            }
+            close(sp_fd);
+        }
+    }
+
     char *final_prompt = sc_strbuf_finish(&prompt_buf);
 
     /* Skip orphaned tool messages at start of history */

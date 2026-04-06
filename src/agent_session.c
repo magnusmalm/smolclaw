@@ -282,6 +282,31 @@ void sc_drain_summarize(sc_agent_t *agent)
                 free(bootstrap);
             }
 
+            /* Re-read scratchpad (working notes that survive compaction) */
+            if (args->workspace) {
+                char sp_path[1024];
+                snprintf(sp_path, sizeof(sp_path),
+                         "%s/state/scratchpad.md", args->workspace);
+                FILE *sp_f = fopen(sp_path, "r");
+                if (sp_f) {
+                    fseek(sp_f, 0, SEEK_END);
+                    long sp_sz = ftell(sp_f);
+                    if (sp_sz > 0 && sp_sz < 4096) {
+                        fseek(sp_f, 0, SEEK_SET);
+                        char *sp = malloc(sp_sz + 1);
+                        if (sp) {
+                            size_t n = fread(sp, 1, sp_sz, sp_f);
+                            sp[n] = '\0';
+                            sc_strbuf_append(&reinject,
+                                "\n## Working Notes (Scratchpad)\n");
+                            sc_strbuf_appendf(&reinject, "%s\n", sp);
+                            free(sp);
+                        }
+                    }
+                    fclose(sp_f);
+                }
+            }
+
             char *reinject_text = sc_strbuf_finish(&reinject);
             if (reinject_text && reinject_text[0]) {
                 sc_llm_message_t boundary = sc_msg_user(reinject_text);
@@ -384,7 +409,13 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
                     best = i;
             }
             if (best < 0) break;
-            int cost = (int)strlen(history[best].content ? history[best].content : "") + 30;
+            int cost;
+            if (history[best].tool_call_id) {
+                /* Tool results are compressed to ~80 bytes in transcript */
+                cost = 80;
+            } else {
+                cost = (int)strlen(history[best].content ? history[best].content : "") + 30;
+            }
             if (cost > budget) { scores[best] = 0; continue; }
             selected[best] = 1;
             budget -= cost;
@@ -393,23 +424,76 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
         }
     }
 
-    /* Build transcript from selected messages in chronological order */
+    /* Build transcript from selected messages in chronological order.
+     * Action-only compaction: preserve full tool-call descriptions but
+     * compress tool-result content to metadata (tool name, status, size).
+     * This helps the summarizer capture *what the agent did* without
+     * wasting budget on verbose tool output (e.g. 48KB file reads). */
     for (int i = 0; i < discard_count; i++) {
         if (!selected[i]) continue;
 
         const char *role = history[i].role;
         if (!role || strcmp(role, "system") == 0) continue;
 
-        const char *label = role;
-        if (history[i].tool_call_id)
-            label = "tool_result";
-        else if (history[i].tool_call_count > 0)
-            label = "assistant (tool_use)";
+        if (history[i].tool_call_id) {
+            /* Tool result: compress to metadata only */
+            const char *content = history[i].content ? history[i].content : "";
+            int content_len = (int)strlen(content);
+            int line_count = 1;
+            for (const char *p = content; *p; p++)
+                if (*p == '\n') line_count++;
 
-        const char *content = history[i].content;
-        if (!content) content = "";
+            /* Extract tool name from XML wrapper if present */
+            const char *tool_name = "unknown";
+            char tn_buf[64];
+            const char *tn = strstr(content, "tool=\"");
+            if (tn) {
+                tn += 6;
+                const char *tn_end = strchr(tn, '"');
+                if (tn_end && (tn_end - tn) < (int)sizeof(tn_buf)) {
+                    memcpy(tn_buf, tn, (size_t)(tn_end - tn));
+                    tn_buf[tn_end - tn] = '\0';
+                    tool_name = tn_buf;
+                }
+            }
 
-        sc_strbuf_appendf(&transcript, "[%s] %s\n", label, content);
+            int is_error = (strstr(content, "ERROR") || strstr(content, "error:")
+                            || strstr(content, "failed"));
+
+            sc_strbuf_appendf(&transcript,
+                "[tool_result: %s -> %s, %d bytes, %d lines]\n",
+                tool_name, is_error ? "ERROR" : "ok",
+                content_len, line_count);
+
+        } else if (history[i].tool_call_count > 0) {
+            /* Assistant with tool calls: list each call with name + args */
+            if (history[i].content && history[i].content[0])
+                sc_strbuf_appendf(&transcript, "[assistant] %s\n",
+                                  history[i].content);
+
+            for (int j = 0; j < history[i].tool_call_count; j++) {
+                sc_tool_call_t *tc = &history[i].tool_calls[j];
+                char *args_str = tc->arguments
+                    ? cJSON_PrintUnformatted(tc->arguments) : NULL;
+                /* Truncate large args (e.g. write_file content) */
+                if (args_str && strlen(args_str) > 200) {
+                    args_str[197] = '.';
+                    args_str[198] = '.';
+                    args_str[199] = '.';
+                    args_str[200] = '\0';
+                }
+                sc_strbuf_appendf(&transcript, "[tool_call: %s(%s)]\n",
+                    tc->name ? tc->name : "?",
+                    args_str ? args_str : "{}");
+                free(args_str);
+            }
+
+        } else {
+            /* Regular user or assistant message */
+            const char *content = history[i].content;
+            if (!content) content = "";
+            sc_strbuf_appendf(&transcript, "[%s] %s\n", role, content);
+        }
     }
 
     free(scores);
