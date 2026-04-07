@@ -1038,18 +1038,67 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
                              " (%d bytes)", result_len);
         snprintf(line + llen, sizeof(line) - llen, "\n");
 
-        /* Append to log, cap at 2KB by truncating from head */
+        /* On error: extract relevant error lines from tool output.
+         * Filters for compiler errors, linker errors, and notes.
+         * Capped at 500 bytes to keep the action log concise. */
+        char error_snippet[512];
+        int esnip_len = 0;
+        if (result && result->is_error && result->for_llm) {
+            const char *p = result->for_llm;
+            while (*p && esnip_len < (int)sizeof(error_snippet) - 2) {
+                /* Find start of current line */
+                const char *eol = strchr(p, '\n');
+                int line_len = eol ? (int)(eol - p) : (int)strlen(p);
+
+                /* Check if this line contains an error/warning keyword */
+                /* Use a temp buffer for case-insensitive search */
+                int relevant = 0;
+                if (line_len > 0 && line_len < 500) {
+                    /* Match common compiler diagnostic patterns */
+                    for (const char *q = p; q < p + line_len - 4; q++) {
+                        if ((q[0]=='e'&&q[1]=='r'&&q[2]=='r'&&q[3]=='o'&&q[4]=='r') ||
+                            (q[0]=='f'&&q[1]=='a'&&q[2]=='t'&&q[3]=='a'&&q[4]=='l') ||
+                            (q[0]=='n'&&q[1]=='o'&&q[2]=='t'&&q[3]=='e'&&q[4]==':') ||
+                            (q[0]=='u'&&q[1]=='n'&&q[2]=='d'&&q[3]=='e'&&(q[4]=='c'||q[4]=='f')))
+                        {
+                            relevant = 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (relevant) {
+                    int take = line_len;
+                    if (take > 200) take = 200;  /* truncate long lines */
+                    if (esnip_len + take + 4 >= (int)sizeof(error_snippet))
+                        break;
+                    memcpy(error_snippet + esnip_len, "  ", 2);
+                    esnip_len += 2;
+                    memcpy(error_snippet + esnip_len, p, take);
+                    esnip_len += take;
+                    error_snippet[esnip_len++] = '\n';
+                }
+
+                if (!eol) break;
+                p = eol + 1;
+            }
+            error_snippet[esnip_len] = '\0';
+        }
+
+        /* Append to log, cap at 4KB by truncating from head */
         FILE *lf = fopen(log_path, "a");
         if (lf) {
             fputs(line, lf);
+            if (esnip_len > 0)
+                fputs(error_snippet, lf);
             long pos = ftell(lf);
             fclose(lf);
 
-            /* If file > 2KB, keep only the last 1.5KB */
-            if (pos > 2048) {
+            /* If file > 4KB, keep only the last 3KB */
+            if (pos > 4096) {
                 FILE *rf = fopen(log_path, "r");
                 if (rf) {
-                    fseek(rf, pos - 1536, SEEK_SET);
+                    fseek(rf, pos - 3072, SEEK_SET);
                     /* Skip to next newline for clean line boundary */
                     int c;
                     while ((c = fgetc(rf)) != EOF && c != '\n') {}
