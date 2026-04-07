@@ -87,6 +87,9 @@ typedef struct {
     int checkpoint_count;   /* how many valid checkpoints we have */
     int rewind_count;       /* how many rewinds this turn (max 2) */
 
+    /* Continuation nudge — prevent premature turn end */
+    int nudge_count;        /* how many nudges this turn (max 1) */
+
     /* LLM failure tracking — populated when all providers fail */
     char *failure_reason;  /* malloc'd, freed by caller */
 

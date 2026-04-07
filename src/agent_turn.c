@@ -1647,6 +1647,63 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         extract_text_tool_calls(resp, tool_defs, tool_count);
 
         if (resp->tool_call_count == 0) {
+            /* Continuation nudge: if the action log shows tool activity
+             * but no exec call, the agent is stopping before building.
+             * Inject the text as an assistant message and nudge it to
+             * continue with a build step.  Only nudge once per turn. */
+            if (tc.nudge_count == 0 && agent->workspace &&
+                iteration >= 5) {
+                char log_path[1024];
+                snprintf(log_path, sizeof(log_path),
+                         "%s/state/action_log.txt", agent->workspace);
+                int has_exec = 0, has_activity = 0;
+                FILE *lf = fopen(log_path, "r");
+                if (lf) {
+                    char line[256];
+                    while (fgets(line, sizeof(line), lf)) {
+                        has_activity = 1;
+                        if (strstr(line, "] exec(") &&
+                            !strstr(line, "exec(cat ") &&
+                            !strstr(line, "exec(ls ") &&
+                            !strstr(line, "exec(grep "))
+                            has_exec = 1;
+                    }
+                    fclose(lf);
+                }
+
+                if (has_activity && !has_exec) {
+                    SC_LOG_INFO("agent",
+                        "Continuation nudge: agent stopping without "
+                        "exec/build at iteration %d", iteration);
+                    tc.nudge_count++;
+
+                    /* Save the text response as an assistant message */
+                    sc_llm_message_t assist = sc_msg_assistant(resp->content);
+                    if (tc.msgs_len + 2 <= tc.msgs_cap ||
+                        (tc.msgs = sc_safe_realloc(tc.msgs,
+                            (size_t)(tc.msgs_cap + 16) * sizeof(sc_llm_message_t)),
+                         tc.msgs && (tc.msgs_cap += 16))) {
+                        tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&assist);
+                        sc_session_add_full_message(agent->sessions,
+                            tc.session_key, &assist);
+
+                        /* Inject a nudge as a user message */
+                        sc_llm_message_t nudge = sc_msg_user(
+                            "You have not built the code yet. "
+                            "The action log shows file edits but no build step. "
+                            "Run the build command now using the exec tool. "
+                            "Do not respond with text — use a tool call.");
+                        tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&nudge);
+                        sc_session_add_full_message(agent->sessions,
+                            tc.session_key, &nudge);
+                        sc_llm_message_free_fields(&nudge);
+                    }
+                    sc_llm_message_free_fields(&assist);
+                    sc_llm_response_free(resp);
+                    continue;  /* back to top of iteration loop */
+                }
+            }
+
             final_content = sc_strdup(resp->content);
             if (out_thinking && resp->thinking)
                 *out_thinking = sc_strdup(resp->thinking);
