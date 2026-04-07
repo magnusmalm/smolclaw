@@ -730,7 +730,12 @@ static int mask_old_observations(sc_context_snap_t *snap, void *userdata)
 
         /* Find the matching tool call to get name + args */
         const sc_tool_call_t *tc = find_tool_call_for_id(msgs, i, msg->tool_call_id);
-        const char *tool_name = tc ? tc->name : "unknown";
+        const char *tool_name = (tc && tc->name) ? tc->name : "unknown";
+        char tn_safe[64];
+        if (strlen(tool_name) >= sizeof(tn_safe)) {
+            snprintf(tn_safe, sizeof(tn_safe), "%.60s...", tool_name);
+            tool_name = tn_safe;
+        }
         char arg_buf[80];
         const char *arg_summary = summarize_tool_arg(tc, arg_buf, sizeof(arg_buf));
 

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -87,7 +88,7 @@ static sc_tool_result_t *scratchpad_execute(sc_tool_t *self, cJSON *args,
     }
 
     /* Atomic write: temp file + rename */
-    char tmp_path[1024];
+    char tmp_path[PATH_MAX];
     snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", d->path);
 
     int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);

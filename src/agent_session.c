@@ -475,12 +475,17 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
                 sc_tool_call_t *tc = &history[i].tool_calls[j];
                 char *args_str = tc->arguments
                     ? cJSON_PrintUnformatted(tc->arguments) : NULL;
-                /* Truncate large args (e.g. write_file content) */
+                /* Truncate large args (e.g. write_file content).
+                 * Find a safe cut point that doesn't split UTF-8. */
                 if (args_str && strlen(args_str) > 200) {
-                    args_str[197] = '.';
-                    args_str[198] = '.';
-                    args_str[199] = '.';
-                    args_str[200] = '\0';
+                    int cut = 197;
+                    /* Back up past any UTF-8 continuation bytes (10xxxxxx) */
+                    while (cut > 0 && (args_str[cut] & 0xC0) == 0x80)
+                        cut--;
+                    args_str[cut++] = '.';
+                    args_str[cut++] = '.';
+                    args_str[cut++] = '.';
+                    args_str[cut] = '\0';
                 }
                 sc_strbuf_appendf(&transcript, "[tool_call: %s(%s)]\n",
                     tc->name ? tc->name : "?",

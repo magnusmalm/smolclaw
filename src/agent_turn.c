@@ -1051,10 +1051,10 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
                 int line_len = eol ? (int)(eol - p) : (int)strlen(p);
 
                 /* Check if this line contains an error/warning keyword */
-                /* Use a temp buffer for case-insensitive search */
                 int relevant = 0;
-                if (line_len > 0 && line_len < 500) {
-                    /* Match common compiler diagnostic patterns */
+                if (line_len >= 5 && line_len < 500) {
+                    /* Match common compiler diagnostic patterns.
+                     * Scan stops 4 chars before line end to avoid overread. */
                     for (const char *q = p; q < p + line_len - 4; q++) {
                         if ((q[0]=='e'&&q[1]=='r'&&q[2]=='r'&&q[3]=='o'&&q[4]=='r') ||
                             (q[0]=='f'&&q[1]=='a'&&q[2]=='t'&&q[3]=='a'&&q[4]=='l') ||
@@ -1726,28 +1726,37 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                         "exec/build at iteration %d", iteration);
                     tc.nudge_count++;
 
-                    /* Save the text response as an assistant message */
-                    sc_llm_message_t assist = sc_msg_assistant(resp->content);
-                    if (tc.msgs_len + 2 <= tc.msgs_cap ||
-                        (tc.msgs = sc_safe_realloc(tc.msgs,
-                            (size_t)(tc.msgs_cap + 16) * sizeof(sc_llm_message_t)),
-                         tc.msgs && (tc.msgs_cap += 16))) {
-                        tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&assist);
-                        sc_session_add_full_message(agent->sessions,
-                            tc.session_key, &assist);
-
-                        /* Inject a nudge as a user message */
-                        sc_llm_message_t nudge = sc_msg_user(
-                            "You have not built the code yet. "
-                            "The action log shows file edits but no build step. "
-                            "Run the build command now using the exec tool. "
-                            "Do not respond with text — use a tool call.");
-                        tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&nudge);
-                        sc_session_add_full_message(agent->sessions,
-                            tc.session_key, &nudge);
-                        sc_llm_message_free_fields(&nudge);
+                    /* Ensure space for 2 new messages */
+                    if (tc.msgs_len + 2 > tc.msgs_cap) {
+                        int new_cap = tc.msgs_cap + 16;
+                        sc_llm_message_t *new_msgs = sc_safe_realloc(
+                            tc.msgs, (size_t)new_cap * sizeof(sc_llm_message_t));
+                        if (!new_msgs) {
+                            sc_llm_response_free(resp);
+                            break;  /* OOM — end turn gracefully */
+                        }
+                        tc.msgs = new_msgs;
+                        tc.msgs_cap = new_cap;
                     }
+
+                    /* Save the text response as an assistant message */
+                    sc_llm_message_t assist = sc_msg_assistant(
+                        resp->content ? resp->content : "");
+                    tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&assist);
+                    sc_session_add_full_message(agent->sessions,
+                        tc.session_key, &assist);
                     sc_llm_message_free_fields(&assist);
+
+                    /* Inject a nudge as a user message */
+                    sc_llm_message_t nudge = sc_msg_user(
+                        "You have not built the code yet. "
+                        "The action log shows file edits but no build step. "
+                        "Run the build command now using the exec tool. "
+                        "Do not respond with text — use a tool call.");
+                    tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&nudge);
+                    sc_session_add_full_message(agent->sessions,
+                        tc.session_key, &nudge);
+                    sc_llm_message_free_fields(&nudge);
                     sc_llm_response_free(resp);
                     continue;  /* back to top of iteration loop */
                 }
