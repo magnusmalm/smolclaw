@@ -270,8 +270,11 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
                     if (n > 0) {
                         sp[n] = '\0';
                         sc_strbuf_append(&prompt_buf,
-                            "\n\n## Working Notes (Scratchpad)\n\n");
+                            "\n\n## Working Notes (Scratchpad)\n"
+                            "<context type=\"scratchpad\">\n");
                         sc_strbuf_append(&prompt_buf, sp);
+                        sc_strbuf_append(&prompt_buf,
+                            "\n</context>\n");
                     }
                     free(sp);
                 }
@@ -294,8 +297,11 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
                     if (n > 0) {
                         al[n] = '\0';
                         sc_strbuf_append(&prompt_buf,
-                            "\n\n## Action Log (auto-recorded)\n\n");
+                            "\n\n## Action Log (auto-recorded)\n"
+                            "<context type=\"action_log\">\n");
                         sc_strbuf_append(&prompt_buf, al);
+                        sc_strbuf_append(&prompt_buf,
+                            "\n</context>\n");
                     }
                     free(al);
                 }

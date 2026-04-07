@@ -1044,7 +1044,11 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
         char error_snippet[512];
         int esnip_len = 0;
         if (result && result->is_error && result->for_llm) {
-            const char *p = result->for_llm;
+            /* Redact secrets before extracting error lines.
+             * The raw result->for_llm may contain secrets that
+             * would otherwise leak into the action log → system prompt. */
+            char *redacted = sc_redact_secrets(result->for_llm);
+            const char *p = redacted ? redacted : result->for_llm;
             while (*p && esnip_len < (int)sizeof(error_snippet) - 2) {
                 /* Find start of current line */
                 const char *eol = strchr(p, '\n');
@@ -1083,6 +1087,7 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
                 p = eol + 1;
             }
             error_snippet[esnip_len] = '\0';
+            free(redacted);
         }
 
         /* Append to log, cap at 4KB by truncating from head */
