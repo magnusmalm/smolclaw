@@ -7,7 +7,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
 #include <unistd.h>
 
 #include "tools/exec_common.h"
@@ -216,9 +218,20 @@ void sc_exec_child(const char *command, const char *working_dir,
     char proc_tmp[] = "/tmp/sc_exec_XXXXXX";
     if (sandbox_enabled) {
         const char *tmpdir = mkdtemp(proc_tmp) ? proc_tmp : "/tmp";
+
+        /* Resolve ~/.local for user-installed tools (cmake, pip packages,
+         * etc.).  This covers both ~/.local/bin (wrapper scripts) and
+         * ~/.local/lib/pythonX.Y/site-packages (actual binaries installed
+         * via pip, e.g. cmake, ninja). */
+        char user_local[PATH_MAX] = "";
+        const char *home = getenv("HOME");
+        if (home)
+            snprintf(user_local, sizeof(user_local), "%s/.local", home);
+
         sc_sandbox_opts_t sandbox_opts = {
             .workspace = workspace,
             .tmpdir = tmpdir,
+            .bin_dir = user_local[0] ? user_local : NULL,
         };
         int sb_ret = sc_sandbox_apply(&sandbox_opts);
         if (sb_ret != 0) {
