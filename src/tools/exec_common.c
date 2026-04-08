@@ -205,10 +205,15 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
     if (use_allowlist && allowed_commands) {
         const char *err = check_allowlist(normalized, allowed_commands,
                                           allowed_count);
-        if (err) { free(normalized); return err; }
+        if (err) {
+            SC_LOG_WARN("exec", "Allowlist blocked: %.200s", command);
+            free(normalized);
+            return err;
+        }
     }
 
     if (sc_deny_list_matches(deny, normalized)) {
+        SC_LOG_WARN("exec", "Deny pattern blocked: %.200s", command);
         free(normalized);
         return "Command blocked by safety guard (dangerous pattern detected)";
     }
