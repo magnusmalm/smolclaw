@@ -200,7 +200,8 @@ static int git_build_argv(const char *dir, const char *subcmd,
             strncmp(a, "--work-tree", 11) == 0 ||
             strncmp(a, "--replace-object", 16) == 0 ||
             strncmp(a, "--hard", 6) == 0 ||
-            strncmp(a, "--force", 7) == 0 ||
+            (strncmp(a, "--force", 7) == 0 &&
+             strncmp(a, "--force-with-lease", 18) != 0) ||
             (a[0] == '-' && a[1] == 'c' && (a[2] == '\0' || a[2] == ' ')) ||
             (a[0] == '-' && a[1] == 'f' && (a[2] == '\0')) ||
             (a[0] == '-' && a[1] == 'p' && (a[2] == '\0' || a[2] == ' ')))
