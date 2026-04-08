@@ -143,16 +143,41 @@ static void do_summarize(sc_summarize_args_t *args)
 
     SC_LOG_INFO("agent", "Calling LLM for session summarization...");
     struct timespec sum_t0, sum_t1;
-    clock_gettime(CLOCK_MONOTONIC, &sum_t0);
 
-    sc_llm_response_t *resp = args->provider->chat(
-        args->provider, msgs, 2, NULL, 0, args->model, options);
+    /* Retry summarization up to 3 times with backoff.
+     * Summarization calls often fail due to rate limiting when the
+     * main agent loop is making concurrent API calls. */
+    sc_llm_response_t *resp = NULL;
+    double sum_elapsed = 0;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) {
+            int backoff_ms = 1000 * (1 << attempt);  /* 2s, 4s */
+            SC_LOG_INFO("agent", "Summarization retry %d/%d (backoff %dms)",
+                        attempt + 1, 3, backoff_ms);
+            struct timespec ts = { .tv_sec = backoff_ms / 1000,
+                                   .tv_nsec = (backoff_ms % 1000) * 1000000L };
+            nanosleep(&ts, NULL);
+        }
+
+        clock_gettime(CLOCK_MONOTONIC, &sum_t0);
+        resp = args->provider->chat(
+            args->provider, msgs, 2, NULL, 0, args->model, options);
+        clock_gettime(CLOCK_MONOTONIC, &sum_t1);
+        sum_elapsed = (sum_t1.tv_sec - sum_t0.tv_sec)
+                    + (sum_t1.tv_nsec - sum_t0.tv_nsec) / 1e9;
+
+        if (resp && resp->content && resp->content[0])
+            break;  /* success */
+
+        SC_LOG_WARN("agent", "Summarization attempt %d failed after %.1fs%s",
+                    attempt + 1, sum_elapsed,
+                    (resp && resp->http_status) ?
+                        (resp->http_status == 429 ? " (rate limited)" :
+                         " (API error)") : " (no response)");
+        if (resp) { sc_llm_response_free(resp); resp = NULL; }
+    }
 
     cJSON_Delete(options);
-
-    clock_gettime(CLOCK_MONOTONIC, &sum_t1);
-    double sum_elapsed = (sum_t1.tv_sec - sum_t0.tv_sec)
-                       + (sum_t1.tv_nsec - sum_t0.tv_nsec) / 1e9;
 
     if (resp && resp->content && resp->content[0]) {
         SC_LOG_INFO("agent", "Session summarized successfully in %.1fs", sum_elapsed);
@@ -160,8 +185,7 @@ static void do_summarize(sc_summarize_args_t *args)
         args->result_summary = redacted_summary
             ? redacted_summary : sc_strdup(resp->content);
     } else {
-        SC_LOG_WARN("agent", "Summarization LLM call failed after %.1fs",
-                    sum_elapsed);
+        SC_LOG_WARN("agent", "Summarization failed after 3 attempts");
     }
 
     if (resp) sc_llm_response_free(resp);
