@@ -6,6 +6,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -443,6 +444,67 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
         sc_tool_result_t *r = sc_tool_result_error(err_str);
         free(err_str);
         return r;
+    }
+
+    /* After a successful clone, populate .git/info/exclude with patterns
+     * for common agent workspace artifacts.  This prevents `git add --all`
+     * from staging audit logs, tee output, state files, and build dirs.
+     * Uses .git/info/exclude (local to clone, never committed) to avoid
+     * modifying the target repository's .gitignore. */
+    if (is_clone) {
+        /* Derive clone target dir from args: last non-flag argument,
+         * or the repo name from the URL if not specified. */
+        const char *clone_dir = NULL;
+        char clone_dir_buf[PATH_MAX];
+        if (args_str) {
+            /* Find last whitespace-separated token that doesn't start with - */
+            const char *last = NULL;
+            const char *p = args_str;
+            while (*p) {
+                while (*p == ' ') p++;
+                if (!*p) break;
+                const char *tok = p;
+                while (*p && *p != ' ') p++;
+                if (tok[0] != '-') last = tok;
+            }
+            /* If last token is a URL (.git), there's no explicit dir */
+            if (last && !strstr(last, ".git") && !strstr(last, "://"))
+                clone_dir = last;
+        }
+        if (!clone_dir) {
+            /* Derive from URL: http://host/user/repo.git → repo */
+            if (args_str) {
+                const char *slash = strrchr(args_str, '/');
+                if (slash) {
+                    const char *name = slash + 1;
+                    size_t nlen = strlen(name);
+                    if (nlen > 4 && strcmp(name + nlen - 4, ".git") == 0)
+                        nlen -= 4;
+                    if (nlen > 0 && nlen < sizeof(clone_dir_buf)) {
+                        memcpy(clone_dir_buf, name, nlen);
+                        clone_dir_buf[nlen] = '\0';
+                        clone_dir = clone_dir_buf;
+                    }
+                }
+            }
+        }
+        if (clone_dir) {
+            char exclude_path[PATH_MAX];
+            snprintf(exclude_path, sizeof(exclude_path),
+                     "%s/%s/.git/info/exclude", use_dir, clone_dir);
+            FILE *ef = fopen(exclude_path, "a");
+            if (ef) {
+                fprintf(ef,
+                    "\n# smolclaw agent workspace artifacts\n"
+                    "audit.log\n"
+                    "state/\n"
+                    "tee/\n"
+                    "cron/jobs.json\n"
+                    "*.o\n"
+                    "build/\n");
+                fclose(ef);
+            }
+        }
     }
 
     sc_tool_result_t *r = sc_tool_result_new(
