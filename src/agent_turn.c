@@ -6,10 +6,12 @@
 
 #include "agent_internal.h"
 
+#include <dirent.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1756,12 +1758,51 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                         tc.session_key, &assist);
                     sc_llm_message_free_fields(&assist);
 
-                    /* Inject a nudge as a user message */
-                    sc_llm_message_t nudge = sc_msg_user(
-                        "You have not built the code yet. "
-                        "The action log shows file edits but no build step. "
-                        "Run the build command now using the exec tool. "
-                        "Do not respond with text — use a tool call.");
+                    /* Inject a nudge with detected build system */
+                    char nudge_text[512];
+                    const char *build_hint = "";
+                    if (agent->workspace) {
+                        /* Scan workspace for build system markers */
+                        char probe[1024];
+                        struct stat st;
+                        snprintf(probe, sizeof(probe), "%s/CMakeLists.txt",
+                                 agent->workspace);
+                        if (stat(probe, &st) == 0) {
+                            build_hint = " Try: exec 'cmake -B build && "
+                                         "cmake --build build'";
+                        } else {
+                            /* Check one level deep (cloned repo) */
+                            DIR *d = opendir(agent->workspace);
+                            if (d) {
+                                struct dirent *ent;
+                                while ((ent = readdir(d))) {
+                                    if (ent->d_name[0] == '.') continue;
+                                    snprintf(probe, sizeof(probe),
+                                             "%s/%s/CMakeLists.txt",
+                                             agent->workspace, ent->d_name);
+                                    if (stat(probe, &st) == 0) {
+                                        snprintf(nudge_text, sizeof(nudge_text),
+                                            "You have not built the code yet. "
+                                            "Run: exec 'cmake -B %s/build -S %s "
+                                            "&& cmake --build %s/build'",
+                                            ent->d_name, ent->d_name, ent->d_name);
+                                        build_hint = NULL; /* used nudge_text */
+                                        break;
+                                    }
+                                }
+                                closedir(d);
+                            }
+                        }
+                    }
+                    if (build_hint) {
+                        snprintf(nudge_text, sizeof(nudge_text),
+                            "You have not built the code yet. "
+                            "The action log shows file edits but no build step. "
+                            "Run the build command now using the exec tool.%s "
+                            "Do not respond with text — use a tool call.",
+                            build_hint);
+                    }
+                    sc_llm_message_t nudge = sc_msg_user(nudge_text);
                     tc.msgs[tc.msgs_len++] = sc_llm_message_clone(&nudge);
                     sc_session_add_full_message(agent->sessions,
                         tc.session_key, &nudge);
