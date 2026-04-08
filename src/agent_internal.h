@@ -60,8 +60,9 @@ typedef struct {
     /* Turn tracking */
     int total_tool_calls;
     size_t total_output_bytes;
-    int prompt_tokens;
-    int completion_tokens;
+    int prompt_tokens;         /* cumulative across all iterations */
+    int completion_tokens;     /* cumulative across all iterations */
+    int last_prompt_tokens;    /* from most recent LLM call (post-transform) */
     time_t turn_start;
 
     /* Stuck-loop detection */

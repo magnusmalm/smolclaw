@@ -780,6 +780,7 @@ static sc_llm_response_t *call_llm_with_fallback(
                          (long)(llm_elapsed * 1000), tc->channel, tc->chat_id, "llm_call");
         tc->prompt_tokens += resp->usage.prompt_tokens;
         tc->completion_tokens += resp->usage.completion_tokens;
+        tc->last_prompt_tokens = resp->usage.prompt_tokens;
         return resp;
     }
 
@@ -829,6 +830,7 @@ static sc_llm_response_t *call_llm_with_fallback(
                              (long)(fb_elapsed * 1000), tc->channel, tc->chat_id, "llm_call");
             tc->prompt_tokens += resp->usage.prompt_tokens;
             tc->completion_tokens += resp->usage.completion_tokens;
+            tc->last_prompt_tokens = resp->usage.prompt_tokens;
             return resp;
         }
         if (f < 8) fallback_http[f] = resp ? resp->http_status : 0;
@@ -1602,19 +1604,21 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
 
         /* Token-aware auto-compaction: if last prompt used >85% of context
          * window, summarize now to free space before the next call.
+         * Uses last_prompt_tokens (post-transform, from the API response)
+         * not cumulative tokens, so observation masking is reflected.
          * Circuit breaker: skip after 3 consecutive compaction failures. */
-        if (iteration > 1 && tc.prompt_tokens > 0 &&
+        if (iteration > 1 && tc.last_prompt_tokens > 0 &&
             agent->context_window > 0 &&
-            tc.prompt_tokens > agent->context_window * 85 / 100 &&
+            tc.last_prompt_tokens > agent->context_window * 85 / 100 &&
             agent->compact_consecutive_failures < 3) {
             SC_LOG_INFO("agent", "Auto-compacting: %d tokens / %d window (%.0f%%)",
-                        tc.prompt_tokens, agent->context_window,
-                        100.0 * tc.prompt_tokens / agent->context_window);
+                        tc.last_prompt_tokens, agent->context_window,
+                        100.0 * tc.last_prompt_tokens / agent->context_window);
             sc_maybe_summarize(agent, session_key);
         } else if (agent->compact_consecutive_failures >= 3 &&
-                   iteration > 1 && tc.prompt_tokens > 0 &&
+                   iteration > 1 && tc.last_prompt_tokens > 0 &&
                    agent->context_window > 0 &&
-                   tc.prompt_tokens > agent->context_window * 85 / 100) {
+                   tc.last_prompt_tokens > agent->context_window * 85 / 100) {
             SC_LOG_WARN("agent", "Auto-compact disabled (circuit breaker: %d consecutive failures)",
                         agent->compact_consecutive_failures);
         }
