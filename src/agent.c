@@ -784,6 +784,8 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->provider = provider;
     agent->workspace = workspace;
     agent->model = sc_strdup(sc_model_strip_prefix(cfg->model));
+    agent->summary_model = cfg->summary_model
+        ? sc_strdup(sc_model_strip_prefix(cfg->summary_model)) : NULL;
     agent->max_tokens = cfg->max_tokens;
     agent->context_window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
     agent->provider_ctx_window = cfg->context_window;
@@ -919,6 +921,7 @@ void sc_agent_free(sc_agent_t *agent)
     free_channel_tools(agent);
     free(agent->workspace);
     free(agent->model);
+    free(agent->summary_model);
     sc_session_manager_free(agent->sessions);
     sc_state_free(agent->state);
     sc_context_builder_free(agent->context_builder);

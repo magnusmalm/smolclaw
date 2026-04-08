@@ -178,6 +178,7 @@ typedef struct {
     int workspace_per_session;   /* Create per-session subdirs under workspace/tasks/ */
     char *provider;
     char *model;
+    char *summary_model;       /* model for summarization (NULL = use primary) */
     char **fallback_models;
     int fallback_model_count;
     int max_tokens;

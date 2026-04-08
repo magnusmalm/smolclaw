@@ -541,7 +541,8 @@ build_done:
 
     args->session_key = sc_strdup(session_key);
     args->transcript = transcript_str;
-    args->model = sc_strdup(agent->model);
+    args->model = sc_strdup(agent->summary_model
+        ? agent->summary_model : agent->model);
     args->workspace = sc_strdup(agent->workspace);
     args->session_keep_last = agent->session_keep_last;
     args->memory_consolidation = agent->memory_consolidation;

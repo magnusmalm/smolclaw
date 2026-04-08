@@ -806,6 +806,7 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     override_str_field(&cfg->workspace, defaults, "workspace");
     override_str_field(&cfg->provider, defaults, "provider");
     override_str_field(&cfg->model, defaults, "model");
+    override_str_field(&cfg->summary_model, defaults, "summary_model");
 
     cfg->fallback_models = sc_json_parse_string_list(
         sc_json_get_array(defaults, "fallback_models"),

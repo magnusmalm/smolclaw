@@ -29,6 +29,7 @@ typedef struct sc_agent {
     sc_provider_t *provider;
     char *workspace;
     char *model;
+    char *summary_model;        /* model for summarization (NULL = use primary) */
     int max_tokens;             /* max output tokens per LLM call */
     int context_window;
     int provider_ctx_window;   /* provider-level context window (e.g. Ollama num_ctx), 0 = default */
