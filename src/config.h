@@ -262,6 +262,13 @@ typedef struct {
     sc_provider_config_t ollama;
     sc_provider_config_t xai;
 
+    /* Custom/named providers (for non-builtin names like "ollama-cloud") */
+    struct {
+        char *name;
+        sc_provider_config_t config;
+    } custom_providers[8];
+    int custom_provider_count;
+
     /* Channels */
     sc_telegram_config_t telegram;
     sc_discord_config_t discord;

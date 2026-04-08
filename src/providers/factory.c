@@ -233,13 +233,27 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
     int allow_no_key = 0;
     const char *label = NULL;
 
-    /* 1. Explicit provider name from config */
+    /* 1. Explicit provider name from config (builtin table) */
     if (provider_name && provider_name[0] != '\0') {
         if (!resolve_by_provider_name(cfg, provider_name,
                                       &api_key, &api_base, &proxy, &use_claude,
                                       &allow_no_key, &label)) {
-            SC_LOG_WARN(LOG_TAG, "Unknown provider name '%s', trying as HTTP",
-                        provider_name);
+            /* 1b. Check custom providers (e.g. "ollama-cloud") */
+            for (int i = 0; i < cfg->custom_provider_count; i++) {
+                if (cfg->custom_providers[i].name &&
+                    strcmp(cfg->custom_providers[i].name, provider_name) == 0) {
+                    api_key = cfg->custom_providers[i].config.api_key;
+                    api_base = cfg->custom_providers[i].config.api_base;
+                    proxy = cfg->custom_providers[i].config.proxy;
+                    label = provider_name;
+                    SC_LOG_INFO(LOG_TAG, "Using custom provider '%s' (base=%s)",
+                                provider_name, api_base ? api_base : "(none)");
+                    break;
+                }
+            }
+            if (!api_base)
+                SC_LOG_WARN(LOG_TAG, "Unknown provider '%s', trying model-name detection",
+                            provider_name);
         }
     }
 

@@ -1304,6 +1304,18 @@ static void doctor_check_connectivity(const sc_config_t *cfg, int *pass, int *fa
         else if (strcmp(provider, "ollama") == 0) base_url = "http://localhost:11434";
     }
 
+    /* Check custom providers */
+    if (!base_url) {
+        for (int i = 0; i < cfg->custom_provider_count; i++) {
+            if (cfg->custom_providers[i].name &&
+                strcmp(cfg->custom_providers[i].name, provider) == 0 &&
+                cfg->custom_providers[i].config.api_base) {
+                base_url = cfg->custom_providers[i].config.api_base;
+                break;
+            }
+        }
+    }
+
     if (!base_url) {
         DOC_FAIL(fail, "Connectivity: %s — no base URL known", provider);
         return;

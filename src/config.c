@@ -1177,6 +1177,30 @@ sc_config_t *sc_config_load(const char *path)
         parse_provider(providers, "deepseek",   &cfg->deepseek);
         parse_provider(providers, "ollama",     &cfg->ollama);
         parse_provider(providers, "xai",        &cfg->xai);
+
+        /* Parse any additional (custom) provider names not in the builtin list */
+        static const char *builtins[] = {
+            "anthropic","openai","openrouter","groq","zhipu",
+            "vllm","gemini","deepseek","ollama","xai",NULL
+        };
+        cJSON *prov_item;
+        cJSON_ArrayForEach(prov_item, (cJSON *)providers) {
+            if (!prov_item->string) continue;
+            int is_builtin = 0;
+            for (int b = 0; builtins[b]; b++) {
+                if (strcmp(prov_item->string, builtins[b]) == 0) {
+                    is_builtin = 1;
+                    break;
+                }
+            }
+            if (!is_builtin && cfg->custom_provider_count < 8) {
+                int idx = cfg->custom_provider_count;
+                cfg->custom_providers[idx].name = sc_strdup(prov_item->string);
+                parse_provider(providers, prov_item->string,
+                               &cfg->custom_providers[idx].config);
+                cfg->custom_provider_count++;
+            }
+        }
     }
 
     load_channels(cfg, root);
