@@ -140,10 +140,37 @@ static const char *check_allowlist(const char *lower,
         size_t word_len = (size_t)(seg - start);
         if (word_len == 0) { seg++; continue; }
 
+        /* Skip redirect targets: purely numeric words (FD numbers like
+         * "2" in "2>&1") and words starting with "/" after ">" (redirect
+         * destinations like "/dev/null") are not commands. */
+        int is_redirect = 1;
+        for (size_t k = 0; k < word_len; k++) {
+            if (!isdigit((unsigned char)start[k])) {
+                is_redirect = 0;
+                break;
+            }
+        }
+        if (is_redirect) {
+            /* Skip past the redirect operator */
+            while (*seg && (*seg == '>' || *seg == '<' || *seg == '&'
+                            || *seg == '!' || isdigit((unsigned char)*seg)))
+                seg++;
+            continue;
+        }
+
+        /* For allowlist matching, strip directory prefix from absolute
+         * paths: "/home/user/.local/bin/cmake" → "cmake". */
+        const char *basename = start;
+        for (const char *s = start; s < start + word_len; s++) {
+            if (*s == '/') basename = s + 1;
+        }
+        size_t base_len = word_len - (size_t)(basename - start);
+
         int allowed = 0;
         for (int i = 0; i < allowed_count; i++) {
-            if (strlen(allowed_commands[i]) == word_len &&
-                strncmp(start, allowed_commands[i], word_len) == 0) {
+            size_t alen = strlen(allowed_commands[i]);
+            if ((alen == word_len && strncmp(start, allowed_commands[i], word_len) == 0) ||
+                (alen == base_len && strncmp(basename, allowed_commands[i], base_len) == 0)) {
                 allowed = 1;
                 break;
             }
