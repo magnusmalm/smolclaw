@@ -91,6 +91,11 @@ typedef struct {
     /* Continuation nudge — prevent premature turn end */
     int nudge_count;        /* how many nudges this turn (max 1) */
 
+    /* Adaptive timeout: grace seconds added for transient errors.
+     * HTTP 0 (connection failure) and 429 (rate limit) don't consume
+     * tokens, so waiting costs nothing. Cap at 300s extra. */
+    int grace_secs;         /* accumulated grace time */
+
     /* LLM failure tracking — populated when all providers fail */
     char *failure_reason;  /* malloc'd, freed by caller */
 

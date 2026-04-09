@@ -393,9 +393,9 @@ static const char *check_turn_limits(const sc_agent_t *agent,
         return "Stopped: too many tool calls in this turn.";
     }
     if (agent->max_turn_secs > 0 &&
-        (int)(time(NULL) - tc->turn_start) > agent->max_turn_secs) {
-        SC_LOG_WARN("agent", "Turn time limit reached (%d sec)",
-                    agent->max_turn_secs);
+        (int)(time(NULL) - tc->turn_start) > agent->max_turn_secs + tc->grace_secs) {
+        SC_LOG_WARN("agent", "Turn time limit reached (%d + %d grace sec)",
+                    agent->max_turn_secs, tc->grace_secs);
         return "Stopped: turn time limit exceeded.";
     }
     if (agent->max_output_total > 0 &&
@@ -842,6 +842,24 @@ static sc_llm_response_t *call_llm_with_fallback(
     SC_LOG_ERROR("agent", "All LLM providers failed at iteration %d", iteration);
     sc_audit_log_ext("llm", "all_providers_failed", 1, 0,
                      tc->channel, tc->chat_id, "llm_fail");
+
+    /* Adaptive timeout: if all failures were transient (connection/rate
+     * issues), add grace time since no tokens were consumed.  Cap at
+     * 300s total grace to prevent infinite waiting. */
+    {
+        int all_transient = is_transient_error(primary_http);
+        for (int f = 0; f < agent->fallback_count && f < 8 && all_transient; f++)
+            if (!is_transient_error(fallback_http[f]))
+                all_transient = 0;
+        if (all_transient && tc->grace_secs < 300) {
+            int grace = 30;  /* 30s per transient failure */
+            if (tc->grace_secs + grace > 300)
+                grace = 300 - tc->grace_secs;
+            tc->grace_secs += grace;
+            SC_LOG_INFO("agent", "Adaptive timeout: +%ds grace (total %ds) "
+                        "for transient failures", grace, tc->grace_secs);
+        }
+    }
 
     /* Build failure reason for user-facing message */
     {
@@ -1821,9 +1839,9 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         }
 
         if (agent->max_turn_secs > 0 &&
-            (int)(time(NULL) - tc.turn_start) > agent->max_turn_secs) {
-            SC_LOG_WARN("agent", "Turn time limit reached after LLM call (%d sec)",
-                        agent->max_turn_secs);
+            (int)(time(NULL) - tc.turn_start) > agent->max_turn_secs + tc.grace_secs) {
+            SC_LOG_WARN("agent", "Turn time limit reached after LLM call (%d + %d grace sec)",
+                        agent->max_turn_secs, tc.grace_secs);
             final_content = sc_strdup("Stopped: turn time limit exceeded.");
             sc_llm_response_free(resp);
             break;
