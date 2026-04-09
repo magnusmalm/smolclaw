@@ -545,8 +545,35 @@ static void init_fallback_providers(sc_agent_t *agent, sc_config_t *cfg)
     }
 
     for (int i = 0; i < cfg->fallback_model_count; i++) {
-        sc_provider_t *fp = sc_provider_create_for_model(cfg,
-            cfg->fallback_models[i]);
+        sc_provider_t *fp = NULL;
+        /* If model has a provider/ prefix, use that provider.
+         * Otherwise, if the primary is a custom provider, clone it
+         * for fallbacks so they route to the same endpoint. */
+        int has_prefix = (strchr(cfg->fallback_models[i], '/') != NULL);
+        if (has_prefix) {
+            fp = sc_provider_create_for_model(cfg, cfg->fallback_models[i]);
+        } else if (cfg->custom_provider_count > 0 && cfg->provider &&
+                   agent->provider && agent->provider->clone) {
+            /* Custom provider active — fallbacks should use same endpoint */
+            int is_custom = 0;
+            for (int c = 0; c < cfg->custom_provider_count; c++) {
+                if (cfg->custom_providers[c].name &&
+                    strcmp(cfg->custom_providers[c].name, cfg->provider) == 0) {
+                    is_custom = 1;
+                    break;
+                }
+            }
+            if (is_custom) {
+                fp = agent->provider->clone(agent->provider);
+                if (fp)
+                    SC_LOG_INFO("agent", "Fallback '%s' using custom provider '%s'",
+                                cfg->fallback_models[i], cfg->provider);
+            } else {
+                fp = sc_provider_create_for_model(cfg, cfg->fallback_models[i]);
+            }
+        } else {
+            fp = sc_provider_create_for_model(cfg, cfg->fallback_models[i]);
+        }
         if (fp) {
             agent->fallback_models[agent->fallback_count] =
                 sc_strdup(sc_model_strip_prefix(cfg->fallback_models[i]));
