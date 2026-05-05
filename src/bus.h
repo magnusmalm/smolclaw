@@ -3,6 +3,7 @@
 
 #include <event2/event.h>
 #include <pthread.h>
+#include "cJSON.h"
 
 /* Inbound message (from channels to agent) */
 typedef struct {
@@ -11,6 +12,7 @@ typedef struct {
     char *chat_id;
     char *content;
     char *session_key;
+    cJSON *response_format;
 } sc_inbound_msg_t;
 
 /* Outbound message (from agent to channels) */
@@ -18,7 +20,8 @@ typedef struct {
     char *channel;
     char *chat_id;
     char *content;
-    int is_progress;   /* 1 = verbose progress update, not final response */
+    int is_progress;         /* 1 = verbose progress update, not final response */
+    int is_final_response;   /* 1 = final assistant reply for this turn */
 } sc_outbound_msg_t;
 
 /* Message handler callback */
@@ -85,7 +88,8 @@ void sc_outbound_msg_free(sc_outbound_msg_t *msg);
 /* Helper: create inbound message (all strings are copied) */
 sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
                                       const char *chat_id, const char *content,
-                                      const char *session_key);
+                                      const char *session_key,
+                                      const cJSON *response_format);
 
 /* Helper: create outbound message (all strings are copied) */
 sc_outbound_msg_t *sc_outbound_msg_new(const char *channel, const char *chat_id,

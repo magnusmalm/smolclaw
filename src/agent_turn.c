@@ -755,6 +755,9 @@ static sc_llm_response_t *call_llm_with_fallback(
     cJSON_AddNumberToObject(options, "temperature", agent->temperature);
     if (agent->provider_ctx_window > 0)
         cJSON_AddNumberToObject(options, "num_ctx", agent->provider_ctx_window);
+    if (agent->response_format)
+        cJSON_AddItemToObject(options, "response_format",
+                              cJSON_Duplicate(agent->response_format, 1));
 
     SC_LOG_INFO("agent", "Calling LLM %s via %s (iteration %d, %d messages)...",
                 model, provider->name, iteration, msgs_len);
@@ -807,8 +810,14 @@ static sc_llm_response_t *call_llm_with_fallback(
         clock_gettime(CLOCK_MONOTONIC, &fb_t0);
 
         cJSON *fb_opts = cJSON_CreateObject();
-        cJSON_AddNumberToObject(fb_opts, "max_tokens", agent->context_window);
+        cJSON_AddNumberToObject(fb_opts, "max_tokens", agent->max_tokens);
         cJSON_AddNumberToObject(fb_opts, "temperature", agent->temperature);
+        if (agent->provider_ctx_window > 0)
+            cJSON_AddNumberToObject(fb_opts, "num_ctx",
+                                    agent->provider_ctx_window);
+        if (agent->response_format)
+            cJSON_AddItemToObject(fb_opts, "response_format",
+                                  cJSON_Duplicate(agent->response_format, 1));
 
         resp = call_provider_with_retry(
             agent->fallback_providers[f], msgs, msgs_len,
@@ -1830,6 +1839,17 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                 }
             }
 
+            if (!resp->content || resp->content[0] == '\0') {
+                SC_LOG_WARN("agent",
+                            "LLM returned empty response without tool calls "
+                            "(iteration %d)", iteration);
+                free(tc.failure_reason);
+                tc.failure_reason = sc_strdup(
+                    "Stopped: model returned an empty final response.");
+                sc_llm_response_free(resp);
+                break;
+            }
+
             final_content = sc_strdup(resp->content);
             if (out_thinking && resp->thinking)
                 *out_thinking = sc_strdup(resp->thinking);
@@ -1925,6 +1945,12 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         }
 
         if (limit_hit) break;
+    }
+
+    if (!final_content && !tc.failure_reason &&
+        iteration >= agent->max_iterations) {
+        tc.failure_reason = sc_strdup(
+            "Stopped: max tool iterations reached before producing a final response.");
     }
 
     log_turn_summary(agent, model, &tc, iteration);

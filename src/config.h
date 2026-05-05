@@ -184,6 +184,7 @@ typedef struct {
     int max_tokens;
     int context_window;        /* provider context window (e.g. Ollama num_ctx), 0 = default */
     double temperature;
+    cJSON *response_format;    /* structured output schema (NULL = disabled) */
     int max_tool_iterations;
     int session_summary_threshold;
     int session_keep_last;

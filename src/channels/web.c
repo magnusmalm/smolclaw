@@ -59,6 +59,7 @@ typedef struct web_pending {
     char *request_id;
     struct evhttp_request *req;
     struct event *timeout_ev;
+    int structured_response;
     struct web_pending *next;
 } web_pending_t;
 
@@ -241,7 +242,8 @@ static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
 
 /* Add a pending request. Returns 0 on success, -1 if at capacity. */
 static int add_pending(web_data_t *wd, const char *request_id,
-                         struct evhttp_request *req)
+                         struct evhttp_request *req,
+                         int structured_response)
 {
     /* Allocate outside lock, then re-check count under lock to close
      * the TOCTOU window between capacity check and insertion. */
@@ -250,6 +252,7 @@ static int add_pending(web_data_t *wd, const char *request_id,
 
     wp->request_id = sc_strdup(request_id);
     wp->req = req;
+    wp->structured_response = structured_response;
     wp->next = NULL;
 
     /* Set timeout */
@@ -274,6 +277,22 @@ static int add_pending(web_data_t *wd, const char *request_id,
 }
 
 /* Find and remove a pending request by ID */
+static int pending_requires_final_response(web_data_t *wd,
+                                          const char *request_id)
+{
+    int structured = 0;
+
+    pthread_mutex_lock(&wd->pending_lock);
+    for (web_pending_t *cur = wd->pending_head; cur; cur = cur->next) {
+        if (strcmp(cur->request_id, request_id) == 0) {
+            structured = cur->structured_response;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&wd->pending_lock);
+    return structured;
+}
+
 static web_pending_t *take_pending(web_data_t *wd, const char *request_id)
 {
     pthread_mutex_lock(&wd->pending_lock);
@@ -351,9 +370,15 @@ static void handle_message(struct evhttp_request *req, void *arg)
 
     const char *message = sc_json_get_string(json, "message", NULL);
     const char *session = sc_json_get_string(json, "session", NULL);
+    cJSON *response_format = cJSON_GetObjectItem(json, "response_format");
     if (!message || !message[0]) {
         cJSON_Delete(json);
         send_json_error(req, 400, "Missing 'message' field");
+        return;
+    }
+    if (response_format && !cJSON_IsObject(response_format)) {
+        cJSON_Delete(json);
+        send_json_error(req, 400, "'response_format' must be an object");
         return;
     }
 
@@ -364,7 +389,7 @@ static void handle_message(struct evhttp_request *req, void *arg)
     free(rid);
 
     /* Store pending request */
-    if (add_pending(wd, request_id, req) != 0) {
+    if (add_pending(wd, request_id, req, response_format != NULL) != 0) {
         cJSON_Delete(json);
         send_json_error(req, 503, "Too many pending requests");
         return;
@@ -406,7 +431,8 @@ static void handle_message(struct evhttp_request *req, void *arg)
      * sender_id = "web" (no user auth), chat_id = request_id for response routing */
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
         SC_CHANNEL_WEB, "web", request_id,
-        full_message ? full_message : message, session_key);
+        full_message ? full_message : message, session_key,
+        response_format);
     free(full_message);
     free(session_key);
     cJSON_Delete(json);
@@ -747,6 +773,8 @@ static int web_send(sc_channel_t *self, sc_outbound_msg_t *msg)
 
     /* Skip verbose progress messages — hold the request for the final response */
     if (msg->is_progress)
+        return 0;
+    if (pending_requires_final_response(wd, msg->chat_id) && !msg->is_final_response)
         return 0;
 
     web_response_t resp;

@@ -290,6 +290,44 @@ static cJSON *build_tools_json(sc_tool_definition_t *tools, int tool_count)
     return arr;
 }
 
+static char *extract_message_content(cJSON *message)
+{
+    cJSON *content = cJSON_GetObjectItemCaseSensitive(message, "content");
+    if (!content)
+        return sc_strdup("");
+
+    if (cJSON_IsString(content) && content->valuestring)
+        return sc_strdup(content->valuestring);
+
+    if (cJSON_IsArray(content)) {
+        sc_strbuf_t buf;
+        sc_strbuf_init(&buf);
+        int n = cJSON_GetArraySize(content);
+        for (int i = 0; i < n; i++) {
+            cJSON *part = cJSON_GetArrayItem(content, i);
+            if (cJSON_IsString(part) && part->valuestring) {
+                sc_strbuf_append(&buf, part->valuestring);
+                continue;
+            }
+            if (!cJSON_IsObject(part))
+                continue;
+            const char *text = sc_json_get_string(part, "text", NULL);
+            if (!text || !text[0])
+                text = sc_json_get_string(part, "content", NULL);
+            if (!text || !text[0]) {
+                cJSON *inner = cJSON_GetObjectItemCaseSensitive(part, "text");
+                if (inner && cJSON_IsObject(inner))
+                    text = sc_json_get_string(inner, "value", NULL);
+            }
+            if (text && text[0])
+                sc_strbuf_append(&buf, text);
+        }
+        return sc_strbuf_finish(&buf);
+    }
+
+    return sc_strdup("");
+}
+
 /* Parse the OpenAI response body */
 static sc_llm_response_t *parse_response(const char *body)
 {
@@ -317,14 +355,18 @@ static sc_llm_response_t *parse_response(const char *body)
      * "reasoning_content". Extract thinking separately when both exist.
      * If "content" is null/empty, fall back to "reasoning_content" so the
      * caller gets *something* rather than a blank response. */
-    const char *content = sc_json_get_string(message, "content", NULL);
+    char *content = extract_message_content(message);
     const char *reasoning = sc_json_get_string(message, "reasoning_content", NULL);
+    if (!reasoning || !reasoning[0])
+        reasoning = sc_json_get_string(message, "reasoning", NULL);
     if (reasoning && reasoning[0]) {
         resp->thinking = sc_strdup(reasoning);
-        if (!content || !content[0])
-            content = reasoning;
+        if (!content || !content[0]) {
+            free(content);
+            content = sc_strdup(reasoning);
+        }
     }
-    resp->content = sc_strdup(content ? content : "");
+    resp->content = content ? content : sc_strdup("");
 
     /* Finish reason */
     const char *fr = sc_json_get_string(choice0, "finish_reason", "stop");

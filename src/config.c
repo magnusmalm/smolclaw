@@ -839,6 +839,13 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->max_tokens          = sc_json_get_int(defaults, "max_tokens", cfg->max_tokens);
     cfg->context_window      = sc_json_get_int(defaults, "context_window", cfg->context_window);
     cfg->temperature         = sc_json_get_double(defaults, "temperature", cfg->temperature);
+    {
+        cJSON *rf = cJSON_GetObjectItem(defaults, "response_format");
+        if (rf && cJSON_IsObject(rf)) {
+            cJSON_Delete(cfg->response_format);
+            cfg->response_format = cJSON_Duplicate(rf, 1);
+        }
+    }
     cfg->max_tool_iterations = sc_json_get_int(defaults, "max_tool_iterations",
                                                 cfg->max_tool_iterations);
     cfg->session_summary_threshold = sc_json_get_int(defaults,
@@ -1439,6 +1446,9 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     if (cfg->context_window > 0)
         cJSON_AddNumberToObject(defaults, "context_window", cfg->context_window);
     cJSON_AddNumberToObject(defaults, "temperature", cfg->temperature);
+    if (cfg->response_format)
+        cJSON_AddItemToObject(defaults, "response_format",
+                              cJSON_Duplicate(cfg->response_format, 1));
     cJSON_AddNumberToObject(defaults, "max_tool_iterations", cfg->max_tool_iterations);
     cJSON_AddNumberToObject(defaults, "session_summary_threshold", cfg->session_summary_threshold);
     cJSON_AddNumberToObject(defaults, "session_keep_last", cfg->session_keep_last);
@@ -1868,6 +1878,7 @@ void sc_config_free(sc_config_t *cfg)
     /* Notifications */
     free(cfg->notify_urls);
 
+    cJSON_Delete(cfg->response_format);
     if (cfg->raw) cJSON_Delete(cfg->raw);
 
     free(cfg);

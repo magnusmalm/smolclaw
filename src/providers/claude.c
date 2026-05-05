@@ -355,7 +355,10 @@ static sc_llm_response_t *claude_chat(sc_provider_t *self,
         cJSON *rf = cJSON_GetObjectItem(options, "response_format");
         if (rf && cJSON_IsObject(rf)) {
             cJSON *schema = cJSON_GetObjectItem(rf, "json_schema");
-            if (schema) {
+            if (schema && cJSON_IsObject(schema)) {
+                cJSON *nested = cJSON_GetObjectItem(schema, "schema");
+                if (nested && cJSON_IsObject(nested))
+                    schema = nested;
                 response_schema = cJSON_Duplicate(schema, 1);
                 structured_output = 1;
             }
@@ -636,7 +639,10 @@ static sc_llm_response_t *claude_chat_stream(sc_provider_t *self,
         cJSON *rf = cJSON_GetObjectItem(options, "response_format");
         if (rf && cJSON_IsObject(rf)) {
             cJSON *schema = cJSON_GetObjectItem(rf, "json_schema");
-            if (schema) {
+            if (schema && cJSON_IsObject(schema)) {
+                cJSON *nested = cJSON_GetObjectItem(schema, "schema");
+                if (nested && cJSON_IsObject(nested))
+                    schema = nested;
                 cJSON *tools_arr = (tools && tool_count > 0)
                     ? build_tools_json(tools, tool_count) : cJSON_CreateArray();
                 cJSON *synth = cJSON_CreateObject();

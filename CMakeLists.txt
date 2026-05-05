@@ -31,8 +31,35 @@ include(cmake/kconfig.cmake)
 
 # Local dev headers/libs extracted from packages
 set(LOCAL_DEV "/tmp/devpkgs/usr")
-set(LOCAL_DEV_INC "${LOCAL_DEV}/include" "${LOCAL_DEV}/include/x86_64-linux-gnu")
-set(LOCAL_DEV_LIB "${LOCAL_DEV}/lib/x86_64-linux-gnu")
+set(LOCAL_DEV_INC)
+set(LOCAL_DEV_LIB)
+if(EXISTS "${LOCAL_DEV}/include")
+    list(APPEND LOCAL_DEV_INC "${LOCAL_DEV}/include")
+endif()
+if(EXISTS "${LOCAL_DEV}/include/x86_64-linux-gnu")
+    list(APPEND LOCAL_DEV_INC "${LOCAL_DEV}/include/x86_64-linux-gnu")
+endif()
+if(EXISTS "${LOCAL_DEV}/lib/x86_64-linux-gnu")
+    set(LOCAL_DEV_LIB "${LOCAL_DEV}/lib/x86_64-linux-gnu")
+endif()
+
+function(reset_stale_local_dev_cache var)
+    if(NOT DEFINED ${var})
+        return()
+    endif()
+
+    set(_value "${${var}}")
+    if(NOT _value)
+        return()
+    endif()
+
+    string(FIND "${_value}" "${LOCAL_DEV}/" _local_dev_pos)
+    if(_local_dev_pos EQUAL 0 AND
+       (NOT EXISTS "${LOCAL_DEV}" OR NOT EXISTS "${_value}"))
+        unset(${var} CACHE)
+        unset(${var})
+    endif()
+endfunction()
 
 # ========================================================================
 # Dependencies - static or dynamic
@@ -94,10 +121,12 @@ elseif(SC_STATIC)
     set(CRYPTO_LIB "${SYS_STATIC}/libcrypto.a")
     set(Z_LIB "${SYS_STATIC}/libz.a")
 
+    reset_stale_local_dev_cache(EVENT_LIB)
     find_library(EVENT_LIB libevent.a PATHS ${SYS_STATIC} ${LOCAL_DEV_LIB})
     if(NOT EVENT_LIB)
         message(FATAL_ERROR "Static libevent not found")
     endif()
+    reset_stale_local_dev_cache(EVENT_OPENSSL_LIB)
     find_library(EVENT_OPENSSL_LIB libevent_openssl.a PATHS ${SYS_STATIC} ${LOCAL_DEV_LIB})
 
     # Readline + terminfo
@@ -113,25 +142,30 @@ else()
         if(EXISTS "/usr/lib/x86_64-linux-gnu/libcurl.so.4")
             set(CURL_LIB "/usr/lib/x86_64-linux-gnu/libcurl.so.4")
         else()
-            find_library(CURL_LIB curl PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+            reset_stale_local_dev_cache(CURL_LIB)
+            find_library(CURL_LIB curl PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
             if(NOT CURL_LIB)
                 set(CURL_LIB "curl")
             endif()
         endif()
     endif()
 
-    find_library(EVENT_LIB event PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+    reset_stale_local_dev_cache(EVENT_LIB)
+    find_library(EVENT_LIB event PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
     if(NOT EVENT_LIB)
         set(EVENT_LIB "event")
     endif()
-    find_library(EVENT_OPENSSL_LIB event_openssl PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+    reset_stale_local_dev_cache(EVENT_OPENSSL_LIB)
+    find_library(EVENT_OPENSSL_LIB event_openssl PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
 
     # OpenSSL needed for Discord (WebSocket TLS), IRC (optional TLS), Slack (WSS), Vault, Updater, X
     if(SC_ENABLE_DISCORD OR SC_ENABLE_IRC OR SC_ENABLE_SLACK OR SC_ENABLE_VAULT OR SC_ENABLE_UPDATER OR SC_ENABLE_X OR SC_ENABLE_X_TOOLS)
         find_package(OpenSSL QUIET)
         if(NOT OpenSSL_FOUND)
-            find_library(SSL_LIB ssl PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
-            find_library(CRYPTO_LIB crypto PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+            reset_stale_local_dev_cache(SSL_LIB)
+            reset_stale_local_dev_cache(CRYPTO_LIB)
+            find_library(SSL_LIB ssl PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
+            find_library(CRYPTO_LIB crypto PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
             if(NOT SSL_LIB)
                 set(SSL_LIB "ssl")
             endif()
@@ -141,7 +175,8 @@ else()
         endif()
     endif()
 
-    find_library(READLINE_LIB readline PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+    reset_stale_local_dev_cache(READLINE_LIB)
+    find_library(READLINE_LIB readline PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
 endif()
 
 # Generate version header from git metadata
@@ -168,18 +203,16 @@ add_custom_command(
 add_library(cjson STATIC deps/cJSON/cJSON.c)
 target_include_directories(cjson PUBLIC deps/cJSON)
 
-# Vendored SQLite (for FTS5 memory search and/or analytics)
-if(SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
-    add_library(sqlite3 STATIC deps/sqlite3/sqlite3.c)
-    target_include_directories(sqlite3 PUBLIC deps/sqlite3)
-    target_compile_definitions(sqlite3 PRIVATE
-        SQLITE_ENABLE_FTS5
-        SQLITE_THREADSAFE=1
-        SQLITE_OMIT_LOAD_EXTENSION
-        SQLITE_OMIT_DEPRECATED)
-    target_compile_options(sqlite3 PRIVATE -w)
-    target_link_libraries(sqlite3 PUBLIC m)
-endif()
+# Vendored SQLite (core host metrics/inventory, plus FTS5 when enabled)
+add_library(sqlite3 STATIC deps/sqlite3/sqlite3.c)
+target_include_directories(sqlite3 PUBLIC deps/sqlite3)
+target_compile_definitions(sqlite3 PRIVATE
+    SQLITE_ENABLE_FTS5
+    SQLITE_THREADSAFE=1
+    SQLITE_OMIT_LOAD_EXTENSION
+    SQLITE_OMIT_DEPRECATED)
+target_compile_options(sqlite3 PRIVATE -w)
+target_link_libraries(sqlite3 PUBLIC m)
 
 # ========================================================================
 # Source files — core (always compiled) + conditional features
@@ -212,6 +245,7 @@ set(SC_SOURCES
     src/agent_session.c
     src/audit.c
     src/tools/registry.c
+    src/tools/host.c
     src/tools/schema_validate.c
     src/tools/exec_common.c
     src/tools/filesystem.c
@@ -354,8 +388,10 @@ target_include_directories(smolclaw_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/deps/cJSON
     ${CMAKE_BINARY_DIR}
-    ${LOCAL_DEV_INC}
 )
+if(LOCAL_DEV_INC)
+    target_include_directories(smolclaw_lib PUBLIC ${LOCAL_DEV_INC})
+endif()
 
 if(SC_MUSL_STATIC)
     # CURL_STATICLIB needed for correct dllimport/visibility on curl headers
@@ -415,10 +451,8 @@ else()
     target_compile_definitions(smolclaw_lib PUBLIC SC_HAVE_EVENT_OPENSSL=0)
 endif()
 
-# SQLite for memory search and/or analytics (all build modes)
-if(SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
-    target_link_libraries(smolclaw_lib PUBLIC sqlite3)
-endif()
+# SQLite is a core dependency for host metrics/inventory persistence.
+target_link_libraries(smolclaw_lib PUBLIC sqlite3)
 
 # Main executable
 add_executable(smolclaw src/main.c)
@@ -549,8 +583,9 @@ elseif(SC_STATIC)
     find_library(EVENT_PTHREADS_LIB libevent_pthreads.a
         PATHS ${SYS_STATIC} ${LOCAL_DEV_LIB})
 else()
+    reset_stale_local_dev_cache(EVENT_PTHREADS_LIB)
     find_library(EVENT_PTHREADS_LIB event_pthreads
-        PATHS ${LOCAL_DEV_LIB} /usr/lib/x86_64-linux-gnu)
+        PATHS /usr/lib/x86_64-linux-gnu ${LOCAL_DEV_LIB})
 endif()
 if(EVENT_PTHREADS_LIB)
     target_link_libraries(test_providers PRIVATE ${EVENT_PTHREADS_LIB})

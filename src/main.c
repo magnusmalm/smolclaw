@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <event2/event.h>
@@ -23,11 +24,16 @@
 #include "workspace.h"
 #include "channels/manager.h"
 #include "channels/cli.h"
+#include "tools/host.h"
 #include "tools/message.h"
 #include "audit.h"
 #include "providers/factory.h"
+#include "util/sandbox.h"
 #include "util/str.h"
 #include "util/curl_common.h"
+#if SC_ENABLE_MEMORY_SEARCH
+#include "memory_index.h"
+#endif
 
 #if SC_ENABLE_CRON
 #include "cron/service.h"
@@ -203,6 +209,7 @@ static void print_help(void)
     printf("  doctor      Validate configuration and dependencies\n");
     printf("  selftest    Run doctor checks + LLM round-trip, exit 0/1\n");
     printf("              --config <path>  Use a specific config file\n");
+    printf("  host-refresh Refresh host inventory and retained metrics\n");
 #if SC_ENABLE_VAULT
     printf("  vault       Manage encrypted secret vault\n");
 #endif
@@ -250,6 +257,74 @@ static void cmd_mcp_server(void)
 }
 #endif
 
+static int cmd_host_refresh(void)
+{
+    sc_config_t *cfg = load_config_or_exit();
+    char *workspace = sc_config_workspace_path(cfg);
+    int sample_ok = 0;
+    int inventory_ok = 0;
+    int sandbox_avail = 0;
+    int landlock_ok = 0;
+    int seccomp_ok = 0;
+    const char *sandbox_status = "disabled";
+    int rc = 1;
+#if SC_ENABLE_MEMORY_SEARCH
+    sc_memory_index_t *midx = NULL;
+#endif
+
+    if (!workspace || !workspace[0]) {
+        fprintf(stderr, "Error: could not resolve workspace path\n");
+        goto done;
+    }
+
+#if SC_ENABLE_MEMORY_SEARCH
+    {
+        sc_strbuf_t db_sb;
+        sc_strbuf_init(&db_sb);
+        sc_strbuf_appendf(&db_sb, "%s/memory/search.db", workspace);
+        char *db_path = sc_strbuf_finish(&db_sb);
+        if (db_path) {
+            midx = sc_memory_index_new(db_path);
+            free(db_path);
+        }
+    }
+#endif
+
+    sample_ok = (sc_host_record_sample(workspace, 1) == 0);
+    sandbox_avail = sc_sandbox_available();
+    landlock_ok = (sandbox_avail & SC_SANDBOX_LANDLOCK) != 0;
+    seccomp_ok = (sandbox_avail & SC_SANDBOX_SECCOMP) != 0;
+    if (cfg->sandbox_enabled)
+        sandbox_status = (landlock_ok && seccomp_ok) ? "ok" : "degraded";
+    inventory_ok =
+        (sc_host_refresh_inventory_artifacts(
+             workspace,
+#if SC_ENABLE_MEMORY_SEARCH
+             midx
+#else
+             NULL
+#endif
+             ,
+             cfg->sandbox_enabled
+         ) == 0);
+
+    printf("workspace: %s\n", workspace);
+    printf("sample: %s\n", sample_ok ? "ok" : "error");
+    printf("inventory: %s\n", inventory_ok ? "ok" : "error");
+    printf("sandbox_status: %s\n", sandbox_status);
+    printf("sandbox_landlock: %s\n", landlock_ok ? "available" : "unavailable");
+    printf("sandbox_seccomp: %s\n", seccomp_ok ? "available" : "unavailable");
+    rc = (sample_ok && inventory_ok) ? 0 : 1;
+
+done:
+#if SC_ENABLE_MEMORY_SEARCH
+    sc_memory_index_free(midx);
+#endif
+    free(workspace);
+    sc_config_free(cfg);
+    return rc;
+}
+
 #if SC_ENABLE_CRON
 /* Cron handler callback — dispatches via the bus to avoid blocking the
  * event loop. The LLM call in sc_agent_process_heartbeat can take 10-60s,
@@ -278,7 +353,7 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
     SC_LOG_INFO("cron", "Dispatching cron job '%s' via bus",
                 job->name ? job->name : job->id);
     sc_inbound_msg_t *imsg = sc_inbound_msg_new(
-        SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol");
+        SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol", NULL);
     if (imsg)
         sc_bus_publish_inbound(agent->bus, imsg);
     return sc_strdup("dispatched");
@@ -1210,6 +1285,15 @@ static void doctor_check_provider(const sc_config_t *cfg, int *pass, int *fail)
     else if (strcmp(provider, "zhipu") == 0) api_key = cfg->zhipu.api_key;
     else if (strcmp(provider, "ollama") == 0) api_key = "not_required";
     else if (strcmp(provider, "vllm") == 0) api_key = cfg->vllm.api_key;
+    else {
+        for (int i = 0; i < cfg->custom_provider_count; i++) {
+            if (cfg->custom_providers[i].name &&
+                strcmp(cfg->custom_providers[i].name, provider) == 0) {
+                api_key = cfg->custom_providers[i].config.api_key;
+                break;
+            }
+        }
+    }
 
     if (api_key && api_key[0]) {
         if (strncmp(api_key, "vault://", 8) == 0) {
@@ -1630,7 +1714,7 @@ static int cmd_selftest(int argc, char **argv)
     msgs[0].tool_call_id = NULL;
 
     cJSON *options = cJSON_CreateObject();
-    cJSON_AddNumberToObject(options, "max_tokens", 16);
+    cJSON_AddNumberToObject(options, "max_tokens", 64);
     cJSON_AddNumberToObject(options, "temperature", 0.0);
 
     sc_llm_response_t *resp = provider->chat(
@@ -1694,8 +1778,22 @@ static void gateway_process_message(sc_agent_t *agent,
         sc_tool_t *mt = sc_tool_registry_get(agent->tools, "message");
         int already_sent = mt ? sc_tool_message_has_sent(mt) : 0;
 
-        if (!already_sent) {
-            sc_channel_manager_send(ch_mgr, msg->channel, msg->chat_id, response);
+        if (!already_sent || msg->response_format) {
+            if (msg->response_format && agent->bus) {
+                sc_outbound_msg_t *out = sc_outbound_msg_new(msg->channel,
+                                                             msg->chat_id,
+                                                             response);
+                if (out) {
+                    out->is_final_response = 1;
+                    sc_bus_publish_outbound(agent->bus, out);
+                } else if (!already_sent) {
+                    sc_channel_manager_send(ch_mgr, msg->channel,
+                                            msg->chat_id, response);
+                }
+            } else {
+                sc_channel_manager_send(ch_mgr, msg->channel, msg->chat_id,
+                                        response);
+            }
         }
     }
 
@@ -1727,6 +1825,8 @@ typedef struct {
     sc_updater_t *updater;
     struct event *update_timer;
 #endif
+    const char *host_sample_workspace;
+    time_t host_sample_next;
     int _unused; /* avoid empty struct */
 } gateway_services_t;
 
@@ -1758,6 +1858,12 @@ static void gateway_start_services(gateway_services_t *svc,
                                     const char *workspace)
 {
     (void)svc; (void)agent; (void)bus; (void)base; (void)cfg; (void)workspace;
+
+    svc->host_sample_workspace = workspace;
+    if (workspace && workspace[0]) {
+        sc_host_record_sample(workspace, 1);
+        svc->host_sample_next = time(NULL) + sc_host_sample_interval_sec();
+    }
 
 #if SC_ENABLE_CRON
     sc_strbuf_t cron_path;
@@ -1854,6 +1960,14 @@ static void gateway_event_loop(struct event_base *base,
         if (svc->cron)
             sc_cron_service_tick(svc->cron);
 #endif
+
+        if (svc->host_sample_workspace && svc->host_sample_next > 0) {
+            time_t now = time(NULL);
+            if (now >= svc->host_sample_next) {
+                sc_host_record_sample(svc->host_sample_workspace, 0);
+                svc->host_sample_next = now + sc_host_sample_interval_sec();
+            }
+        }
 
         sc_inbound_msg_t *msg = sc_bus_try_consume_inbound(bus);
         if (msg) {
@@ -2042,6 +2156,10 @@ int main(int argc, char **argv)
         return cmd_doctor(argc, argv);
     } else if (strcmp(command, "selftest") == 0) {
         return cmd_selftest(argc, argv);
+    } else if (strcmp(command, "host-refresh") == 0) {
+        int rc = cmd_host_refresh();
+        sc_logger_shutdown();
+        return rc;
 #if SC_ENABLE_VAULT
     } else if (strcmp(command, "vault") == 0) {
         cmd_vault(argc, argv);

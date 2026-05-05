@@ -211,8 +211,9 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
     /* Config dirs: read only */
     ll_add_path_rule(ruleset_fd, "/etc", ro);
 
-    /* /proc: read only */
+    /* Kernel/system views for read-only host introspection */
     ll_add_path_rule(ruleset_fd, "/proc", ro);
+    ll_add_path_rule(ruleset_fd, "/sys", ro);
 
     /* Device nodes */
     ll_add_path_rule(ruleset_fd, "/dev/null", dev_rw);

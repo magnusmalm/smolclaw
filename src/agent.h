@@ -34,6 +34,7 @@ typedef struct sc_agent {
     int context_window;
     int provider_ctx_window;   /* provider-level context window (e.g. Ollama num_ctx), 0 = default */
     double temperature;
+    cJSON *response_format;     /* structured output schema (NULL = disabled) */
     int max_iterations;
     int session_summary_threshold;
     int session_keep_last;

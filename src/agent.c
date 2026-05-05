@@ -23,6 +23,7 @@
 #include "audit.h"
 #include "logger.h"
 #include "tools/filesystem.h"
+#include "tools/host.h"
 #include "tools/shell.h"
 #include "tools/message.h"
 #include "tools/memory_tools.h"
@@ -98,7 +99,8 @@ static const struct { const char *name; const char *model; } builtin_aliases[] =
 static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg);
 static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
-                            const char *user_message, int no_history);
+                            const char *user_message, int no_history,
+                            const cJSON *response_format_override);
 static void update_tool_contexts(sc_agent_t *agent, const char *channel, const char *chat_id);
 
 /* Message send callback for the message tool */
@@ -107,12 +109,94 @@ static int message_send_cb(const char *channel, const char *chat_id,
 {
     sc_agent_t *agent = ctx;
     if (!agent || !agent->bus) return -1;
+    if (agent->response_format) {
+        SC_LOG_WARN("agent", "Blocking message tool during structured-output turn");
+        return -1;
+    }
 
     sc_outbound_msg_t *out = sc_outbound_msg_new(channel, chat_id, content);
     if (!out) return -1;
 
     sc_bus_publish_outbound(agent->bus, out);
     return 0;
+}
+
+static void free_tool_name_list(char **names, int count)
+{
+    if (!names) return;
+    for (int i = 0; i < count; i++)
+        free(names[i]);
+    free(names);
+}
+
+static char **dup_allowed_tool_names(sc_tool_registry_t *reg, int *out_count)
+{
+    char **names = NULL;
+
+    if (out_count) *out_count = 0;
+    if (!reg || !reg->allowed_tools || reg->allowed_count <= 0)
+        return NULL;
+
+    names = calloc((size_t)reg->allowed_count, sizeof(char *));
+    if (!names) return NULL;
+    for (int i = 0; i < reg->allowed_count; i++) {
+        names[i] = sc_strdup(reg->allowed_tools[i]);
+        if (!names[i]) {
+            free_tool_name_list(names, reg->allowed_count);
+            return NULL;
+        }
+    }
+    if (out_count) *out_count = reg->allowed_count;
+    return names;
+}
+
+static char **build_structured_output_allowlist(sc_tool_registry_t *reg, int *out_count)
+{
+    char **names = NULL;
+    int count = 0;
+    int capacity = 0;
+
+    if (out_count) *out_count = 0;
+    if (!reg) return NULL;
+
+    if (reg->allowed_tools && reg->allowed_count > 0) {
+        capacity = reg->allowed_count;
+        names = calloc((size_t)capacity, sizeof(char *));
+        if (!names) return NULL;
+        for (int i = 0; i < reg->allowed_count; i++) {
+            const char *name = reg->allowed_tools[i];
+            if (!name || strcmp(name, "message") == 0)
+                continue;
+            names[count] = sc_strdup(name);
+            if (!names[count]) {
+                free_tool_name_list(names, capacity);
+                return NULL;
+            }
+            count++;
+        }
+    } else {
+        capacity = reg->count;
+        names = calloc((size_t)capacity, sizeof(char *));
+        if (!names) return NULL;
+        for (int i = 0; i < reg->count; i++) {
+            const char *name = reg->tools[i] ? reg->tools[i]->name : NULL;
+            if (!name || strcmp(name, "message") == 0)
+                continue;
+            names[count] = sc_strdup(name);
+            if (!names[count]) {
+                free_tool_name_list(names, capacity);
+                return NULL;
+            }
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        free(names);
+        return NULL;
+    }
+    if (out_count) *out_count = count;
+    return names;
 }
 
 /* Register standalone tools (no agent dependency).
@@ -204,6 +288,11 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
 
     /* Scratchpad: persistent working notes that survive compaction */
     sc_tool_registry_register(reg, sc_tool_scratchpad_new(workspace));
+    sc_tool_registry_register(reg,
+                              sc_tool_host_status_new(workspace,
+                                                      cfg->sandbox_enabled));
+
+    sc_memory_index_t *midx = NULL;
 
     /* Memory search (FTS5 index) — standalone mode */
 #if SC_ENABLE_MEMORY_SEARCH
@@ -213,7 +302,7 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
         sc_strbuf_appendf(&db_sb, "%s/memory/search.db", workspace);
         char *db_path = sc_strbuf_finish(&db_sb);
 
-        sc_memory_index_t *midx = sc_memory_index_new(db_path);
+        midx = sc_memory_index_new(db_path);
         free(db_path);
 
         if (midx) {
@@ -241,9 +330,9 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                     };
                     sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
                         ctx_exts, 7);
-                    sc_tool_registry_register(reg,
-                        sc_tool_context_search_new(midx));
                 }
+                sc_tool_registry_register(reg,
+                    sc_tool_context_search_new(midx));
                 free(ctx_dir);
             }
             /* Note: midx ownership leaks in standalone mode —
@@ -251,6 +340,14 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
         }
     }
 #endif
+
+    sc_host_record_sample(workspace, 1);
+    sc_host_refresh_inventory_artifacts(workspace, midx,
+                                        cfg->sandbox_enabled);
+    sc_tool_registry_register(reg,
+                              sc_tool_host_inventory_new(workspace, midx,
+                                                         cfg->sandbox_enabled));
+    sc_tool_registry_register(reg, sc_tool_host_trend_new(workspace));
 
     /* Git tool */
 #if SC_ENABLE_GIT
@@ -382,6 +479,9 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     if (cfg->restrict_message_tool)
         sc_tool_message_set_restrict(msg_tool, 1);
     sc_tool_registry_register(agent->tools, msg_tool);
+    sc_tool_registry_register(agent->tools,
+                              sc_tool_host_status_new(workspace,
+                                                      cfg->sandbox_enabled));
 
     /* Memory tools */
     sc_tool_t *mem_write_tool = sc_tool_memory_write_new(workspace);
@@ -393,6 +493,8 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     /* Scratchpad: persistent working notes that survive compaction */
     sc_tool_registry_register(agent->tools, sc_tool_scratchpad_new(workspace));
 
+    sc_memory_index_t *midx = NULL;
+
     /* Memory search (FTS5 index) */
 #if SC_ENABLE_MEMORY_SEARCH
     {
@@ -401,7 +503,7 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
         sc_strbuf_appendf(&db_sb, "%s/memory/search.db", workspace);
         char *db_path = sc_strbuf_finish(&db_sb);
 
-        sc_memory_index_t *midx = sc_memory_index_new(db_path);
+        midx = sc_memory_index_new(db_path);
         free(db_path);
 
         if (midx) {
@@ -436,14 +538,23 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                     };
                     sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
                         ctx_exts, 7);
-                    sc_tool_registry_register(agent->tools,
-                        sc_tool_context_search_new(midx));
                 }
+                sc_tool_registry_register(agent->tools,
+                    sc_tool_context_search_new(midx));
                 free(ctx_dir);
             }
         }
     }
 #endif
+
+    sc_host_record_sample(workspace, 1);
+    sc_host_refresh_inventory_artifacts(workspace, midx,
+                                        cfg->sandbox_enabled);
+    sc_tool_registry_register(agent->tools,
+                               sc_tool_host_inventory_new(workspace, midx,
+                                                          cfg->sandbox_enabled));
+    sc_tool_registry_register(agent->tools,
+                               sc_tool_host_trend_new(workspace));
 
     /* Git tool + worktree isolation */
 #if SC_ENABLE_GIT
@@ -817,6 +928,8 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->context_window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
     agent->provider_ctx_window = cfg->context_window;
     agent->temperature = cfg->temperature;
+    agent->response_format = cfg->response_format
+        ? cJSON_Duplicate(cfg->response_format, 1) : NULL;
     agent->max_iterations = cfg->max_tool_iterations;
     agent->session_summary_threshold = cfg->session_summary_threshold;
     agent->session_keep_last = cfg->session_keep_last;
@@ -946,6 +1059,7 @@ void sc_agent_free(sc_agent_t *agent)
 #endif
     sc_audit_shutdown();
     free_channel_tools(agent);
+    cJSON_Delete(agent->response_format);
     free(agent->workspace);
     free(agent->model);
     free(agent->summary_model);
@@ -991,10 +1105,14 @@ int sc_agent_run(sc_agent_t *agent)
             sc_tool_t *mt = sc_tool_registry_get(agent->tools, "message");
             int already_sent = mt ? sc_tool_message_has_sent(mt) : 0;
 
-            if (!already_sent) {
+            if (!already_sent || msg->response_format) {
                 sc_outbound_msg_t *out = sc_outbound_msg_new(
                     msg->channel, msg->chat_id, response);
-                if (out) sc_bus_publish_outbound(agent->bus, out);
+                if (out) {
+                    if (msg->response_format)
+                        out->is_final_response = 1;
+                    sc_bus_publish_outbound(agent->bus, out);
+                }
             }
         }
 
@@ -1063,6 +1181,9 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->max_output_chars = cfg->max_output_chars;
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
+    cJSON_Delete(agent->response_format);
+    agent->response_format = cfg->response_format
+        ? cJSON_Duplicate(cfg->response_format, 1) : NULL;
     agent->max_tokens = cfg->max_tokens;
     agent->context_window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
     agent->provider_ctx_window = cfg->context_window;
@@ -1094,7 +1215,7 @@ char *sc_agent_process_direct(sc_agent_t *agent, const char *content,
                                const char *session_key)
 {
     const char *sk = session_key ? session_key : "cli:default";
-    return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0);
+    return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0, NULL);
 }
 
 /* Remove a directory tree recursively (rm -rf equivalent). */
@@ -1202,7 +1323,7 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
         }
     }
 
-    char *result = run_agent_loop(agent, sk, ch, cid, content, 0);
+    char *result = run_agent_loop(agent, sk, ch, cid, content, 0, NULL);
 
     /* Restore original workspace and prune old task dirs */
     if (task_ws) {
@@ -1217,7 +1338,7 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,
                                   const char *channel, const char *chat_id)
 {
-    return run_agent_loop(agent, "heartbeat", channel, chat_id, content, 1);
+    return run_agent_loop(agent, "heartbeat", channel, chat_id, content, 1, NULL);
 }
 
 /* ======================================================================
@@ -1260,7 +1381,8 @@ static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg)
     }
 
     char *result = run_agent_loop(agent, msg->session_key, msg->channel,
-                                   msg->chat_id, content, 0);
+                                   msg->chat_id, content, 0,
+                                   msg->response_format);
     free(expanded);
     return result;
 }
@@ -1377,7 +1499,8 @@ unwrap_message_tool_call(const char *content)
 
 static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
-                            const char *user_message, int no_history)
+                            const char *user_message, int no_history,
+                            const cJSON *response_format_override)
 {
     /* Reset per-turn arena — all previous arena allocations are invalid */
     if (agent->arena)
@@ -1473,11 +1596,35 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     int iterations = 0;
     char *failure_reason = NULL;
     char *final_thinking = NULL;
+    cJSON *saved_response_format = agent->response_format;
+    char **saved_allowed_tools = NULL;
+    char **structured_allowed = NULL;
+    int saved_allowed_count = 0;
+    int structured_allowed_count = 0;
+
+    if (response_format_override) {
+        saved_allowed_tools = dup_allowed_tool_names(agent->tools,
+                                                     &saved_allowed_count);
+        structured_allowed = build_structured_output_allowlist(agent->tools,
+                                                               &structured_allowed_count);
+        if (structured_allowed_count > 0) {
+            sc_tool_registry_set_allowed(agent->tools, structured_allowed,
+                                         structured_allowed_count);
+        }
+        agent->response_format = (cJSON *)response_format_override;
+    }
     char *final_content = sc_run_llm_iteration(agent, use_provider, use_model,
                                                 messages, msg_count,
                                                 session_key, channel, chat_id,
                                                 &iterations, &failure_reason,
                                                 &final_thinking);
+    if (response_format_override) {
+        sc_tool_registry_set_allowed(agent->tools, saved_allowed_tools,
+                                     saved_allowed_count);
+    }
+    agent->response_format = saved_response_format;
+    free_tool_name_list(structured_allowed, structured_allowed_count);
+    free_tool_name_list(saved_allowed_tools, saved_allowed_count);
 
     sc_llm_message_array_free(messages, msg_count);
 
