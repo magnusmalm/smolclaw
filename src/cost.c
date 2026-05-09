@@ -21,43 +21,116 @@
 
 #define COST_TAG "cost"
 
-/* ---------- Built-in pricing ($/M tokens) ---------- */
+/* ---------- Built-in pricing ($/M tokens) ----------
+ *
+ * Exact-name match only. Prefix matching previously caused gemini-2.5-flash
+ * to be billed at gemini-pro rates (16x overestimate) and similar drift on
+ * gpt-4.1-mini and grok-fast variants. Add an explicit row per model.
+ *
+ * Rates last verified: 2026-05-09. When adding a model, also bump the
+ * verification date in the comment beside the row. Local-inference models
+ * (ollama/..., lmstudio/..., vllm/...) are NOT listed here; lookup returns
+ * 0/0 and that is correct — they cost $0.
+ *
+ * Override at runtime by setting agents.defaults.pricing_overrides in
+ * config.json: {"my-model": {"prompt": 1.0, "completion": 5.0}}.
+ */
 
 typedef struct {
-    const char *prefix;  /* model name prefix to match */
+    const char *name;    /* exact model name (as reported by provider) */
     double prompt;       /* $/M input tokens */
     double completion;   /* $/M output tokens */
 } sc_pricing_entry_t;
 
 static const sc_pricing_entry_t DEFAULT_PRICING[] = {
-    /* Anthropic */
-    {"claude-opus-4",       15.0,   75.0},
-    {"claude-sonnet-4",      3.0,   15.0},
-    {"claude-haiku-4",       0.80,   4.0},
-    /* OpenAI */
-    {"gpt-4o",               2.50,  10.0},
-    {"gpt-4.1",              2.0,    8.0},
-    {"o3",                   2.50,  10.0},
-    {"o4-mini",              1.10,   4.40},
-    /* OpenRouter-prefixed models */
-    {"z-ai/glm",             0.14,   0.14},
-    {"moonshotai/kimi",      0.14,   0.28},
-    {"deepseek",             0.27,   1.10},
-    {"x-ai/grok",            3.0,   15.0},
-    {"google/gemini",        1.25,   5.0},
-    /* Raw model names (as returned by provider APIs) */
-    {"gemini",               1.25,   5.0},
-    {"glm",                  0.14,   0.14},
-    {"kimi",                 0.14,   0.28},
-    {"grok",                 3.0,   15.0},
+    /* Anthropic — direct API.
+     * Both dash and dot variants seen in the wild ("claude-sonnet-4-6" from
+     * provider, "claude-sonnet-4.6" from older config templates). */
+    {"claude-opus-4-7",                 15.0,   75.0},
+    {"claude-opus-4-6",                 15.0,   75.0},
+    {"claude-opus-4-5",                 15.0,   75.0},
+    {"claude-sonnet-4-7",                3.0,   15.0},
+    {"claude-sonnet-4-6",                3.0,   15.0},
+    {"claude-sonnet-4.6",                3.0,   15.0},
+    {"claude-sonnet-4-5",                3.0,   15.0},
+    {"claude-haiku-4-5",                 1.0,    5.0},
+    {"claude-haiku-4-5-20251001",        1.0,    5.0},
+    {"claude-haiku-4.5",                 1.0,    5.0},
+    /* OpenAI — direct API */
+    {"gpt-4.1",                          2.0,    8.0},
+    {"gpt-4.1-mini",                     0.40,   1.60},
+    {"gpt-4.1-nano",                     0.10,   0.40},
+    {"gpt-4o",                           2.50,  10.0},
+    {"gpt-4o-mini",                      0.15,   0.60},
+    {"o3",                               2.0,    8.0},
+    {"o4-mini",                          1.10,   4.40},
+    /* xAI — direct API */
+    {"grok-4",                           3.0,   15.0},
+    {"grok-4-1",                         3.0,   15.0},
+    {"grok-4-1-fast-reasoning",          0.20,   0.50},
+    {"grok-4-1-fast",                    0.20,   0.50},
+    {"grok-4-fast-reasoning",            0.20,   0.50},
+    {"grok-4-fast",                      0.20,   0.50},
+    /* Google Gemini — direct API */
+    {"gemini-2.5-flash",                 0.075,  0.30},
+    {"gemini-2.5-pro",                   1.25,   5.0},
+    {"gemini-3-flash-preview",           0.075,  0.30},
+    {"gemini-3-pro-preview",             1.25,   5.0},
+    /* OpenRouter passthrough — keep both raw and openrouter-prefixed forms */
+    {"anthropic/claude-haiku-4-5",       1.0,    5.0},
+    {"anthropic/claude-sonnet-4-6",      3.0,   15.0},
+    {"openai/gpt-4.1-mini",              0.40,   1.60},
+    {"x-ai/grok-4-1-fast-reasoning",     0.20,   0.50},
+    {"google/gemini-2.5-flash",          0.075,  0.30},
+    {"google/gemini-3-flash-preview",    0.075,  0.30},
+    {"z-ai/glm-4.6",                     0.14,   0.14},
+    {"z-ai/glm-5",                       0.14,   0.14},
+    {"z-ai/glm-5.1",                     0.14,   0.14},
+    {"glm-5",                            0.14,   0.14},
+    {"glm-5.1",                          0.14,   0.14},
+    {"moonshotai/kimi-k2",               0.14,   0.28},
+    {"moonshotai/kimi-k2.5",             0.14,   0.28},
+    {"deepseek/deepseek-chat",           0.27,   1.10},
+    {"deepseek-chat",                    0.27,   1.10},
+    {"deepseek/deepseek-v3.2",           0.27,   1.10},
+    {"deepseek-v3.2",                    0.27,   1.10},
+    /* Qwen — paid OpenRouter variants (the slash means cloud-hosted; the
+     * "qwen3.5:9b"-style colon names are local-Ollama and stay zero). */
+    {"qwen/qwen3-coder",                 0.30,   1.20},
+    {"qwen/qwen3-coder-next",            0.30,   1.20},
+    {"qwen/qwen3.6-plus",                0.40,   1.60},
+    {"qwen/qwen3.6-plus:free",           0.0,    0.0},
     /* Sentinel */
     {NULL, 0, 0}
 };
+
+/* Models we treat as known-zero-cost and never warn about:
+ *   - explicit local-inference prefixes
+ *   - any name containing ':' (Ollama tag syntax: "qwen3.5:9b", "gemma4:31b").
+ *     Cloud providers use '/' for namespacing, never ':', so ':' is a
+ *     reliable local-inference marker.
+ */
+static const char *KNOWN_ZERO_COST_PREFIXES[] = {
+    "ollama/", "lmstudio/", "vllm/", "local/", "tgi/", NULL
+};
+
+static int is_known_zero_cost(const char *model)
+{
+    if (!model) return 0;
+    if (strchr(model, ':')) return 1;
+    for (int i = 0; KNOWN_ZERO_COST_PREFIXES[i]; i++) {
+        size_t plen = strlen(KNOWN_ZERO_COST_PREFIXES[i]);
+        if (strncmp(model, KNOWN_ZERO_COST_PREFIXES[i], plen) == 0)
+            return 1;
+    }
+    return 0;
+}
 
 struct sc_cost_tracker {
     char *state_path;       /* {workspace}/state/costs.json */
     cJSON *data;            /* {"models":{...}, "total_turns":N} */
     cJSON *pricing_config;  /* borrowed from config, may be NULL */
+    cJSON *warned_models;   /* set of model names we've already warned about */
 };
 
 /* Look up pricing rate for a model. Checks config overrides first,
@@ -83,15 +156,39 @@ lookup_rate(const sc_cost_tracker_t *ct, const char *model,
         }
     }
 
-    /* Prefix-match built-in table */
-    for (int i = 0; DEFAULT_PRICING[i].prefix; i++) {
-        if (strncmp(model, DEFAULT_PRICING[i].prefix,
-                    strlen(DEFAULT_PRICING[i].prefix)) == 0) {
+    /* Exact-match built-in table */
+    for (int i = 0; DEFAULT_PRICING[i].name; i++) {
+        if (strcmp(model, DEFAULT_PRICING[i].name) == 0) {
             *out_prompt = DEFAULT_PRICING[i].prompt;
             *out_completion = DEFAULT_PRICING[i].completion;
             return;
         }
     }
+}
+
+/* Warn once per process per unknown model. Returns 1 if this is the first
+ * sighting and a warning was emitted. Suppressed for known-zero-cost
+ * (local-inference) prefixes. */
+static int warn_unknown_model_once(sc_cost_tracker_t *ct, const char *model)
+{
+    if (!ct || !model) return 0;
+    if (is_known_zero_cost(model)) return 0;
+
+    if (!ct->warned_models)
+        ct->warned_models = cJSON_CreateArray();
+
+    int n = cJSON_GetArraySize(ct->warned_models);
+    for (int i = 0; i < n; i++) {
+        cJSON *e = cJSON_GetArrayItem(ct->warned_models, i);
+        if (e && cJSON_IsString(e) && strcmp(e->valuestring, model) == 0)
+            return 0;
+    }
+    cJSON_AddItemToArray(ct->warned_models, cJSON_CreateString(model));
+    SC_LOG_WARN(COST_TAG,
+        "no pricing entry for model '%s' — recording $0; "
+        "add an exact entry to DEFAULT_PRICING in src/cost.c "
+        "or set agents.defaults.pricing_overrides in config", model);
+    return 1;
 }
 
 static double
@@ -285,6 +382,8 @@ void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
             cJSON_SetNumberValue(cost_field, model_cost);
         else
             cJSON_AddNumberToObject(entry, "estimated_cost_usd", model_cost);
+    } else {
+        warn_unknown_model_once(ct, model);
     }
 
     /* Recompute total estimated cost across all models */
@@ -427,10 +526,63 @@ void sc_cost_tracker_reset(sc_cost_tracker_t *ct)
     printf("Cost data reset.\n");
 }
 
+/* Recompute estimated_cost_usd for every model entry against the current
+ * pricing table. Use after editing DEFAULT_PRICING or pricing_overrides to
+ * retroactively correct stale costs without waiting for new traffic. */
+int sc_cost_tracker_recompute(sc_cost_tracker_t *ct)
+{
+    if (!ct || !ct->data) return -1;
+    cJSON *models = cJSON_GetObjectItem(ct->data, "models");
+    if (!models) return 0;
+
+    int changed = 0;
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, models) {
+        const char *name = entry->string;
+        if (!name) continue;
+
+        double prompt_rate = 0, completion_rate = 0;
+        lookup_rate(ct, name, &prompt_rate, &completion_rate);
+
+        cJSON *pt = cJSON_GetObjectItem(entry, "prompt_tokens");
+        cJSON *cf = cJSON_GetObjectItem(entry, "completion_tokens");
+        double model_pt = pt ? pt->valuedouble : 0;
+        double model_ct = cf ? cf->valuedouble : 0;
+
+        cJSON *cost_field = cJSON_GetObjectItem(entry, "estimated_cost_usd");
+        if (prompt_rate <= 0 && completion_rate <= 0) {
+            warn_unknown_model_once(ct, name);
+            if (cost_field) {
+                cJSON_DeleteItemFromObject(entry, "estimated_cost_usd");
+                changed++;
+            }
+            continue;
+        }
+
+        double new_cost = compute_cost(prompt_rate, completion_rate,
+                                        model_pt, model_ct);
+        if (cost_field) {
+            if (cost_field->valuedouble != new_cost) {
+                cJSON_SetNumberValue(cost_field, new_cost);
+                changed++;
+            }
+        } else {
+            cJSON_AddNumberToObject(entry, "estimated_cost_usd", new_cost);
+            changed++;
+        }
+    }
+
+    if (changed > 0 && save_json(ct->state_path, ct->data) != 0)
+        SC_LOG_WARN(COST_TAG, "Failed to save recomputed cost data");
+
+    return changed;
+}
+
 void sc_cost_tracker_free(sc_cost_tracker_t *ct)
 {
     if (!ct) return;
     free(ct->state_path);
     cJSON_Delete(ct->data);
+    cJSON_Delete(ct->warned_models);
     free(ct);
 }

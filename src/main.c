@@ -1033,19 +1033,31 @@ static void cmd_cost(int argc, char **argv)
 
     int do_reset = 0;
     int do_sessions = 0;
+    int do_recompute = 0;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--reset") == 0 || strcmp(argv[i], "-r") == 0)
             do_reset = 1;
         else if (strcmp(argv[i], "--sessions") == 0 || strcmp(argv[i], "-s") == 0)
             do_sessions = 1;
+        else if (strcmp(argv[i], "--recompute") == 0)
+            do_recompute = 1;
     }
 
-    if (do_reset)
+    if (do_reset) {
         sc_cost_tracker_reset(ct);
-    else if (do_sessions)
-        sc_cost_tracker_print_sessions(ct);
-    else
+    } else if (do_recompute) {
+        int n = sc_cost_tracker_recompute(ct);
+        if (n < 0)
+            fprintf(stderr, "Error: recompute failed\n");
+        else
+            printf("Recomputed estimated_cost_usd for %d model entr%s.\n",
+                   n, n == 1 ? "y" : "ies");
         sc_cost_tracker_print_summary(ct);
+    } else if (do_sessions) {
+        sc_cost_tracker_print_sessions(ct);
+    } else {
+        sc_cost_tracker_print_summary(ct);
+    }
 
     sc_cost_tracker_free(ct);
     sc_config_free(cfg);

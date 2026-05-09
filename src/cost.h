@@ -28,6 +28,12 @@ void sc_cost_tracker_print_sessions(sc_cost_tracker_t *ct);
 /* Reset all tracked data */
 void sc_cost_tracker_reset(sc_cost_tracker_t *ct);
 
+/* Recompute every model's estimated_cost_usd against the current pricing
+ * table (DEFAULT_PRICING + any pricing_overrides). Returns the number of
+ * entries changed, or -1 on error. Use after rate updates to retroactively
+ * correct stored costs. */
+int sc_cost_tracker_recompute(sc_cost_tracker_t *ct);
+
 /* Free tracker */
 void sc_cost_tracker_free(sc_cost_tracker_t *ct);
 
