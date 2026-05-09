@@ -63,6 +63,11 @@ typedef struct {
     int prompt_tokens;         /* cumulative across all iterations */
     int completion_tokens;     /* cumulative across all iterations */
     int last_prompt_tokens;    /* from most recent LLM call (post-transform) */
+    /* Cumulative provider-reported actual cost across all iterations of
+     * this turn. -1 means no provider has reported a cost (e.g. all calls
+     * went through Anthropic, which doesn't return usage.cost). When >= 0,
+     * the cost tracker prefers this over the rate-table estimate. */
+    double actual_cost_usd;
     time_t turn_start;
 
     /* Stuck-loop detection */

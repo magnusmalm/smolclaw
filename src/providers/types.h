@@ -28,6 +28,11 @@ typedef struct {
     int prompt_tokens;
     int completion_tokens;
     int total_tokens;
+    /* Provider-reported actual USD billed for this call. -1 means the
+     * provider didn't report it (e.g. Anthropic, raw OpenAI); cost
+     * tracker falls back to the rate-table estimate in that case.
+     * OpenRouter populates this from usage.cost. */
+    double cost_usd;
 } sc_usage_info_t;
 
 /* LLM response */

@@ -14,10 +14,20 @@ sc_cost_tracker_t *sc_cost_tracker_new(const char *workspace);
 void sc_cost_tracker_set_pricing(sc_cost_tracker_t *ct,
                                   struct cJSON *overrides);
 
-/* Record tokens for a turn */
+/* Record tokens for a turn (uses rate-table estimate for cost). */
 void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
                              const char *session_key,
                              int prompt_tokens, int completion_tokens);
+
+/* Record tokens with a provider-reported actual USD billed for this turn.
+ * Pass actual_cost_usd < 0 to skip (defaults to estimate). When supplied,
+ * accumulates actual_cost_usd into the model's cumulative actual_cost_usd
+ * field and tags cost_source as "provider"/"mixed" depending on history.
+ * The estimated_cost_usd field is also maintained for comparison. */
+void sc_cost_tracker_record_actual(sc_cost_tracker_t *ct, const char *model,
+                                    const char *session_key,
+                                    int prompt_tokens, int completion_tokens,
+                                    double actual_cost_usd);
 
 /* Print summary table to stdout */
 void sc_cost_tracker_print_summary(sc_cost_tracker_t *ct);

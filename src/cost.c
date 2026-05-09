@@ -327,6 +327,15 @@ void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
                              const char *session_key,
                              int prompt_tokens, int completion_tokens)
 {
+    sc_cost_tracker_record_actual(ct, model, session_key,
+                                   prompt_tokens, completion_tokens, -1.0);
+}
+
+void sc_cost_tracker_record_actual(sc_cost_tracker_t *ct, const char *model,
+                                    const char *session_key,
+                                    int prompt_tokens, int completion_tokens,
+                                    double actual_cost_usd)
+{
     if (!ct || !ct->data || !model) return;
     if (prompt_tokens <= 0 && completion_tokens <= 0) return;
 
@@ -403,20 +412,60 @@ void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
         warn_unknown_model_once(ct, model);
     }
 
+    /* Provider-reported actual cost (OpenRouter usage.cost). Accumulated
+     * separately so we can compare estimate vs truth. cost_source tracks
+     * whether this model has ever seen an actual: "provider" if every
+     * call had one, "estimated" if none have, "mixed" if some did. */
+    if (actual_cost_usd >= 0) {
+        cJSON *acu = cJSON_GetObjectItem(entry, "actual_cost_usd");
+        if (acu)
+            cJSON_SetNumberValue(acu, acu->valuedouble + actual_cost_usd);
+        else
+            cJSON_AddNumberToObject(entry, "actual_cost_usd", actual_cost_usd);
+
+        cJSON *src = cJSON_GetObjectItem(entry, "cost_source");
+        const char *cur = (src && cJSON_IsString(src)) ? src->valuestring : NULL;
+        const char *next = (!cur || strcmp(cur, "estimated") == 0)
+                           ? (cur ? "mixed" : "provider")
+                           : cur;  /* already "provider" or "mixed" */
+        if (src) cJSON_SetValuestring(src, next);
+        else cJSON_AddStringToObject(entry, "cost_source", next);
+    } else {
+        cJSON *src = cJSON_GetObjectItem(entry, "cost_source");
+        if (!src) {
+            cJSON_AddStringToObject(entry, "cost_source", "estimated");
+        } else if (cJSON_IsString(src) &&
+                   strcmp(src->valuestring, "provider") == 0) {
+            cJSON_SetValuestring(src, "mixed");
+        }
+    }
+
     stamp_updated(ct->data);
 
-    /* Recompute total estimated cost across all models */
-    double total_cost = 0;
+    /* Recompute totals across all models. Also surface actual_cost_usd at
+     * the top level so smolswarm can compare cost_source="provider"/"mixed"
+     * data against estimates without walking the per-model dict. */
+    double total_estimate = 0;
+    double total_actual = 0;
+    int any_actual = 0;
     cJSON *m;
     cJSON_ArrayForEach(m, models) {
         cJSON *c = cJSON_GetObjectItem(m, "estimated_cost_usd");
-        if (c) total_cost += c->valuedouble;
+        if (c) total_estimate += c->valuedouble;
+        cJSON *a = cJSON_GetObjectItem(m, "actual_cost_usd");
+        if (a) { total_actual += a->valuedouble; any_actual = 1; }
     }
     cJSON *tc_usd = cJSON_GetObjectItem(ct->data, "estimated_cost_usd");
     if (tc_usd)
-        cJSON_SetNumberValue(tc_usd, total_cost);
+        cJSON_SetNumberValue(tc_usd, total_estimate);
     else
-        cJSON_AddNumberToObject(ct->data, "estimated_cost_usd", total_cost);
+        cJSON_AddNumberToObject(ct->data, "estimated_cost_usd", total_estimate);
+
+    if (any_actual) {
+        cJSON *ta = cJSON_GetObjectItem(ct->data, "actual_cost_usd");
+        if (ta) cJSON_SetNumberValue(ta, total_actual);
+        else cJSON_AddNumberToObject(ct->data, "actual_cost_usd", total_actual);
+    }
 
     /* Save atomically */
     if (save_json(ct->state_path, ct->data) != 0)

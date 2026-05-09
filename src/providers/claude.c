@@ -221,6 +221,7 @@ static sc_llm_response_t *parse_response(const char *body)
     }
 
     sc_llm_response_t *resp = calloc(1, sizeof(sc_llm_response_t));
+    resp->usage.cost_usd = -1.0;  /* Anthropic doesn't report actual cost */
 
     /* Parse content blocks */
     cJSON *content_arr = sc_json_get_array(root, "content");
@@ -738,6 +739,7 @@ static sc_llm_response_t *claude_chat_stream(sc_provider_t *self,
 
     /* Build response */
     sc_llm_response_t *resp = calloc(1, sizeof(*resp));
+    resp->usage.cost_usd = -1.0;  /* Anthropic doesn't report actual cost */
     resp->content = sc_strbuf_finish(&sc.content);
     resp->thinking = sc_strbuf_finish(&sc.thinking);
     if (resp->thinking && resp->thinking[0] == '\0') {

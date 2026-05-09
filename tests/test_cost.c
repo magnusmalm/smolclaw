@@ -192,6 +192,68 @@ static void test_recompute_updates_top_level(void)
     cJSON_Delete(j2);
 }
 
+/* Provider-reported actuals override estimates and tag cost_source.
+ * A turn that mixes actual + estimate ends up "mixed". */
+static void test_actual_cost_tracking(void)
+{
+    char *ws = make_tmp_workspace();
+    sc_cost_tracker_t *ct = sc_cost_tracker_new(ws);
+
+    /* OpenRouter-style call returns its own cost — record_actual stores it */
+    sc_cost_tracker_record_actual(ct, "openai/gpt-4.1-mini", "s",
+                                   1000, 1000, 0.0042);
+    /* Native Anthropic call doesn't report cost — record (4-arg wrapper)
+     * leaves cost_source = "estimated" for that model */
+    sc_cost_tracker_record(ct, "claude-haiku-4-5", "s", 1000, 1000);
+    /* Same OpenRouter model used again with provider-reported cost: stays "provider" */
+    sc_cost_tracker_record_actual(ct, "openai/gpt-4.1-mini", "s",
+                                   500, 500, 0.0021);
+    sc_cost_tracker_free(ct);
+
+    cJSON *j = load_costs(ws);
+    ASSERT_NOT_NULL(j);
+
+    cJSON *models = cJSON_GetObjectItem(j, "models");
+    cJSON *m_or = cJSON_GetObjectItem(models, "openai/gpt-4.1-mini");
+    cJSON *m_an = cJSON_GetObjectItem(models, "claude-haiku-4-5");
+    ASSERT_NOT_NULL(m_or);
+    ASSERT_NOT_NULL(m_an);
+
+    cJSON *or_actual = cJSON_GetObjectItem(m_or, "actual_cost_usd");
+    cJSON *or_src = cJSON_GetObjectItem(m_or, "cost_source");
+    ASSERT_NOT_NULL(or_actual);
+    /* 0.0042 + 0.0021 = 0.0063 */
+    ASSERT(or_actual->valuedouble > 0.00629 && or_actual->valuedouble < 0.00631,
+           "openrouter actual ~0.0063");
+    ASSERT_STR_EQ(or_src->valuestring, "provider");
+
+    cJSON *an_actual = cJSON_GetObjectItem(m_an, "actual_cost_usd");
+    cJSON *an_src = cJSON_GetObjectItem(m_an, "cost_source");
+    ASSERT_NULL(an_actual);  /* never reported, no field */
+    ASSERT_STR_EQ(an_src->valuestring, "estimated");
+
+    /* Top-level actual_cost_usd reflects sum of model actuals */
+    cJSON *tcu_actual = cJSON_GetObjectItem(j, "actual_cost_usd");
+    ASSERT_NOT_NULL(tcu_actual);
+    ASSERT(tcu_actual->valuedouble > 0.00629 && tcu_actual->valuedouble < 0.00631,
+           "top-level actual ~0.0063");
+
+    cJSON_Delete(j);
+
+    /* Now record a call against the same model WITHOUT actual cost
+     * (e.g. provider failed to return usage.cost) — cost_source should
+     * downgrade from "provider" to "mixed". */
+    ct = sc_cost_tracker_new(ws);
+    sc_cost_tracker_record(ct, "openai/gpt-4.1-mini", "s", 100, 100);
+    sc_cost_tracker_free(ct);
+
+    cJSON *j2 = load_costs(ws);
+    cJSON *m_or2 = cJSON_GetObjectItem(cJSON_GetObjectItem(j2, "models"),
+                                       "openai/gpt-4.1-mini");
+    ASSERT_STR_EQ(cJSON_GetObjectItem(m_or2, "cost_source")->valuestring, "mixed");
+    cJSON_Delete(j2);
+}
+
 int main(void)
 {
     printf("Running cost tests:\n");
@@ -199,5 +261,6 @@ int main(void)
     RUN_TEST(test_local_models_zero_cost);
     RUN_TEST(test_zero_tokens_no_op);
     RUN_TEST(test_recompute_updates_top_level);
+    RUN_TEST(test_actual_cost_tracking);
     TEST_REPORT();
 }

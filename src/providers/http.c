@@ -338,6 +338,7 @@ static sc_llm_response_t *parse_response(const char *body)
     }
 
     sc_llm_response_t *resp = calloc(1, sizeof(sc_llm_response_t));
+    resp->usage.cost_usd = -1.0;  /* sentinel: provider didn't report */
 
     cJSON *choices = sc_json_get_array(root, "choices");
     if (!choices || cJSON_GetArraySize(choices) == 0) {
@@ -410,6 +411,12 @@ static sc_llm_response_t *parse_response(const char *body)
         resp->usage.prompt_tokens = sc_json_get_int(usage, "prompt_tokens", 0);
         resp->usage.completion_tokens = sc_json_get_int(usage, "completion_tokens", 0);
         resp->usage.total_tokens = sc_json_get_int(usage, "total_tokens", 0);
+        /* OpenRouter returns the actual billed USD as usage.cost — use it
+         * as ground truth instead of our rate-table estimate when present.
+         * Native OpenAI omits the field; sentinel -1 means "not reported." */
+        cJSON *cost = cJSON_GetObjectItem(usage, "cost");
+        if (cost && cJSON_IsNumber(cost))
+            resp->usage.cost_usd = cost->valuedouble;
     }
 
     cJSON_Delete(root);
@@ -792,6 +799,7 @@ static sc_llm_response_t *http_chat_stream(sc_provider_t *self,
     free(sc.tool_arg_bufs);
 
     sc_llm_response_t *resp = calloc(1, sizeof(*resp));
+    resp->usage.cost_usd = -1.0;  /* streaming path doesn't capture usage.cost yet */
     resp->content = sc_strbuf_finish(&sc.content);
     resp->tool_calls = sc.tool_calls;
     resp->tool_call_count = sc.tool_call_count;

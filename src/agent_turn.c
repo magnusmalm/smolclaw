@@ -786,6 +786,10 @@ static sc_llm_response_t *call_llm_with_fallback(
         tc->prompt_tokens += resp->usage.prompt_tokens;
         tc->completion_tokens += resp->usage.completion_tokens;
         tc->last_prompt_tokens = resp->usage.prompt_tokens;
+        if (resp->usage.cost_usd >= 0) {
+            if (tc->actual_cost_usd < 0) tc->actual_cost_usd = 0;
+            tc->actual_cost_usd += resp->usage.cost_usd;
+        }
         return resp;
     }
 
@@ -842,6 +846,10 @@ static sc_llm_response_t *call_llm_with_fallback(
             tc->prompt_tokens += resp->usage.prompt_tokens;
             tc->completion_tokens += resp->usage.completion_tokens;
             tc->last_prompt_tokens = resp->usage.prompt_tokens;
+            if (resp->usage.cost_usd >= 0) {
+                if (tc->actual_cost_usd < 0) tc->actual_cost_usd = 0;
+                tc->actual_cost_usd += resp->usage.cost_usd;
+            }
             return resp;
         }
         if (f < 8) fallback_http[f] = resp ? resp->http_status : 0;
@@ -1543,8 +1551,9 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
                      tc->channel, tc->chat_id, "turn_summary");
 
     if (agent->cost_tracker)
-        sc_cost_tracker_record(agent->cost_tracker, model, tc->session_key,
-                                tc->prompt_tokens, tc->completion_tokens);
+        sc_cost_tracker_record_actual(agent->cost_tracker, model, tc->session_key,
+                                       tc->prompt_tokens, tc->completion_tokens,
+                                       tc->actual_cost_usd);
 
     /* Report cost to smolchat for fleet-wide tracking */
     report_cost_to_smolchat(model, tc->prompt_tokens, tc->completion_tokens);
@@ -1595,6 +1604,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         .msgs_cap = msg_count + 64,
         .msgs_len = msg_count,
         .turn_start = time(NULL),
+        .actual_cost_usd = -1.0,  /* sentinel: no provider has reported */
     };
 
     tc.msgs = calloc((size_t)tc.msgs_cap, sizeof(sc_llm_message_t));
