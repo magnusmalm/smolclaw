@@ -572,6 +572,26 @@ int sc_cost_tracker_recompute(sc_cost_tracker_t *ct)
         }
     }
 
+    /* Refresh the top-level estimated_cost_usd (sum of per-model costs).
+     * smolswarm probes this single field via $.tokens.estimated_cost_usd;
+     * leaving it stale was what kept the supervisor's frozen-cost alarm
+     * firing after the rate-table fix. */
+    double total_cost = 0;
+    cJSON_ArrayForEach(entry, models) {
+        cJSON *c = cJSON_GetObjectItem(entry, "estimated_cost_usd");
+        if (c) total_cost += c->valuedouble;
+    }
+    cJSON *tc_usd = cJSON_GetObjectItem(ct->data, "estimated_cost_usd");
+    if (tc_usd) {
+        if (tc_usd->valuedouble != total_cost) {
+            cJSON_SetNumberValue(tc_usd, total_cost);
+            changed++;
+        }
+    } else {
+        cJSON_AddNumberToObject(ct->data, "estimated_cost_usd", total_cost);
+        changed++;
+    }
+
     if (changed > 0 && save_json(ct->state_path, ct->data) != 0)
         SC_LOG_WARN(COST_TAG, "Failed to save recomputed cost data");
 
