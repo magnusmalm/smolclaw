@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "util/str.h"
@@ -264,6 +265,20 @@ static int save_json(const char *path, cJSON *data)
     return ret;
 }
 
+/* Stamp the top-level last_updated_ts to the current epoch second.
+ * Consumers (smolswarm alert.c) treat a missing or stale value as
+ * "cost data is not fresh; do not fire cost_high alarms on it." */
+static void stamp_updated(cJSON *data)
+{
+    if (!data) return;
+    long ts = (long)time(NULL);
+    cJSON *e = cJSON_GetObjectItem(data, "last_updated_ts");
+    if (e)
+        cJSON_SetNumberValue(e, (double)ts);
+    else
+        cJSON_AddNumberToObject(data, "last_updated_ts", (double)ts);
+}
+
 static cJSON *init_empty_data(void)
 {
     cJSON *data = cJSON_CreateObject();
@@ -271,6 +286,8 @@ static cJSON *init_empty_data(void)
     cJSON_AddNumberToObject(data, "total_turns", 0);
     cJSON_AddNumberToObject(data, "total_prompt_tokens", 0);
     cJSON_AddNumberToObject(data, "total_completion_tokens", 0);
+    /* Initialize to 0 so a never-recorded tracker reads as not-fresh. */
+    cJSON_AddNumberToObject(data, "last_updated_ts", 0);
     return data;
 }
 
@@ -385,6 +402,8 @@ void sc_cost_tracker_record(sc_cost_tracker_t *ct, const char *model,
     } else {
         warn_unknown_model_once(ct, model);
     }
+
+    stamp_updated(ct->data);
 
     /* Recompute total estimated cost across all models */
     double total_cost = 0;
@@ -592,8 +611,11 @@ int sc_cost_tracker_recompute(sc_cost_tracker_t *ct)
         changed++;
     }
 
-    if (changed > 0 && save_json(ct->state_path, ct->data) != 0)
-        SC_LOG_WARN(COST_TAG, "Failed to save recomputed cost data");
+    if (changed > 0) {
+        stamp_updated(ct->data);
+        if (save_json(ct->state_path, ct->data) != 0)
+            SC_LOG_WARN(COST_TAG, "Failed to save recomputed cost data");
+    }
 
     return changed;
 }
