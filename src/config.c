@@ -1003,6 +1003,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
             sc_json_get_array(webcfg, "allow_from"), &cfg->web.allow_from_count);
         cfg->web.tools = sc_json_parse_string_list(
             sc_json_get_array(webcfg, "tools"), &cfg->web.tool_count);
+        cfg->web.request_timeout_secs = sc_json_get_int(webcfg,
+            "request_timeout_secs", cfg->web.request_timeout_secs);
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -1592,6 +1594,9 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
         cJSON_AddStringToObject(web_obj, "dm_policy", cfg->web.dm_policy);
     save_allow_from(web_obj, (const char *const *)cfg->web.allow_from,
                     cfg->web.allow_from_count);
+    if (cfg->web.request_timeout_secs > 0)
+        cJSON_AddNumberToObject(web_obj, "request_timeout_secs",
+                                cfg->web.request_timeout_secs);
 
     /* x */
     cJSON *x_obj = cJSON_AddObjectToObject(channels, "x");

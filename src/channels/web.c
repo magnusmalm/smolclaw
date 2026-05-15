@@ -51,7 +51,9 @@
 #include "audit.h"
 
 #define WEB_TAG "web"
-#define WEB_REQUEST_TIMEOUT 600  /* seconds — must cover multi-step delegation chains */
+#define WEB_REQUEST_TIMEOUT_DEFAULT 600  /* seconds — fallback when config and
+                                          * max_turn_secs are both unset. Must
+                                          * cover multi-step delegation chains. */
 #define WEB_MAX_PENDING     100
 
 /* Pending request entry */
@@ -92,6 +94,14 @@ typedef struct {
 
     /* Workspace path for memory access */
     char *workspace;
+
+    /* Per-request server-side timeout (seconds). Source priority:
+     *   1. channels.web.request_timeout_secs if explicitly set
+     *   2. agents.defaults.max_turn_secs + 30s grace
+     *   3. WEB_REQUEST_TIMEOUT_DEFAULT (600s)
+     * Resolved once at channel construction; rebind the agent to pick
+     * up a config change. */
+    int request_timeout_secs;
 
     /* Uptime tracking */
     time_t start_time;
@@ -256,7 +266,10 @@ static int add_pending(web_data_t *wd, const char *request_id,
     wp->next = NULL;
 
     /* Set timeout */
-    struct timeval tv = { .tv_sec = WEB_REQUEST_TIMEOUT, .tv_usec = 0 };
+    int t = wd->request_timeout_secs > 0
+            ? wd->request_timeout_secs
+            : WEB_REQUEST_TIMEOUT_DEFAULT;
+    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
     wp->timeout_ev = event_new(wd->base, -1, 0, request_timeout_cb, wp);
     if (wp->timeout_ev)
         event_add(wp->timeout_ev, &tv);
@@ -1000,6 +1013,7 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
                                ? cfg->bind_addr : "127.0.0.1");
     wd->port = cfg->port > 0 ? cfg->port : SC_DEFAULT_WEB_PORT;
     wd->auto_port = cfg->auto_port;
+    wd->request_timeout_secs = cfg->request_timeout_secs;
     wd->tls_cert = sc_strdup(cfg->tls_cert);
     wd->tls_key = sc_strdup(cfg->tls_key);
     wd->workspace = sc_strdup(workspace);

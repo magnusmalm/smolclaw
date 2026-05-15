@@ -98,6 +98,11 @@ typedef struct {
     int allow_from_count;
     char **tools;           /* per-channel tool allowlist (NULL = all) */
     int tool_count;
+    /* Per-request server-side timeout (seconds) for /api/message.
+     * 0 = derive from agents.defaults.max_turn_secs (+30s grace);
+     * if max_turn_secs is also unset, falls back to a legacy 600s constant.
+     * Must be >= max_turn_secs or the HTTP request will 504 mid-turn. */
+    int request_timeout_secs;
 } sc_web_config_t;
 
 /* Web tools config */

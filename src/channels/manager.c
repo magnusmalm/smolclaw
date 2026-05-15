@@ -189,6 +189,11 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
                                          cfg->web.allow_from_count)) {
 #endif
             SC_LOG_INFO("channels", "Initializing Web channel");
+            /* Default web request timeout to max_turn_secs + 30s grace so a
+             * long-running LLM turn doesn't 504 mid-flight. Explicit
+             * channels.web.request_timeout_secs still wins. */
+            if (cfg->web.request_timeout_secs <= 0 && cfg->max_turn_secs > 0)
+                cfg->web.request_timeout_secs = cfg->max_turn_secs + 30;
             sc_channel_t *web = sc_channel_web_new(&cfg->web, bus, cfg->workspace);
             if (web)
                 manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
