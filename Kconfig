@@ -109,9 +109,11 @@ config SC_ENABLE_CODE_GRAPH
 	bool "Code dependency graph tool"
 	default y
 	help
-	  Enable the code_graph tool for analyzing import dependencies.
-	  Regex-based extraction from JS/TS, Python, C/C++, Go, Rust.
-	  Actions: build, query, stats, cycles.
+	  Enable the code_graph tool for analyzing import dependencies and
+	  C/C++ symbols (for researcher Drill-down).
+	  Regex-based extraction from JS/TS, Python, C/C++, Go, Rust (graphs)
+	  plus lightweight C symbol extraction (funcs, structs, defines, etc.).
+	  Actions: build, query, stats, cycles, symbols (with path/name_filter).
 
 endmenu
 

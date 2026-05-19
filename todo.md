@@ -1,5 +1,13 @@
 # smolclaw TODO
 
+## xAI Grok OAuth (SuperGrok Subscription)
+
+Design doc: `docs/design/xai-grok-oauth.md` (detailed treatment of the "smol" philosophy, security model for the PKCE loopback + JWT-refresh flow using the public Grok CLI client ID, and comprehensive test coverage plan).
+
+Status: Design complete — ready for implementation.
+
+---
+
 ## Audit low-severity fixes
 
 Remaining items from the deep code audit (AUDIT_REPORT.md). All low severity.
@@ -130,3 +138,91 @@ Tool call: exec("pip install requests && python script.py")
 
 Multi-week. The HTTP client and sandbox lifecycle management are the bulk of
 the work. Testing requires a KVM-capable host with microsandbox installed.
+
+---
+
+## Signal Channel (Planned)
+
+Full design document: `docs/design/signal-channel.md`
+
+**Goal**: Add Signal as a first-class channel (DMs + groups) via external
+`signal-cli` daemon (HTTP JSON-RPC). No embedded libsignal.
+
+**Key Requirements** (from design doc):
+- External daemon only (user runs `signal-cli daemon --http` or the
+  bbernhard Docker container).
+- Full support for existing security model (`dm_policy`, `allow_from`,
+  pairing, `SC_STRICT_SECURITY`).
+- Strong preference for `uuid:...` form of sender IDs when available.
+- Polling MVP; SSE streaming planned for Phase 2.
+- Text only in MVP (attachments in Phase 3).
+
+**Security (Critical)**:
+- Dedicated bot number strongly recommended.
+- Users must back up `signal-cli` keys (`~/.local/share/signal-cli`).
+- Pairing flow must support both phone numbers and `uuid:...` entries.
+- Careful validation of all data coming from the JSON-RPC daemon.
+
+**Testing (Critical)**:
+- Primary tests use `tests/mock_http.h` to emulate the daemon.
+- Must cover: DM receive (phone + UUID), group messages, pairing challenge,
+  `allow_from` matching for both ID forms, error/backoff handling.
+- Real daemon smoke test required.
+
+**Status**: Design complete. Implementation not started.
+
+See `docs/design/signal-channel.md` for the complete plan, architecture,
+detailed component design, phased implementation checklist with day estimates,
+and draft user documentation.
+
+---
+
+## Binary size optimizations (no compression)
+
+These are the "better size wins" identified during the 2026-05 compression
+analysis. Easier than adding UPX/zstd self-decompression, and avoid the
+startup latency and AV false-positive risks of packed binaries.
+
+### Add size-optimized build configuration
+
+- Add CMake options or build type for size-optimized release:
+  - `-DCMAKE_BUILD_TYPE=MinSizeRel` or explicit `-Os` / `-Oz`
+  - Enable LTO (`-flto` or `-flto=thin`) for cross-TU dead code elimination
+  - Add `-ffunction-sections -fdata-sections -Wl,--gc-sections` to drop
+    unused functions/data at link time
+- Wire into release.yml so release binaries use the size-optimized path
+- Measure before/after on x86_64 and aarch64 (target: 10-25% reduction)
+
+**Files:** `CMakeLists.txt`, `.github/workflows/release.yml`
+
+**Effort:** 1-2 days (mostly CMake + CI validation).
+
+### Make SQLite FTS5 optional
+
+- FTS5 (full-text search) is compiled unconditionally into the vendored
+  SQLite (`SQLITE_ENABLE_FTS5` in CMakeLists.txt:210).
+- FTS5 is only used when `SC_ENABLE_MEMORY_SEARCH` is on (for
+  `memory_index.c` / `memory_search` tool).
+- Gate FTS5 behind the same Kconfig symbol so minimal builds (no memory
+  search) get a meaningfully smaller binary.
+- Verify that `memory_search` tests still pass when enabled; minimal
+  profile builds should have FTS5 symbols absent.
+
+**Files:** `CMakeLists.txt`, `Kconfig`, `configs/defconfig.minimal`
+
+**Effort:** Half-day (small CMake conditional + test matrix check).
+
+### Evaluate splitting updater into a separate binary
+
+- The self-updater (`src/updater/`) is ~2 source files but pulls in
+  cJSON + curl + OpenSSL + SHA-256 machinery even when unused.
+- Most deployments never use `SC_ENABLE_UPDATER`.
+- Investigate building a tiny `smolclaw-updater` helper (or keep it in-tree
+  but as a separate executable) that the main binary can exec when needed.
+- Requires careful atomic-replace + rollback semantics to stay safe.
+- Alternative: keep the code, but ensure it is truly dead-code-eliminated
+  in non-updater builds via the section GC flags above.
+
+**Files:** Potentially new `src/updater/main.c`, changes to CMake, docs
+
+**Effort:** 3-5 days for a clean split; less if we just rely on LTO+GC.

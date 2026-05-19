@@ -61,6 +61,7 @@
 #endif
 #if SC_ENABLE_CODE_GRAPH
 #include "tools/code_graph.h"
+#include "tools/symbol_lookup.h"
 #endif
 #if SC_ENABLE_X_TOOLS
 #include "tools/x_tools.h"
@@ -357,10 +358,12 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                                    cfg->git.push_allowed_remote_count));
 #endif
 
-    /* Code graph tool */
+    /* Code graph tool + thin symbol_lookup wrapper (Drill-down convenience) */
 #if SC_ENABLE_CODE_GRAPH
     sc_tool_registry_register(reg,
                                sc_tool_code_graph_new(workspace));
+    sc_tool_registry_register(reg,
+                               sc_tool_symbol_lookup_new(workspace));
 #endif
 
     /* Gitea tool */
@@ -566,10 +569,12 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     sc_tool_registry_register(agent->tools, sc_tool_worktree_exit_new(agent));
 #endif
 
-    /* Code graph tool */
+    /* Code graph tool + thin symbol_lookup wrapper (Drill-down convenience) */
 #if SC_ENABLE_CODE_GRAPH
     sc_tool_registry_register(agent->tools,
                                sc_tool_code_graph_new(workspace));
+    sc_tool_registry_register(agent->tools,
+                               sc_tool_symbol_lookup_new(workspace));
 #endif
 
     /* Gitea tool */
