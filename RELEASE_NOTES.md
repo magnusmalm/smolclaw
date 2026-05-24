@@ -1,5 +1,24 @@
 First stable release of smolclaw — a C11 lightweight AI agent framework.
 
+## Unreleased
+
+- **Session isolation for delegate calls** — fixes a cross-session memory
+  contamination class where a long-running agent shared by multiple
+  callers (e.g. a smolswarm fleet) could leak one delegate's consolidated
+  memory into another delegate's system prompt. Web channel sessions
+  matching a configurable glob (`channels.web.isolation_pattern`,
+  default `"wf-*"`) now run in a per-session memory namespace under
+  `{workspace}/memory/_sessions/<id>/` and skip the shared "# Memory"
+  block in the system prompt. Background cleanup reaps namespaces idle
+  longer than 24 h. See
+  [`docs/operations/session-isolation.md`](docs/operations/session-isolation.md)
+  and [`docs/design/session-isolation-plan.md`](docs/design/session-isolation-plan.md).
+- **code_graph regex fix** — POSIX ERE patterns in the Phase 3 symbol
+  extractor used PCRE-only `(?:...)` non-capturing groups; `regcomp`
+  silently failed and `extract_c_symbols` returned 0 symbols. Replaced
+  with capturing groups + updated capture-group indices. The matching
+  test_code_graph suite (broken since landing) now runs and is green.
+
 ## Highlights
 
 - **6 channels**: CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST + embedded chat UI)
