@@ -399,16 +399,16 @@ static void test_symbols_action(void)
     r = exec_tool(tool, "{\"action\":\"symbols\",\"path\":\"src\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "under 'src'") != NULL);
-    ASSERT(strstr(r->for_llm, "src/main.c") != NULL);
-    ASSERT(strstr(r->for_llm, "src/utils.c") != NULL);
+    ASSERT(strstr(r->for_llm, "under 'src'") != NULL, "scoped header");
+    ASSERT(strstr(r->for_llm, "src/main.c") != NULL,   "src/main.c listed");
+    ASSERT(strstr(r->for_llm, "src/utils.c") != NULL,  "src/utils.c listed");
     sc_tool_result_free(r);
 
     /* Single file path */
     r = exec_tool(tool, "{\"action\":\"symbols\",\"path\":\"src/main.c\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "main.c") != NULL);
+    ASSERT(strstr(r->for_llm, "main.c") != NULL, "includes main.c");
     ASSERT(strstr(r->for_llm, "utils.c") == NULL, "other file excluded");
     sc_tool_result_free(r);
 
@@ -417,8 +417,8 @@ static void test_symbols_action(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     ASSERT(strstr(r->for_llm, "(kinds='func')") != NULL, "kinds reflected in output header");
-    ASSERT(strstr(r->for_llm, "func: set_retention") != NULL);
-    ASSERT(strstr(r->for_llm, "func: helper") != NULL);
+    ASSERT(strstr(r->for_llm, "func: set_retention") != NULL, "includes func: set_retention");
+    ASSERT(strstr(r->for_llm, "func: helper") != NULL, "includes func: helper");
     ASSERT(strstr(r->for_llm, "define:") == NULL, "define filtered out by kinds");
     ASSERT(strstr(r->for_llm, "struct:") == NULL, "struct filtered out by kinds");
     sc_tool_result_free(r);
@@ -427,8 +427,8 @@ static void test_symbols_action(void)
     r = exec_tool(tool, "{\"action\":\"symbols\",\"path\":\".\",\"kinds\":\"define,struct\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "define: MAX_RETENTION") != NULL);
-    ASSERT(strstr(r->for_llm, "struct: retention_info") != NULL);
+    ASSERT(strstr(r->for_llm, "define: MAX_RETENTION") != NULL, "includes define: MAX_RETENTION");
+    ASSERT(strstr(r->for_llm, "struct: retention_info") != NULL, "includes struct: retention_info");
     ASSERT(strstr(r->for_llm, "func:") == NULL, "func filtered by multi-kinds");
     sc_tool_result_free(r);
 
@@ -466,12 +466,12 @@ static void test_symbols_kinds_combined_with_filters(void)
         "{\"action\":\"symbols\",\"path\":\".\",\"kinds\":\"func\",\"name_filter\":\"one\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "(kinds='func')") != NULL);
-    ASSERT(strstr(r->for_llm, "(name_filter='one')") != NULL);
-    ASSERT(strstr(r->for_llm, "func_one") != NULL);
+    ASSERT(strstr(r->for_llm, "(kinds='func')") != NULL, "includes (kinds='func')");
+    ASSERT(strstr(r->for_llm, "(name_filter='one')") != NULL, "includes (name_filter='one')");
+    ASSERT(strstr(r->for_llm, "func_one") != NULL, "includes func_one");
     ASSERT(strstr(r->for_llm, "func_two") == NULL, "name_filter excludes");
     ASSERT(strstr(r->for_llm, "define:") == NULL, "kinds excludes defines");
-    ASSERT(strstr(r->for_llm, "struct:") == NULL);
+    ASSERT(strstr(r->for_llm, "struct:") == NULL, "excludes struct:");
     sc_tool_result_free(r);
 
     /* kinds + max_results (truncation still possible if enough matching kinds) */
@@ -479,7 +479,7 @@ static void test_symbols_kinds_combined_with_filters(void)
         "{\"action\":\"symbols\",\"path\":\".\",\"kinds\":\"func,define\",\"max_results\":1}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "1 result") != NULL || strstr(r->for_llm, "1 results") != NULL);
+    ASSERT(strstr(r->for_llm, "1 result") != NULL || strstr(r->for_llm, "1 results") != NULL, "assertion");
     /* truncation note appears only if pre-filter hit the cap for the requested kinds */
     /* since 3 funcs+defines >1, and filter keeps some, but cap during scan, expect note if count post still >=? */
     /* In practice, with small set we mainly verify it doesn't crash and applies both */
@@ -518,10 +518,10 @@ static void test_symbol_lookup_wrapper_basic(void)
     sc_tool_result_t *r = exec_tool(tool, "{\"name\":\"wrap\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "code_graph symbols under '.'") != NULL);
-    ASSERT(strstr(r->for_llm, "define: WRAP_DEF") != NULL);
-    ASSERT(strstr(r->for_llm, "func: wrapper_func") != NULL);
-    ASSERT(strstr(r->for_llm, "struct: wrap_struct") != NULL);
+    ASSERT(strstr(r->for_llm, "code_graph symbols under '.'") != NULL, "includes code_graph symbols under '.'");
+    ASSERT(strstr(r->for_llm, "define: WRAP_DEF") != NULL, "includes define: WRAP_DEF");
+    ASSERT(strstr(r->for_llm, "func: wrapper_func") != NULL, "includes func: wrapper_func");
+    ASSERT(strstr(r->for_llm, "struct: wrap_struct") != NULL, "includes struct: wrap_struct");
     /* default max_results=30 reflected? (not in text header unless hit) */
     sc_tool_result_free(r);
 
@@ -529,8 +529,8 @@ static void test_symbol_lookup_wrapper_basic(void)
     r = exec_tool(tool, "{\"name\":\"func\",\"path\":\"src\",\"max_results\":5}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "under 'src'") != NULL);
-    ASSERT(strstr(r->for_llm, "wrapper_func") != NULL);
+    ASSERT(strstr(r->for_llm, "under 'src'") != NULL, "includes under 'src'");
+    ASSERT(strstr(r->for_llm, "wrapper_func") != NULL, "includes wrapper_func");
     sc_tool_result_free(r);
 
     /* Wrapper parameters schema */
@@ -572,8 +572,8 @@ static void test_symbol_lookup_wrapper_with_kinds(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     ASSERT(strstr(r->for_llm, "(kinds='define,struct')") != NULL, "kinds header from core");
-    ASSERT(strstr(r->for_llm, "define: ONLY_DEF") != NULL);
-    ASSERT(strstr(r->for_llm, "struct: only_struct") != NULL);
+    ASSERT(strstr(r->for_llm, "define: ONLY_DEF") != NULL, "includes define: ONLY_DEF");
+    ASSERT(strstr(r->for_llm, "struct: only_struct") != NULL, "includes struct: only_struct");
     ASSERT(strstr(r->for_llm, "func:") == NULL, "func excluded by wrapper-kinds");
     sc_tool_result_free(r);
 
@@ -581,8 +581,8 @@ static void test_symbol_lookup_wrapper_with_kinds(void)
     r = exec_tool(tool, "{\"kinds\":\"func\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "only_func") != NULL);
-    ASSERT(strstr(r->for_llm, "ONLY_DEF") == NULL);
+    ASSERT(strstr(r->for_llm, "only_func") != NULL, "includes only_func");
+    ASSERT(strstr(r->for_llm, "ONLY_DEF") == NULL, "excludes ONLY_DEF");
     sc_tool_result_free(r);
 
     tool->destroy(tool);
@@ -630,7 +630,7 @@ static void test_symbols_edge_cases(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     ASSERT(strstr(r->for_llm, "(no C symbols matched") != NULL, "empty result message");
-    ASSERT(strstr(r->for_llm, "0 result") != NULL);
+    ASSERT(strstr(r->for_llm, "0 result") != NULL, "includes 0 result");
     sc_tool_result_free(r);
 
     /* path to non-C : 0 C files scanned */
@@ -638,7 +638,7 @@ static void test_symbols_edge_cases(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     ASSERT(strstr(r->for_llm, "scanned 0 C file") != NULL, "non-C path scans 0");
-    ASSERT(strstr(r->for_llm, "0 result") != NULL);
+    ASSERT(strstr(r->for_llm, "0 result") != NULL, "includes 0 result");
     sc_tool_result_free(r);
 
     /* single binary .c should also yield 0 */
@@ -646,7 +646,7 @@ static void test_symbols_edge_cases(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     /* still 0 C because binary skipped */
-    ASSERT(strstr(r->for_llm, "0 result") != NULL || strstr(r->for_llm, "scanned 0") != NULL);
+    ASSERT(strstr(r->for_llm, "0 result") != NULL || strstr(r->for_llm, "scanned 0") != NULL, "assertion");
     sc_tool_result_free(r);
 
     /* truncation note when kinds filter active: create enough funcs to hit cap, then filter to funcs */
@@ -663,8 +663,8 @@ static void test_symbols_edge_cases(void)
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
     ASSERT(strstr(r->for_llm, "truncated at max_results=2") != NULL, "truncation note with kinds active");
-    ASSERT(strstr(r->for_llm, "f1") != NULL);
-    ASSERT(strstr(r->for_llm, "f2") != NULL);
+    ASSERT(strstr(r->for_llm, "f1") != NULL, "includes f1");
+    ASSERT(strstr(r->for_llm, "f2") != NULL, "includes f2");
     ASSERT(strstr(r->for_llm, "f3") == NULL, "capped");
     sc_tool_result_free(r);
 
@@ -672,8 +672,8 @@ static void test_symbols_edge_cases(void)
     r = exec_tool(tool, "{\"action\":\"symbols\",\"path\":\".\",\"kinds\":\"enum\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "0 result") != NULL);
-    ASSERT(strstr(r->for_llm, "enum") != NULL || strstr(r->for_llm, "no C symbols") != NULL);
+    ASSERT(strstr(r->for_llm, "0 result") != NULL, "includes 0 result");
+    ASSERT(strstr(r->for_llm, "enum") != NULL || strstr(r->for_llm, "no C symbols") != NULL, "assertion");
     sc_tool_result_free(r);
 
     tool->destroy(tool);
@@ -716,8 +716,8 @@ static void test_symbol_lookup_set_workspace(void)
     sc_tool_result_t *r = exec_tool(tool, "{\"name\":\"dir1\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "from_dir1_symbol") != NULL);
-    ASSERT(strstr(r->for_llm, "from_dir2_symbol") == NULL);
+    ASSERT(strstr(r->for_llm, "from_dir1_symbol") != NULL, "includes from_dir1_symbol");
+    ASSERT(strstr(r->for_llm, "from_dir2_symbol") == NULL, "excludes from_dir2_symbol");
     sc_tool_result_free(r);
 
     /* switch workspace */
@@ -727,7 +727,7 @@ static void test_symbol_lookup_set_workspace(void)
     r = exec_tool(tool, "{\"name\":\"dir2\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "from_dir2_symbol") != NULL);
+    ASSERT(strstr(r->for_llm, "from_dir2_symbol") != NULL, "includes from_dir2_symbol");
     ASSERT(strstr(r->for_llm, "from_dir1_symbol") == NULL, "old ws no longer active");
     sc_tool_result_free(r);
 
@@ -736,7 +736,7 @@ static void test_symbol_lookup_set_workspace(void)
     cg->set_workspace(cg, dir2);
     r = exec_tool(cg, "{\"action\":\"symbols\",\"path\":\".\",\"name_filter\":\"dir2\"}");
     ASSERT_NOT_NULL(r);
-    ASSERT(strstr(r->for_llm, "from_dir2_symbol") != NULL);
+    ASSERT(strstr(r->for_llm, "from_dir2_symbol") != NULL, "includes from_dir2_symbol");
     sc_tool_result_free(r);
     cg->destroy(cg);
 
@@ -779,8 +779,8 @@ static void test_symbol_lookup_kinds_set_workspace_and_unsupported(void)
     sc_tool_result_t *r = exec_tool(sl, "{\"kinds\":\"func\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "dir1_func") != NULL);
-    ASSERT(strstr(r->for_llm, "DIR1_DEF") == NULL);
+    ASSERT(strstr(r->for_llm, "dir1_func") != NULL, "includes dir1_func");
+    ASSERT(strstr(r->for_llm, "DIR1_DEF") == NULL, "excludes DIR1_DEF");
     sc_tool_result_free(r);
 
     /* switch workspace */
@@ -790,7 +790,7 @@ static void test_symbol_lookup_kinds_set_workspace_and_unsupported(void)
     r = exec_tool(sl, "{\"kinds\":\"define\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "DIR2_DEF") != NULL);
+    ASSERT(strstr(r->for_llm, "DIR2_DEF") != NULL, "includes DIR2_DEF");
     ASSERT(strstr(r->for_llm, "dir2_func") == NULL, "func excluded by kinds after switch");
     sc_tool_result_free(r);
 
@@ -798,14 +798,14 @@ static void test_symbol_lookup_kinds_set_workspace_and_unsupported(void)
     r = exec_tool(sl, "{\"kinds\":\"typedef,enum\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "0 result") != NULL || strstr(r->for_llm, "no C symbols matched") != NULL);
+    ASSERT(strstr(r->for_llm, "0 result") != NULL || strstr(r->for_llm, "no C symbols matched") != NULL, "assertion");
     sc_tool_result_free(r);
 
     /* integration: kinds + name_filter via wrapper after switch */
     r = exec_tool(sl, "{\"name\":\"DIR2\",\"kinds\":\"define\"}");
     ASSERT_NOT_NULL(r);
     ASSERT_INT_EQ(r->is_error, 0);
-    ASSERT(strstr(r->for_llm, "DIR2_DEF") != NULL);
+    ASSERT(strstr(r->for_llm, "DIR2_DEF") != NULL, "includes DIR2_DEF");
     sc_tool_result_free(r);
 
     sl->destroy(sl);

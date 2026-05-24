@@ -219,14 +219,15 @@ static int compile_symbol_patterns(code_graph_t *g)
     /* #define FOO ... or #define FOO(x) ...  -> capture name */
     err |= regcomp(&g->re_c_define,
         "^[ \t]*#[ \t]*define[ \t]+([A-Za-z_][A-Za-z0-9_]*)", REG_EXTENDED | REG_NEWLINE);
-    /* struct Foo or typedef struct Foo */
+    /* struct Foo or typedef struct Foo.
+     * POSIX ERE has no non-capturing (?:) — uses plain (). Name is group 2. */
     err |= regcomp(&g->re_c_struct,
-        "^[ \t]*(?:typedef[ \t]+)?struct[ \t]+([A-Za-z_][A-Za-z0-9_]*)", REG_EXTENDED | REG_NEWLINE);
+        "^[ \t]*(typedef[ \t]+)?struct[ \t]+([A-Za-z_][A-Za-z0-9_]*)", REG_EXTENDED | REG_NEWLINE);
     /* Approximate C function definition (common smol* style).
-     * Captures last identifier before ( as the function name.
-     * Limitations documented in code_graph.md (future) and output. */
+     * Captures last identifier before ( as the function name (group 4 in POSIX ERE
+     * — the inner alternation gets its own implicit group). */
     err |= regcomp(&g->re_c_func_def,
-        "^[ \t]*((?:static|inline|extern|const|unsigned|signed|void|int|char|short|long|float|double|size_t|uint[0-9]+_t|int[0-9]+_t|bool)[ \t]+)*([A-Za-z_][A-Za-z0-9_ \t\\*]+)[ \t]+([A-Za-z_][A-Za-z0-9_]+)[ \t]*\\(",
+        "^[ \t]*((static|inline|extern|const|unsigned|signed|void|int|char|short|long|float|double|size_t|uint[0-9]+_t|int[0-9]+_t|bool)[ \t]+)*([A-Za-z_][A-Za-z0-9_ \t\\*]+)[ \t]+([A-Za-z_][A-Za-z0-9_]+)[ \t]*\\(",
         REG_EXTENDED | REG_NEWLINE);
     if (err) return -1;
     g->symbol_patterns_compiled = 1;
@@ -391,13 +392,14 @@ static int extract_c_symbols(code_graph_t *g, const char *content,
             }
         }
 
-        /* struct NAME */
+        /* struct NAME — name is capture group 2 (group 1 = optional "typedef ") */
+        regmatch_t ms[3];
         if (local_count < max_syms &&
-            regexec(&g->re_c_struct, linebuf, 2, m, 0) == 0 && m[1].rm_so >= 0) {
-            int nlen = m[1].rm_eo - m[1].rm_so;
+            regexec(&g->re_c_struct, linebuf, 3, ms, 0) == 0 && ms[2].rm_so >= 0) {
+            int nlen = ms[2].rm_eo - ms[2].rm_so;
             if (nlen > 0 && nlen < MAX_SYMBOL_NAME-1) {
                 char namebuf[MAX_SYMBOL_NAME];
-                memcpy(namebuf, linebuf + m[1].rm_so, (size_t)nlen);
+                memcpy(namebuf, linebuf + ms[2].rm_so, (size_t)nlen);
                 namebuf[nlen] = '\0';
                 if (!name_filter || !name_filter[0] || stristr(namebuf, name_filter)) {
                     cg_symbol_t *s = &symbols[local_count];
@@ -413,19 +415,21 @@ static int extract_c_symbols(code_graph_t *g, const char *content,
             }
         }
 
-        /* func definition (name in group 3) */
+        /* func definition — name is capture group 4 (groups 1+2 = optional return-type
+         * tokens, group 3 = trailing return type). POSIX ERE inserts an implicit group
+         * for the alternation inside group 1. */
         if (local_count < max_syms) {
-            regmatch_t mf[4];
-            if (regexec(&g->re_c_func_def, linebuf, 4, mf, 0) == 0 && mf[3].rm_so >= 0) {
-                int nlen = mf[3].rm_eo - mf[3].rm_so;
+            regmatch_t mf[5];
+            if (regexec(&g->re_c_func_def, linebuf, 5, mf, 0) == 0 && mf[4].rm_so >= 0) {
+                int nlen = mf[4].rm_eo - mf[4].rm_so;
                 if (nlen > 0 && nlen < MAX_SYMBOL_NAME-1) {
                     char namebuf[MAX_SYMBOL_NAME];
-                    memcpy(namebuf, linebuf + mf[3].rm_so, (size_t)nlen);
+                    memcpy(namebuf, linebuf + mf[4].rm_so, (size_t)nlen);
                     namebuf[nlen] = '\0';
                     if (!name_filter || !name_filter[0] || stristr(namebuf, name_filter)) {
                         /* sig approx: line up to first ) after the name */
                         char sigbuf[MAX_SYMBOL_SIG];
-                        const char *after_name = linebuf + mf[3].rm_so;
+                        const char *after_name = linebuf + mf[4].rm_so;
                         const char *rparen = strchr(after_name, ')');
                         int siglen;
                         if (rparen) {
