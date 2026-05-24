@@ -101,7 +101,8 @@ static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg);
 static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
                             const char *user_message, int no_history,
-                            const cJSON *response_format_override);
+                            const cJSON *response_format_override,
+                            int isolated, const char *namespace_id);
 static void update_tool_contexts(sc_agent_t *agent, const char *channel, const char *chat_id);
 
 /* Message send callback for the message tool */
@@ -1220,7 +1221,8 @@ char *sc_agent_process_direct(sc_agent_t *agent, const char *content,
                                const char *session_key)
 {
     const char *sk = session_key ? session_key : "cli:default";
-    return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0, NULL);
+    return run_agent_loop(agent, sk, SC_CHANNEL_CLI, "direct", content, 0, NULL,
+                          /* isolated */ 0, /* namespace_id */ NULL);
 }
 
 /* Remove a directory tree recursively (rm -rf equivalent). */
@@ -1328,7 +1330,8 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
         }
     }
 
-    char *result = run_agent_loop(agent, sk, ch, cid, content, 0, NULL);
+    char *result = run_agent_loop(agent, sk, ch, cid, content, 0, NULL,
+                                   /* isolated */ 0, /* namespace_id */ NULL);
 
     /* Restore original workspace and prune old task dirs */
     if (task_ws) {
@@ -1343,7 +1346,20 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,
                                   const char *channel, const char *chat_id)
 {
-    return run_agent_loop(agent, "heartbeat", channel, chat_id, content, 1, NULL);
+    return run_agent_loop(agent, "heartbeat", channel, chat_id, content, 1, NULL,
+                          /* isolated */ 0, /* namespace_id */ NULL);
+}
+
+char *sc_agent_process_isolated(sc_agent_t *agent, const char *content,
+                                 const char *session_key,
+                                 const char *channel, const char *chat_id,
+                                 const char *namespace_id)
+{
+    const char *sk  = session_key ? session_key : "isolated:default";
+    const char *ch  = channel     ? channel     : SC_CHANNEL_CLI;
+    const char *cid = chat_id     ? chat_id     : "direct";
+    return run_agent_loop(agent, sk, ch, cid, content, 0, NULL,
+                          /* isolated */ 1, namespace_id);
 }
 
 /* ======================================================================
@@ -1387,7 +1403,8 @@ static char *process_message(sc_agent_t *agent, sc_inbound_msg_t *msg)
 
     char *result = run_agent_loop(agent, msg->session_key, msg->channel,
                                    msg->chat_id, content, 0,
-                                   msg->response_format);
+                                   msg->response_format,
+                                   msg->isolated, msg->namespace_id);
     free(expanded);
     return result;
 }
@@ -1505,11 +1522,44 @@ unwrap_message_tool_call(const char *content)
 static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                             const char *channel, const char *chat_id,
                             const char *user_message, int no_history,
-                            const cJSON *response_format_override)
+                            const cJSON *response_format_override,
+                            int isolated, const char *namespace_id)
 {
     /* Reset per-turn arena — all previous arena allocations are invalid */
     if (agent->arena)
         sc_arena_reset(agent->arena);
+
+    /* Defensive: isolated requires a namespace_id. Treat the malformed
+     * combination as non-isolated so downstream code can take its normal
+     * path. See docs/design/session-isolation-plan.md §6. */
+    if (isolated && (!namespace_id || !namespace_id[0])) {
+        SC_LOG_WARN("agent",
+            "run_agent_loop: isolated=1 with no namespace_id; running shared");
+        isolated = 0;
+    }
+
+    /* For isolated turns we build a fresh per-turn context_builder so the
+     * system prompt omits shared workspace memory. The agent's persistent
+     * context_builder (with shared memory) is left untouched. */
+    sc_context_builder_t *turn_cb = isolated
+        ? sc_context_builder_new_isolated(agent->workspace, namespace_id)
+        : NULL;
+    if (isolated && !turn_cb) {
+        SC_LOG_WARN("agent",
+            "run_agent_loop: failed to build isolated context (ns='%s'); "
+            "falling back to shared", namespace_id);
+        isolated = 0;
+    }
+    /* From this point on, `effective_cb` is what builds the system prompt
+     * for this turn. */
+    sc_context_builder_t *effective_cb = turn_cb
+        ? turn_cb : agent->context_builder;
+    /* Pass tools/skills to the per-turn builder so its system prompt
+     * matches what the agent advertises. */
+    if (turn_cb) {
+        sc_context_builder_set_tools(turn_cb, agent->tools);
+        sc_context_builder_set_skills(turn_cb, agent->skills);
+    }
 
     /* Record last channel for heartbeat routing (skip internal channels) */
     if (channel && chat_id && !sc_is_internal_channel(channel)) {
@@ -1556,14 +1606,16 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     /* Build messages */
     int msg_count = 0;
     sc_llm_message_t *messages = sc_context_build_messages(
-        agent->context_builder,
+        effective_cb,
         history, history_count,
         summary, actual_message,
         channel, chat_id,
         &msg_count);
 
-    if (!messages)
+    if (!messages) {
+        sc_context_builder_free(turn_cb);
         return sc_strdup("Error: failed to build context messages.");
+    }
 
     /* Apply context transforms */
     if (agent->transform_count > 0) {
@@ -1591,8 +1643,10 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         }
     }
 
-    if (!messages)
+    if (!messages) {
+        sc_context_builder_free(turn_cb);
         return sc_strdup("Error: failed to build context messages.");
+    }
 
     /* Save user message to session (stripped of alias prefix) */
     sc_session_add_message(agent->sessions, session_key, "user", actual_message);
@@ -1622,7 +1676,8 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                                                 messages, msg_count,
                                                 session_key, channel, chat_id,
                                                 &iterations, &failure_reason,
-                                                &final_thinking);
+                                                &final_thinking,
+                                                isolated, namespace_id);
     if (response_format_override) {
         sc_tool_registry_set_allowed(agent->tools, saved_allowed_tools,
                                      saved_allowed_count);
@@ -1678,7 +1733,11 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     sc_session_save(agent->sessions, session_key);
 
     if (!no_history)
-        sc_maybe_summarize(agent, session_key);
+        sc_maybe_summarize(agent, session_key, isolated, namespace_id);
+
+    /* Per-turn isolated builder (if any) owns memory + namespace allocs;
+     * release before returning. */
+    sc_context_builder_free(turn_cb);
 
     char *preview = sc_truncate(final_content, 120);
     SC_LOG_INFO("agent", "Response (%d iterations): %s", iterations, preview ? preview : "");

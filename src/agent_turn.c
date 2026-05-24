@@ -1579,7 +1579,8 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
                            int *out_iterations, char **out_failure_reason,
-                           char **out_thinking)
+                           char **out_thinking,
+                           int isolated, const char *namespace_id)
 {
     if (out_thinking) *out_thinking = NULL;
     sc_audit_set_model(model);
@@ -1653,7 +1654,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             SC_LOG_INFO("agent", "Auto-compacting: %d tokens / %d window (%.0f%%)",
                         tc.last_prompt_tokens, agent->context_window,
                         100.0 * tc.last_prompt_tokens / agent->context_window);
-            sc_maybe_summarize(agent, session_key);
+            sc_maybe_summarize(agent, session_key, isolated, namespace_id);
         } else if (agent->compact_consecutive_failures >= 3 &&
                    iteration > 1 && tc.last_prompt_tokens > 0 &&
                    agent->context_window > 0 &&

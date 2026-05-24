@@ -116,6 +116,17 @@ char *sc_agent_process_channel(sc_agent_t *agent, const char *content,
 char *sc_agent_process_heartbeat(sc_agent_t *agent, const char *content,
                                   const char *channel, const char *chat_id);
 
+/* Isolated session processing (Phase 4). Runs the message in an ephemeral
+ * memory namespace keyed by namespace_id, so per-session consolidation
+ * and post-compact scratchpad never touch the agent's shared workspace
+ * memory. See docs/design/session-isolation-plan.md. namespace_id must
+ * be non-empty [A-Za-z0-9_-]; otherwise the call falls back to shared
+ * behavior with a logged warning. */
+char *sc_agent_process_isolated(sc_agent_t *agent, const char *content,
+                                 const char *session_key,
+                                 const char *channel, const char *chat_id,
+                                 const char *namespace_id);
+
 /* Register additional tool */
 void sc_agent_register_tool(sc_agent_t *agent, sc_tool_t *tool);
 

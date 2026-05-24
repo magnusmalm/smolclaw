@@ -40,6 +40,13 @@ typedef struct {
     int memory_consolidation;
     int summary_max_transcript;
     int context_window;
+    /* Session-isolation routing (Phase 4): when isolated == 1 the
+     * consolidation and post-compact reinjection use a namespaced
+     * sc_memory_t and per-session scratchpad rather than the workspace
+     * shared paths. namespace_id must be set when isolated == 1.
+     * See docs/design/session-isolation-plan.md. */
+    int isolated;
+    char *namespace_id;          /* copied; non-NULL iff isolated == 1 */
     /* Result — written by thread, read by main thread after join */
     char *result_summary;        /* NULL if summarization failed */
 } sc_summarize_args_t;
@@ -54,6 +61,7 @@ static void free_summarize_args(sc_summarize_args_t *args)
     free(args->session_key);
     free(args->transcript);
     free(args->existing_summary);
+    free(args->namespace_id);
     free(args->result_summary);
     free(args);
 }
@@ -89,7 +97,9 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
 
     if (resp && resp->content && resp->content[0] &&
         strncmp(resp->content, "NONE", 4) != 0) {
-        sc_memory_t *mem = sc_memory_new(args->workspace);
+        sc_memory_t *mem = (args->isolated && args->namespace_id)
+            ? sc_memory_new_namespaced(args->workspace, args->namespace_id)
+            : sc_memory_new(args->workspace);
         if (mem) {
             sc_strbuf_t sb;
             sc_strbuf_init(&sb);
@@ -276,8 +286,14 @@ void sc_drain_summarize(sc_agent_t *agent)
             sc_strbuf_append(&reinject,
                 "[Session compacted. Key context re-injected below.]\n\n");
 
-            /* Re-read long-term memory */
-            sc_memory_t *mem = sc_memory_new(args->workspace);
+            /* Re-read long-term memory.
+             * In isolated sessions sc_memory_read_long_term() returns NULL
+             * (per design §6.2), so the "## Memory" block is skipped — the
+             * delegate task's instructions and the per-session scratchpad
+             * carry the relevant context instead. */
+            sc_memory_t *mem = (args->isolated && args->namespace_id)
+                ? sc_memory_new_namespaced(args->workspace, args->namespace_id)
+                : sc_memory_new(args->workspace);
             if (mem) {
                 char *memory = sc_memory_read_long_term(mem);
                 if (memory && memory[0]) {
@@ -306,11 +322,19 @@ void sc_drain_summarize(sc_agent_t *agent)
                 free(bootstrap);
             }
 
-            /* Re-read scratchpad (working notes that survive compaction) */
+            /* Re-read scratchpad (working notes that survive compaction).
+             * In isolated sessions use the per-session scratchpad path so
+             * one delegate's notes never re-inject into another's compaction. */
             if (args->workspace) {
                 char sp_path[1024];
-                snprintf(sp_path, sizeof(sp_path),
-                         "%s/state/scratchpad.md", args->workspace);
+                if (args->isolated && args->namespace_id) {
+                    snprintf(sp_path, sizeof(sp_path),
+                             "%s/memory/_sessions/%s/scratchpad.md",
+                             args->workspace, args->namespace_id);
+                } else {
+                    snprintf(sp_path, sizeof(sp_path),
+                             "%s/state/scratchpad.md", args->workspace);
+                }
                 FILE *sp_f = fopen(sp_path, "r");
                 if (sp_f) {
                     fseek(sp_f, 0, SEEK_END);
@@ -382,10 +406,21 @@ static int score_msg_density(const sc_llm_message_t *msg)
     return score;
 }
 
-void sc_maybe_summarize(sc_agent_t *agent, const char *session_key)
+void sc_maybe_summarize(sc_agent_t *agent, const char *session_key,
+                        int isolated, const char *namespace_id)
 {
     /* Drain previous summarization thread if still active */
     apply_summarize_result(agent);
+
+    /* Defensive: isolated requires a namespace_id. If callers set
+     * isolated=1 without an id, fall back to shared so consolidation
+     * doesn't write nowhere. */
+    if (isolated && (!namespace_id || !namespace_id[0])) {
+        SC_LOG_WARN("agent",
+            "sc_maybe_summarize called with isolated=1 but no namespace_id; "
+            "falling back to shared memory");
+        isolated = 0;
+    }
 
     int count = 0;
     sc_llm_message_t *history = sc_session_get_history(agent->sessions,
@@ -548,6 +583,8 @@ build_done:
     args->memory_consolidation = agent->memory_consolidation;
     args->summary_max_transcript = agent->summary_max_transcript;
     args->context_window = agent->context_window;
+    args->isolated = isolated;
+    args->namespace_id = isolated ? sc_strdup(namespace_id) : NULL;
 
     /* Clone provider for thread isolation */
     if (agent->provider->clone) {

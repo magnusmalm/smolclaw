@@ -13,6 +13,13 @@ typedef struct {
     char *content;
     char *session_key;
     cJSON *response_format;
+    /* Session isolation (Phase 4): when isolated == 1 the agent runs this
+     * message in an ephemeral memory namespace identified by namespace_id.
+     * See docs/design/session-isolation-plan.md. The channel that produced
+     * the message is responsible for setting both fields (or leaving them
+     * 0/NULL for shared-memory behavior). */
+    int isolated;
+    char *namespace_id;
 } sc_inbound_msg_t;
 
 /* Outbound message (from agent to channels) */
@@ -85,11 +92,19 @@ void sc_bus_flush_outbound(sc_bus_t *bus);
 void sc_inbound_msg_free(sc_inbound_msg_t *msg);
 void sc_outbound_msg_free(sc_outbound_msg_t *msg);
 
-/* Helper: create inbound message (all strings are copied) */
+/* Helper: create inbound message (all strings are copied).
+ *
+ * `isolated` enables ephemeral session-memory isolation (see
+ * docs/design/session-isolation-plan.md). When isolated is non-zero,
+ * `namespace_id` must be a non-empty [A-Za-z0-9_-] string; it identifies
+ * the per-session memory bucket. Pass isolated=0 and namespace_id=NULL
+ * for the standard shared-memory behavior. */
 sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
                                       const char *chat_id, const char *content,
                                       const char *session_key,
-                                      const cJSON *response_format);
+                                      const cJSON *response_format,
+                                      int isolated,
+                                      const char *namespace_id);
 
 /* Helper: create outbound message (all strings are copied) */
 sc_outbound_msg_t *sc_outbound_msg_new(const char *channel, const char *chat_id,

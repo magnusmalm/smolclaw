@@ -353,7 +353,8 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
     SC_LOG_INFO("cron", "Dispatching cron job '%s' via bus",
                 job->name ? job->name : job->id);
     sc_inbound_msg_t *imsg = sc_inbound_msg_new(
-        SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol", NULL);
+        SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol", NULL,
+        /* isolated */ 0, /* namespace_id */ NULL);
     if (imsg)
         sc_bus_publish_inbound(agent->bus, imsg);
     return sc_strdup("dispatched");

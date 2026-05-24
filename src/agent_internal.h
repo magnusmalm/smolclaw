@@ -121,12 +121,20 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            int msg_count, const char *session_key,
                            const char *channel, const char *chat_id,
                            int *out_iterations, char **out_failure_reason,
-                           char **out_thinking);
+                           char **out_thinking,
+                           int isolated, const char *namespace_id);
 
 /* ---------- agent_session.c ---------- */
 
-/* Summarize session if over threshold, then consolidate to long-term memory */
-void sc_maybe_summarize(sc_agent_t *agent, const char *session_key);
+/* Summarize session if over threshold, then consolidate to long-term memory.
+ *
+ * Phase 4 isolation: when isolated == 1 and namespace_id is non-NULL,
+ * consolidation writes to the per-session memory namespace and the
+ * post-compact reinjection reads the per-session scratchpad rather than
+ * the workspace shared ones. Callers from non-isolated paths should pass
+ * isolated=0, namespace_id=NULL. */
+void sc_maybe_summarize(sc_agent_t *agent, const char *session_key,
+                        int isolated, const char *namespace_id);
 
 /* Drain any pending async summarization thread and apply its result.
  * Safe to call when no thread is active (no-op). */

@@ -198,7 +198,8 @@ void sc_channel_handle_message(sc_channel_t *ch, const char *sender_id,
     char *session_key = sc_strbuf_finish(&sb);
 
     sc_inbound_msg_t *msg = sc_inbound_msg_new(
-        ch->name, sender_id, chat_id, content, session_key, NULL);
+        ch->name, sender_id, chat_id, content, session_key, NULL,
+        /* isolated */ 0, /* namespace_id */ NULL);
     free(session_key);
 
     if (msg) {

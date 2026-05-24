@@ -490,6 +490,7 @@ set(TEST_SOURCES
     tests/test_memory_tools.c
     tests/test_memory_namespaced.c
     tests/test_context_isolation.c
+    tests/test_session_isolation.c
     tests/test_curl_common.c
     tests/test_cost.c
 )

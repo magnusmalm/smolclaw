@@ -270,7 +270,9 @@ void sc_bus_flush_outbound(sc_bus_t *bus)
 sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
                                       const char *chat_id, const char *content,
                                       const char *session_key,
-                                      const cJSON *response_format)
+                                      const cJSON *response_format,
+                                      int isolated,
+                                      const char *namespace_id)
 {
     sc_inbound_msg_t *msg = calloc(1, sizeof(*msg));
     if (!msg) return NULL;
@@ -282,6 +284,9 @@ sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
     msg->session_key = sc_strdup(session_key);
     msg->response_format = response_format
         ? cJSON_Duplicate((cJSON *)response_format, 1) : NULL;
+    msg->isolated = isolated ? 1 : 0;
+    msg->namespace_id = (msg->isolated && namespace_id)
+        ? sc_strdup(namespace_id) : NULL;
 
     return msg;
 }
@@ -307,6 +312,7 @@ void sc_inbound_msg_free(sc_inbound_msg_t *msg)
     free(msg->chat_id);
     free(msg->content);
     free(msg->session_key);
+    free(msg->namespace_id);
     cJSON_Delete(msg->response_format);
     free(msg);
 }

@@ -442,10 +442,12 @@ static void handle_message(struct evhttp_request *req, void *arg)
 
     /* Publish inbound message to bus.
      * sender_id = "web" (no user auth), chat_id = request_id for response routing */
+    /* Isolation flag is wired in Stage 5 (web pattern matching).
+     * For now pass 0/NULL — identical to pre-isolation behavior. */
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
         SC_CHANNEL_WEB, "web", request_id,
         full_message ? full_message : message, session_key,
-        response_format);
+        response_format, /* isolated */ 0, /* namespace_id */ NULL);
     free(full_message);
     free(session_key);
     cJSON_Delete(json);
