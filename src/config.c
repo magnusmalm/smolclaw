@@ -602,6 +602,7 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_str(&cfg->web.tls_cert,         "SMOLCLAW_WEB_TLS_CERT");
     env_override_str(&cfg->web.tls_key,          "SMOLCLAW_WEB_TLS_KEY");
     env_override_str(&cfg->web.dm_policy,        "SMOLCLAW_CHANNELS_WEB_DM_POLICY");
+    env_override_str(&cfg->web.isolation_pattern, "SMOLCLAW_CHANNELS_WEB_ISOLATION_PATTERN");
 
     env_override_bool(&cfg->x.enabled,            "SMOLCLAW_CHANNELS_X_ENABLED");
     env_override_str(&cfg->x.consumer_key,        "SMOLCLAW_CHANNELS_X_CONSUMER_KEY");
@@ -772,6 +773,9 @@ sc_config_t *sc_config_default(void)
     cfg->web.bind_addr = sc_strdup("127.0.0.1");
     cfg->web.port = SC_DEFAULT_WEB_PORT;
     cfg->web.dm_policy = sc_strdup(default_dm);
+    /* Session isolation: opt-in to smolswarm delegate convention by default.
+     * Set to "" or NULL in config to disable. */
+    cfg->web.isolation_pattern = sc_strdup("wf-*");
 
     /* Web tools */
     cfg->web_tools.brave_enabled      = 0;
@@ -1005,6 +1009,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
             sc_json_get_array(webcfg, "tools"), &cfg->web.tool_count);
         cfg->web.request_timeout_secs = sc_json_get_int(webcfg,
             "request_timeout_secs", cfg->web.request_timeout_secs);
+        override_str_field(&cfg->web.isolation_pattern, webcfg,
+                           "isolation_pattern");
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -1597,6 +1603,9 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
     if (cfg->web.request_timeout_secs > 0)
         cJSON_AddNumberToObject(web_obj, "request_timeout_secs",
                                 cfg->web.request_timeout_secs);
+    if (cfg->web.isolation_pattern)
+        cJSON_AddStringToObject(web_obj, "isolation_pattern",
+                                cfg->web.isolation_pattern);
 
     /* x */
     cJSON *x_obj = cJSON_AddObjectToObject(channels, "x");
@@ -1826,6 +1835,7 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->web.tls_cert);
     free(cfg->web.tls_key);
     free(cfg->web.dm_policy);
+    free(cfg->web.isolation_pattern);
     for (int i = 0; i < cfg->web.allow_from_count; i++)
         free(cfg->web.allow_from[i]);
     free(cfg->web.allow_from);

@@ -44,6 +44,7 @@
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #endif
+#include "util/glob.h"
 #include "util/str.h"
 #include "util/uuid.h"
 #include "util/json_helpers.h"
@@ -103,6 +104,11 @@ typedef struct {
      * up a config change. */
     int request_timeout_secs;
 
+    /* Session-isolation glob (Phase 4). If non-NULL/non-empty and a
+     * request's `session` field matches, the inbound message is marked
+     * isolated. See docs/design/session-isolation-plan.md. */
+    char *isolation_pattern;
+
     /* Uptime tracking */
     time_t start_time;
 
@@ -110,6 +116,27 @@ typedef struct {
     SSL_CTX *ssl_ctx;
 #endif
 } web_data_t;
+
+int sc_web_compute_isolation(const char *pattern,
+                              const char *session_name,
+                              const char *session_key,
+                              char out_ns_id[17])
+{
+    if (out_ns_id) out_ns_id[0] = '\0';
+    if (!pattern || !pattern[0]) return 0;
+    if (!session_name || !session_key || !out_ns_id) return 0;
+    if (!sc_glob_match(pattern, session_name)) return 0;
+
+    sc_sha256_ctx_t ctx;
+    sc_sha256_init(&ctx);
+    sc_sha256_update(&ctx, (const uint8_t *)session_key, strlen(session_key));
+    uint8_t hash[32];
+    sc_sha256_final(&ctx, hash);
+    for (int i = 0; i < 8; i++)
+        snprintf(out_ns_id + i * 2, 3, "%02x", hash[i]);
+    out_ns_id[16] = '\0';
+    return 1;
+}
 
 /* Check if address is loopback (safe for plaintext HTTP) */
 static int is_loopback_addr(const char *addr)
@@ -442,12 +469,15 @@ static void handle_message(struct evhttp_request *req, void *arg)
 
     /* Publish inbound message to bus.
      * sender_id = "web" (no user auth), chat_id = request_id for response routing */
-    /* Isolation flag is wired in Stage 5 (web pattern matching).
-     * For now pass 0/NULL — identical to pre-isolation behavior. */
+    /* Session-isolation routing (see sc_web_compute_isolation in web.h). */
+    char ns_id[17];
+    int isolated = sc_web_compute_isolation(wd->isolation_pattern, sess_name,
+                                             session_key, ns_id);
+
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
         SC_CHANNEL_WEB, "web", request_id,
         full_message ? full_message : message, session_key,
-        response_format, /* isolated */ 0, /* namespace_id */ NULL);
+        response_format, isolated, isolated ? ns_id : NULL);
     free(full_message);
     free(session_key);
     cJSON_Delete(json);
@@ -988,6 +1018,7 @@ static void web_destroy(sc_channel_t *self)
         if (wd->ssl_ctx) SSL_CTX_free(wd->ssl_ctx);
 #endif
         free(wd->bearer_token);
+        free(wd->isolation_pattern);
         free(wd->bind_addr);
         free(wd->tls_cert);
         free(wd->tls_key);
@@ -1011,6 +1042,8 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
     if (!wd) { free(ch); return NULL; }
 
     wd->bearer_token = sc_strdup(cfg->bearer_token);
+    wd->isolation_pattern = (cfg->isolation_pattern && cfg->isolation_pattern[0])
+        ? sc_strdup(cfg->isolation_pattern) : NULL;
     wd->bind_addr = sc_strdup(cfg->bind_addr && cfg->bind_addr[0]
                                ? cfg->bind_addr : "127.0.0.1");
     wd->port = cfg->port > 0 ? cfg->port : SC_DEFAULT_WEB_PORT;

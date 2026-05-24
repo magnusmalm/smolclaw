@@ -495,6 +495,10 @@ set(TEST_SOURCES
     tests/test_cost.c
 )
 
+if(SC_ENABLE_WEB)
+    list(APPEND TEST_SOURCES tests/test_web_isolation.c)
+endif()
+
 if(SC_ENABLE_STREAMING)
     list(APPEND TEST_SOURCES tests/test_sse.c)
 endif()

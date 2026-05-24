@@ -8,4 +8,17 @@
 sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
                                   const char *workspace);
 
+/* Phase 4 isolation helper, exposed for unit testing.
+ *
+ * Decides whether a given inbound web request should run with isolated
+ * session memory. If `pattern` is non-empty and `session_name` matches
+ * the glob, computes a stable namespace_id from `session_key` (SHA-256
+ * truncated to 16 hex digits, plus terminator — out_ns_id must be at
+ * least 17 bytes) and returns 1. Otherwise returns 0 and leaves out_ns_id
+ * as an empty string. See docs/design/session-isolation-plan.md §6.5. */
+int sc_web_compute_isolation(const char *pattern,
+                              const char *session_name,
+                              const char *session_key,
+                              char out_ns_id[17]);
+
 #endif /* SC_CHANNEL_WEB_H */
