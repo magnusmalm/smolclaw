@@ -488,6 +488,7 @@ set(TEST_SOURCES
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_memory_tools.c
+    tests/test_memory_namespaced.c
     tests/test_curl_common.c
     tests/test_cost.c
 )
