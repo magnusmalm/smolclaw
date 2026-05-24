@@ -28,6 +28,8 @@ struct sc_context_builder {
     sc_memory_t *memory;
     sc_tool_registry_t *tools;
     sc_skill_registry_t *skills;  /* borrowed */
+    int is_isolated;              /* 1 = skip shared memory block in system prompt */
+    char *namespace_id;           /* set in isolated mode; NULL otherwise */
 };
 
 sc_context_builder_t *sc_context_builder_new(const char *workspace)
@@ -42,11 +44,38 @@ sc_context_builder_t *sc_context_builder_new(const char *workspace)
     return cb;
 }
 
+sc_context_builder_t *sc_context_builder_new_isolated(const char *workspace,
+                                                       const char *namespace_id)
+{
+    if (!workspace) return NULL;
+
+    sc_memory_t *mem = sc_memory_new_namespaced(workspace, namespace_id);
+    if (!mem) return NULL;  /* invalid namespace_id */
+
+    sc_context_builder_t *cb = calloc(1, sizeof(*cb));
+    if (!cb) {
+        sc_memory_free(mem);
+        return NULL;
+    }
+
+    cb->workspace = sc_strdup(workspace);
+    cb->memory = mem;
+    cb->is_isolated = 1;
+    cb->namespace_id = sc_strdup(namespace_id);
+    return cb;
+}
+
+int sc_context_builder_is_isolated(const sc_context_builder_t *cb)
+{
+    return cb && cb->is_isolated;
+}
+
 void sc_context_builder_free(sc_context_builder_t *cb)
 {
     if (!cb) return;
     free(cb->workspace);
     sc_memory_free(cb->memory);
+    free(cb->namespace_id);
     /* tools registry is borrowed, not owned */
     free(cb);
 }
@@ -88,8 +117,15 @@ static char *build_identity(const sc_context_builder_t *cb)
     sc_strbuf_appendf(&sb, "## Current Time\n%s\n\n", timebuf);
     sc_strbuf_appendf(&sb, "## Runtime\n%s %s, C11\n\n", sysname, machine);
     sc_strbuf_appendf(&sb, "## Workspace\nYour workspace is at: %s\n", cb->workspace);
-    sc_strbuf_appendf(&sb, "- Memory: %s/memory/MEMORY.md\n", cb->workspace);
-    sc_strbuf_appendf(&sb, "- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md\n\n", cb->workspace);
+    if (cb->is_isolated) {
+        sc_strbuf_append(&sb,
+            "- This is an isolated session: shared memory/daily notes are not "
+            "available. Treat each turn as starting from the task prompt and "
+            "your tools, not from prior session memory.\n\n");
+    } else {
+        sc_strbuf_appendf(&sb, "- Memory: %s/memory/MEMORY.md\n", cb->workspace);
+        sc_strbuf_appendf(&sb, "- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md\n\n", cb->workspace);
+    }
 
     /* Tools section */
     if (cb->tools) {
@@ -184,8 +220,11 @@ char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
     }
     free(bootstrap);
 
-    /* Memory context — CDATA-wrapped to isolate user-influenced data */
-    if (cb->memory) {
+    /* Memory context — CDATA-wrapped to isolate user-influenced data.
+     * Skipped entirely in isolated sessions: per-session memory exists for
+     * consolidation/post-compact reinjection bookkeeping, not for prompt
+     * priming. See docs/design/session-isolation-plan.md §6.3. */
+    if (cb->memory && !cb->is_isolated) {
         char *mem_ctx = sc_memory_get_context(cb->memory);
         if (mem_ctx && mem_ctx[0] != '\0') {
             char *redacted = sc_redact_secrets(mem_ctx);

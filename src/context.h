@@ -46,6 +46,21 @@ typedef struct {
 
 /* Create/destroy */
 sc_context_builder_t *sc_context_builder_new(const char *workspace);
+
+/* Isolated constructor for ephemeral delegate sessions. Creates a
+ * context builder whose memory is namespaced (sc_memory_new_namespaced)
+ * and whose system prompt omits the shared "# Memory" block entirely.
+ * The agent's identity, bootstrap files, skills, and tool list are still
+ * included — those are part of the agent's persistent self.
+ *
+ * See docs/design/session-isolation-plan.md §6.3. Returns NULL if
+ * namespace_id is invalid (must be non-empty [A-Za-z0-9_-]). */
+sc_context_builder_t *sc_context_builder_new_isolated(const char *workspace,
+                                                       const char *namespace_id);
+
+/* Returns 1 if the builder was created via the isolated constructor. */
+int sc_context_builder_is_isolated(const sc_context_builder_t *cb);
+
 void sc_context_builder_free(sc_context_builder_t *cb);
 
 /* Set tools registry for dynamic tool summaries */
