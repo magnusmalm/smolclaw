@@ -403,6 +403,102 @@ static void test_shared_system_prompt_includes_memory(void)
     destroy_fixture(&fx);
 }
 
+static void test_cleanup_tick_reaps_stale_isolated_sessions(void)
+{
+    fixture_t fx = create_fixture();
+
+    /* Force the cleanup to fire on the next run_agent_loop and treat
+     * every isolated session dir as stale. tick=1 is fine because
+     * last_isolation_cleanup starts at 0 (initialized by calloc), so the
+     * elapsed check trivially passes on first call. */
+    fx.agent->isolation_cleanup_tick_secs = 1;
+    fx.agent->isolation_ttl_secs          = 0;  /* any age qualifies */
+    fx.agent->session_summary_threshold   = 100; /* no summarize noise */
+
+    /* Pre-create a fake stale isolated session dir under the workspace. */
+    char ses_dir[512];
+    snprintf(ses_dir, sizeof(ses_dir),
+             "%s/memory/_sessions/stalesess1", fx.tmpdir);
+    char *dup = sc_strdup(ses_dir);
+    /* mkdir -p */
+    for (char *p = dup + 1; *p; p++) {
+        if (*p == '/') { *p = '\0'; mkdir(dup, 0755); *p = '/'; }
+    }
+    mkdir(dup, 0755);
+    free(dup);
+    char la_path[600];
+    snprintf(la_path, sizeof(la_path), "%s/last_access", ses_dir);
+    write_text(la_path, "1\n");  /* far in the past */
+
+    ASSERT(path_exists(ses_dir), "stale session dir exists before tick");
+
+    /* Process any non-isolated message to drive the cleanup hook. */
+    fx.mpd->responses[0] = (canned_response_t){
+        .content = "ok", .finish_reason = "end_turn",
+    };
+    fx.mpd->response_count = 1;
+    char *r = sc_agent_process_direct(fx.agent, "ping", "cleanup-trigger");
+    ASSERT_NOT_NULL(r);
+    free(r);
+
+    ASSERT(!path_exists(ses_dir),
+           "cleanup tick removed the stale isolated session dir");
+
+    /* last_isolation_cleanup epoch should be set so a subsequent run
+     * within the tick window does NOT re-fire (it can't observe much,
+     * but we can at least assert the field moved). */
+    ASSERT(fx.agent->last_isolation_cleanup > 0,
+           "last_isolation_cleanup epoch recorded");
+
+    destroy_fixture(&fx);
+}
+
+static void test_cleanup_tick_skipped_within_window(void)
+{
+    fixture_t fx = create_fixture();
+
+    /* Long tick → cleanup must NOT fire on the second message. */
+    fx.agent->isolation_cleanup_tick_secs = 3600;
+    fx.agent->isolation_ttl_secs          = 0;
+    fx.agent->session_summary_threshold   = 100;
+
+    fx.mpd->responses[0] = (canned_response_t){
+        .content = "ok", .finish_reason = "end_turn",
+    };
+    fx.mpd->responses[1] = (canned_response_t){
+        .content = "ok2", .finish_reason = "end_turn",
+    };
+    fx.mpd->response_count = 2;
+
+    char *r1 = sc_agent_process_direct(fx.agent, "ping1", "cleanup-window");
+    ASSERT_NOT_NULL(r1); free(r1);
+    time_t first_cleanup = fx.agent->last_isolation_cleanup;
+    ASSERT(first_cleanup > 0, "first run set last_isolation_cleanup");
+
+    /* Plant a stale dir now (after the first cleanup ran). */
+    char ses_dir[512];
+    snprintf(ses_dir, sizeof(ses_dir),
+             "%s/memory/_sessions/recent01", fx.tmpdir);
+    char *dup = sc_strdup(ses_dir);
+    for (char *p = dup + 1; *p; p++) {
+        if (*p == '/') { *p = '\0'; mkdir(dup, 0755); *p = '/'; }
+    }
+    mkdir(dup, 0755);
+    free(dup);
+    char la_path[600];
+    snprintf(la_path, sizeof(la_path), "%s/last_access", ses_dir);
+    write_text(la_path, "1\n");
+
+    /* Second call should NOT trigger cleanup (within the 3600s window). */
+    char *r2 = sc_agent_process_direct(fx.agent, "ping2", "cleanup-window");
+    ASSERT_NOT_NULL(r2); free(r2);
+    ASSERT_INT_EQ((int)fx.agent->last_isolation_cleanup, (int)first_cleanup);
+    ASSERT(path_exists(ses_dir),
+           "stale dir survived because second cleanup tick was suppressed");
+
+    destroy_fixture(&fx);
+}
+
 static void test_isolated_with_null_ns_falls_back_to_shared(void)
 {
     fixture_t fx = create_fixture();
@@ -439,5 +535,7 @@ int main(void)
     RUN_TEST(test_isolated_system_prompt_has_no_shared_memory);
     RUN_TEST(test_shared_system_prompt_includes_memory);
     RUN_TEST(test_isolated_with_null_ns_falls_back_to_shared);
+    RUN_TEST(test_cleanup_tick_reaps_stale_isolated_sessions);
+    RUN_TEST(test_cleanup_tick_skipped_within_window);
     TEST_REPORT();
 }

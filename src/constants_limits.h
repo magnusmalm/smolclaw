@@ -37,6 +37,13 @@
 #define SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR 200
 #define SC_DEFAULT_MAX_TOKENS_PER_HOUR    0  /* 0 = unlimited */
 
+/* Session-isolation maintenance (Phase 4):
+ *   TTL: stale isolated session dirs older than this get reaped.
+ *   TICK: how often the agent checks for staleness.
+ * Both can be overridden per-agent for tests via sc_agent_t fields. */
+#define SC_ISOLATION_TTL_SECS_DEFAULT          (24 * 60 * 60)   /* 24 hours */
+#define SC_ISOLATION_CLEANUP_TICK_SECS_DEFAULT (60 * 60)        /* 1 hour */
+
 /* Gateway rate limiting */
 #define SC_DEFAULT_RATE_LIMIT_PER_MINUTE   20
 

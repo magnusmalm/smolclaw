@@ -927,6 +927,8 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->bus = bus;
     agent->provider = provider;
     agent->workspace = workspace;
+    agent->isolation_cleanup_tick_secs = SC_ISOLATION_CLEANUP_TICK_SECS_DEFAULT;
+    agent->isolation_ttl_secs          = SC_ISOLATION_TTL_SECS_DEFAULT;
     agent->model = sc_strdup(sc_model_strip_prefix(cfg->model));
     agent->summary_model = cfg->summary_model
         ? sc_strdup(sc_model_strip_prefix(cfg->summary_model)) : NULL;
@@ -1528,6 +1530,24 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     /* Reset per-turn arena — all previous arena allocations are invalid */
     if (agent->arena)
         sc_arena_reset(agent->arena);
+
+    /* Periodic isolation-session cleanup tick. Cheap (one opendir + a
+     * handful of stats per stale entry) and runs on the agent thread so
+     * there are no extra threading concerns. At most one cleanup per
+     * isolation_cleanup_tick_secs. */
+    if (agent->workspace && agent->isolation_cleanup_tick_secs > 0) {
+        time_t now = time(NULL);
+        if (now - agent->last_isolation_cleanup >=
+                agent->isolation_cleanup_tick_secs) {
+            int removed = sc_memory_cleanup_sessions(agent->workspace,
+                                                      agent->isolation_ttl_secs);
+            if (removed > 0)
+                SC_LOG_INFO("agent",
+                    "Isolation cleanup: pruned %d stale session dir(s)",
+                    removed);
+            agent->last_isolation_cleanup = now;
+        }
+    }
 
     /* Defensive: isolated requires a namespace_id. Treat the malformed
      * combination as non-isolated so downstream code can take its normal

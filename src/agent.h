@@ -93,6 +93,17 @@ typedef struct sc_agent {
     sc_context_transform_t *transforms;
     int transform_count;
     int transform_cap;
+    /* Phase 4 isolation maintenance: epoch of the last sc_memory_cleanup_sessions
+     * tick. Checked on every inbound message; if more than
+     * isolation_cleanup_tick_secs has elapsed, the cleanup runs and this is
+     * refreshed. Both fields default to 0 (cleanup runs on first message after
+     * agent start). isolation_cleanup_tick_secs / isolation_ttl_secs can be
+     * overridden by tests; the production defaults are
+     * SC_ISOLATION_CLEANUP_TICK_SECS_DEFAULT and SC_ISOLATION_TTL_SECS_DEFAULT
+     * (constants_limits.h). */
+    time_t last_isolation_cleanup;
+    int isolation_cleanup_tick_secs;
+    int isolation_ttl_secs;
 } sc_agent_t;
 
 /* Create agent loop */
