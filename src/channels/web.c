@@ -473,6 +473,9 @@ static void handle_message(struct evhttp_request *req, void *arg)
     char ns_id[17];
     int isolated = sc_web_compute_isolation(wd->isolation_pattern, sess_name,
                                              session_key, ns_id);
+    if (isolated)
+        SC_LOG_DEBUG("web", "isolated session='%s' ns='%s'",
+                     sess_name ? sess_name : "(null)", ns_id);
 
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
         SC_CHANNEL_WEB, "web", request_id,

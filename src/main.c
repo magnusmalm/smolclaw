@@ -1775,6 +1775,12 @@ static void gateway_process_message(sc_agent_t *agent,
     char *response = NULL;
     if (msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0) {
         SC_LOG_INFO("gateway", "System message received");
+    } else if (msg->isolated && msg->namespace_id) {
+        /* Phase 4 isolation: route through the isolated entry so per-session
+         * memory and post-compact scratchpad land in the namespaced bucket. */
+        response = sc_agent_process_isolated(agent, msg->content, msg->session_key,
+                                              msg->channel, msg->chat_id,
+                                              msg->namespace_id);
     } else {
         response = sc_agent_process_channel(agent, msg->content, msg->session_key,
                                                   msg->channel, msg->chat_id);
