@@ -20,6 +20,7 @@
 #include "logger.h"
 #include "agent.h"
 #include "bus.h"
+#include "gateway_route.h"
 #include "pairing.h"
 #include "workspace.h"
 #include "channels/manager.h"
@@ -1775,9 +1776,11 @@ static void gateway_process_message(sc_agent_t *agent,
     char *response = NULL;
     if (msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0) {
         SC_LOG_INFO("gateway", "System message received");
-    } else if (msg->isolated && msg->namespace_id) {
+    } else if (sc_gateway_should_isolate(msg)) {
         /* Phase 4 isolation: route through the isolated entry so per-session
-         * memory and post-compact scratchpad land in the namespaced bucket. */
+         * memory and post-compact scratchpad land in the namespaced bucket.
+         * Decision helper in gateway_route.h, exercised by
+         * tests/test_gateway_routing.c. */
         response = sc_agent_process_isolated(agent, msg->content, msg->session_key,
                                               msg->channel, msg->chat_id,
                                               msg->namespace_id);
