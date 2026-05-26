@@ -20,6 +20,15 @@ typedef struct {
      * 0/NULL for shared-memory behavior). */
     int isolated;
     char *namespace_id;
+
+    /* Per-turn tool-workspace override (Phase 5). When set and safe,
+     * gateway_process_message swaps the tool registry's workspace to
+     * <agent->workspace>/<run_repo_dir> for the duration of this turn,
+     * then restores it. Used to keep delegate tools (read_file, list_dir,
+     * exec, git) scoped to the current run's repo checkout so the model
+     * can't browse stale workspace state (e.g. workspace/runs/<other>/,
+     * workspace/smolchat/). NULL = no override, tools see full workspace. */
+    char *run_repo_dir;
 } sc_inbound_msg_t;
 
 /* Outbound message (from agent to channels) */
@@ -98,13 +107,19 @@ void sc_outbound_msg_free(sc_outbound_msg_t *msg);
  * docs/design/session-isolation-plan.md). When isolated is non-zero,
  * `namespace_id` must be a non-empty [A-Za-z0-9_-] string; it identifies
  * the per-session memory bucket. Pass isolated=0 and namespace_id=NULL
- * for the standard shared-memory behavior. */
+ * for the standard shared-memory behavior.
+ *
+ * `run_repo_dir` is an optional workspace-relative path (no leading "/",
+ * no ".." segments) that narrows the tool registry's workspace for this
+ * turn — see sc_inbound_msg_t::run_repo_dir. Pass NULL for the default
+ * full-workspace behavior. */
 sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
                                       const char *chat_id, const char *content,
                                       const char *session_key,
                                       const cJSON *response_format,
                                       int isolated,
-                                      const char *namespace_id);
+                                      const char *namespace_id,
+                                      const char *run_repo_dir);
 
 /* Helper: create outbound message (all strings are copied) */
 sc_outbound_msg_t *sc_outbound_msg_new(const char *channel, const char *chat_id,

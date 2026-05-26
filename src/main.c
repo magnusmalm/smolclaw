@@ -355,7 +355,8 @@ static char *cron_handler(sc_cron_job_t *job, void *ctx)
                 job->name ? job->name : job->id);
     sc_inbound_msg_t *imsg = sc_inbound_msg_new(
         SC_CHANNEL_CLI, "cron", "cron", msg, "cron:patrol", NULL,
-        /* isolated */ 0, /* namespace_id */ NULL);
+        /* isolated */ 0, /* namespace_id */ NULL,
+        /* run_repo_dir */ NULL);
     if (imsg)
         sc_bus_publish_inbound(agent->bus, imsg);
     return sc_strdup("dispatched");
@@ -1772,6 +1773,38 @@ static void gateway_process_message(sc_agent_t *agent,
                                          typing_thread_fn, &typing) == 0);
     }
 
+    /* Phase 5 per-turn tool-workspace override: narrow the tool registry's
+     * workspace to <agent->workspace>/<run_repo_dir> for this turn so
+     * delegate tools (read_file, list_dir, exec, git) can't browse stale
+     * workspace state from other runs. Restored after the response is
+     * built so subsequent turns / non-delegate channels see the full ws.
+     * Validation in gateway_route.h; stat() catches a missing dir at
+     * runtime. agent->workspace itself is unchanged — memory consolidation
+     * and scratchpad still write to the agent-wide path. */
+    char *narrowed_ws = NULL;
+    if (sc_gateway_run_repo_dir_safe(msg->run_repo_dir)
+        && agent->workspace && agent->workspace[0]
+        && agent->tools) {
+        if (asprintf(&narrowed_ws, "%s/%s",
+                     agent->workspace, msg->run_repo_dir) < 0) {
+            narrowed_ws = NULL;
+        } else {
+            struct stat st;
+            if (stat(narrowed_ws, &st) == 0 && S_ISDIR(st.st_mode)) {
+                sc_tool_registry_set_workspace(agent->tools, narrowed_ws);
+                SC_LOG_DEBUG("gateway",
+                             "tool workspace narrowed to %s for this turn",
+                             narrowed_ws);
+            } else {
+                SC_LOG_WARN("gateway",
+                            "run_repo_dir '%s' does not resolve to a dir under %s, ignoring",
+                            msg->run_repo_dir, agent->workspace);
+                free(narrowed_ws);
+                narrowed_ws = NULL;
+            }
+        }
+    }
+
     /* Build response */
     char *response = NULL;
     if (msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0) {
@@ -1787,6 +1820,13 @@ static void gateway_process_message(sc_agent_t *agent,
     } else {
         response = sc_agent_process_channel(agent, msg->content, msg->session_key,
                                                   msg->channel, msg->chat_id);
+    }
+
+    /* Restore tool workspace (Phase 5). Always runs if we narrowed,
+     * regardless of which agent_process_* path we took. */
+    if (narrowed_ws) {
+        sc_tool_registry_set_workspace(agent->tools, agent->workspace);
+        free(narrowed_ws);
     }
 
     /* Stop typing thread */

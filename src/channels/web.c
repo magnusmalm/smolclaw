@@ -477,10 +477,19 @@ static void handle_message(struct evhttp_request *req, void *arg)
         SC_LOG_DEBUG("web", "isolated session='%s' ns='%s'",
                      sess_name ? sess_name : "(null)", ns_id);
 
+    /* Per-turn tool-workspace override (Phase 5). Smolswarm's workflow.c
+     * sends this when materialize succeeded for a run, so delegate tools
+     * (read_file, list_dir, exec, git) get scoped to the run-specific
+     * repo checkout for the duration of this turn. Gateway validates the
+     * path before swapping; an invalid value silently falls through to
+     * the agent's full workspace (caller's bug, not ours to enforce). */
+    const char *run_repo_dir = sc_json_get_string(json, "run_repo_dir", NULL);
+
     sc_inbound_msg_t *inbound = sc_inbound_msg_new(
         SC_CHANNEL_WEB, "web", request_id,
         full_message ? full_message : message, session_key,
-        response_format, isolated, isolated ? ns_id : NULL);
+        response_format, isolated, isolated ? ns_id : NULL,
+        run_repo_dir);
     free(full_message);
     free(session_key);
     cJSON_Delete(json);

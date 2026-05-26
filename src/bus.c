@@ -272,7 +272,8 @@ sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
                                       const char *session_key,
                                       const cJSON *response_format,
                                       int isolated,
-                                      const char *namespace_id)
+                                      const char *namespace_id,
+                                      const char *run_repo_dir)
 {
     sc_inbound_msg_t *msg = calloc(1, sizeof(*msg));
     if (!msg) return NULL;
@@ -287,6 +288,8 @@ sc_inbound_msg_t *sc_inbound_msg_new(const char *channel, const char *sender_id,
     msg->isolated = isolated ? 1 : 0;
     msg->namespace_id = (msg->isolated && namespace_id)
         ? sc_strdup(namespace_id) : NULL;
+    msg->run_repo_dir = (run_repo_dir && run_repo_dir[0])
+        ? sc_strdup(run_repo_dir) : NULL;
 
     return msg;
 }
@@ -313,6 +316,7 @@ void sc_inbound_msg_free(sc_inbound_msg_t *msg)
     free(msg->content);
     free(msg->session_key);
     free(msg->namespace_id);
+    free(msg->run_repo_dir);
     cJSON_Delete(msg->response_format);
     free(msg);
 }
