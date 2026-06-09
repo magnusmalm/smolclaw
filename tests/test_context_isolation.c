@@ -146,6 +146,89 @@ static void test_non_isolated_includes_memory_block(void)
     rm_rf(ws);
 }
 
+static void test_isolated_skips_scratchpad_and_action_log(void)
+{
+    char *ws = make_workspace();
+    ASSERT_NOT_NULL(ws);
+
+    /* Poison the agent-wide scratchpad and action log — these live under
+     * the shared workspace and must never reach an isolated turn. */
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/state/scratchpad.md", ws);
+    char *sp_path = sc_strbuf_finish(&sb);
+    write_text(sp_path,
+               "POISON-SCRATCHPAD-MARKER stale notes from a prior run");
+
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/state/action_log.txt", ws);
+    char *al_path = sc_strbuf_finish(&sb);
+    write_text(al_path,
+               "POISON-ACTIONLOG-MARKER tool history from a prior run");
+
+    sc_context_builder_t *iso =
+        sc_context_builder_new_isolated(ws, "isosp01");
+    ASSERT_NOT_NULL(iso);
+
+    int count = 0;
+    sc_llm_message_t *msgs = sc_context_build_messages(
+        iso, NULL, 0, NULL, "do the task", "web", "chat1", &count);
+    ASSERT_NOT_NULL(msgs);
+    ASSERT(count >= 2, "system + user message present");
+    ASSERT_NOT_NULL(msgs[0].content);
+    ASSERT(strstr(msgs[0].content, "POISON-SCRATCHPAD-MARKER") == NULL,
+           "isolated prompt does not leak agent-wide scratchpad");
+    ASSERT(strstr(msgs[0].content, "Working Notes (Scratchpad)") == NULL,
+           "isolated prompt omits scratchpad header");
+    ASSERT(strstr(msgs[0].content, "POISON-ACTIONLOG-MARKER") == NULL,
+           "isolated prompt does not leak agent-wide action log");
+    ASSERT(strstr(msgs[0].content, "Action Log (auto-recorded)") == NULL,
+           "isolated prompt omits action-log header");
+
+    sc_llm_message_array_free(msgs, count);
+    free(sp_path);
+    free(al_path);
+    sc_context_builder_free(iso);
+    rm_rf(ws);
+}
+
+static void test_non_isolated_includes_scratchpad_and_action_log(void)
+{
+    char *ws = make_workspace();
+    ASSERT_NOT_NULL(ws);
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/state/scratchpad.md", ws);
+    char *sp_path = sc_strbuf_finish(&sb);
+    write_text(sp_path, "SHARED-SCRATCHPAD-MARKER working notes");
+
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/state/action_log.txt", ws);
+    char *al_path = sc_strbuf_finish(&sb);
+    write_text(al_path, "SHARED-ACTIONLOG-MARKER recent tool calls");
+
+    sc_context_builder_t *shared = sc_context_builder_new(ws);
+    ASSERT_NOT_NULL(shared);
+
+    int count = 0;
+    sc_llm_message_t *msgs = sc_context_build_messages(
+        shared, NULL, 0, NULL, "do the task", "web", "chat1", &count);
+    ASSERT_NOT_NULL(msgs);
+    ASSERT(count >= 2, "system + user message present");
+    ASSERT_NOT_NULL(msgs[0].content);
+    ASSERT(strstr(msgs[0].content, "SHARED-SCRATCHPAD-MARKER") != NULL,
+           "shared prompt still injects the scratchpad");
+    ASSERT(strstr(msgs[0].content, "SHARED-ACTIONLOG-MARKER") != NULL,
+           "shared prompt still injects the action log");
+
+    sc_llm_message_array_free(msgs, count);
+    free(sp_path);
+    free(al_path);
+    sc_context_builder_free(shared);
+    rm_rf(ws);
+}
+
 static void test_isolated_constructor_uses_namespaced_memory(void)
 {
     char *ws = make_workspace();
@@ -176,6 +259,8 @@ int main(void)
     RUN_TEST(test_isolated_constructor_rejects_bad_ns);
     RUN_TEST(test_isolated_skips_memory_block);
     RUN_TEST(test_non_isolated_includes_memory_block);
+    RUN_TEST(test_isolated_skips_scratchpad_and_action_log);
+    RUN_TEST(test_non_isolated_includes_scratchpad_and_action_log);
     RUN_TEST(test_isolated_constructor_uses_namespaced_memory);
     TEST_REPORT();
 }

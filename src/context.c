@@ -293,8 +293,13 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
     }
 
     /* Scratchpad: persistent working notes that survive compaction.
-     * Read fresh from disk on every LLM call. */
-    if (cb->workspace) {
+     * Read fresh from disk on every LLM call.
+     * Skipped in isolated sessions, mirroring the memory gate in
+     * sc_context_build_system_prompt(): both files live under the
+     * agent-wide workspace and would leak prior-run state into isolated
+     * delegate turns (2026-06-05 contamination diagnosis). Isolated
+     * delegates use the per-session scratchpad instead. */
+    if (cb->workspace && !cb->is_isolated) {
         char sp_path[PATH_MAX];
         snprintf(sp_path, sizeof(sp_path),
                  "%s/state/scratchpad.md", cb->workspace);
