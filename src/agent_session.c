@@ -66,6 +66,34 @@ static void free_summarize_args(sc_summarize_args_t *args)
     free(args);
 }
 
+/* Keep only "- " bullet lines from the consolidation output. Local
+ * models sometimes emit their reasoning monologue despite the
+ * bullets-only instruction; none of that may reach memory. Returns a
+ * malloc'd string of the bullet lines, or NULL if there are none. */
+static char *filter_bullet_lines(const char *s)
+{
+    if (!s) return NULL;
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    int kept = 0;
+    const char *p = s;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t len = eol ? (size_t)(eol - p) : strlen(p);
+        if (len >= 2 && p[0] == '-' && p[1] == ' ') {
+            sc_strbuf_appendf(&sb, "%.*s\n", (int)len, p);
+            kept++;
+        }
+        p += len + (eol ? 1 : 0);
+    }
+    char *out = sc_strbuf_finish(&sb);
+    if (!kept) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
 static void do_consolidate(sc_summarize_args_t *args, const char *summary)
 {
     if (!args->memory_consolidation) return;
@@ -75,7 +103,12 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
     msgs[0] = sc_msg_system(
         "Extract durable facts worth remembering from this conversation summary. "
         "Output only bullet points (- fact). Include: user preferences, project decisions, "
-        "key file paths, recurring patterns, important names/dates. "
+        "recurring patterns, important names/dates. "
+        "EXCLUDE per-run and per-task state: task descriptions, run IDs, "
+        "runs/<id>/ workspace paths, repo checkouts, in-progress status — "
+        "these go stale immediately and contaminate unrelated future tasks. "
+        "EXCLUDE file paths and code structure (rediscoverable from the code). "
+        "No commentary, no reasoning — bullets only. "
         "If nothing is worth remembering long-term, output exactly: NONE");
     msgs[1] = sc_msg_user(summary);
 
@@ -95,8 +128,11 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
     double con_elapsed = (con_t1.tv_sec - con_t0.tv_sec)
                        + (con_t1.tv_nsec - con_t0.tv_nsec) / 1e9;
 
+    char *bullets = NULL;
     if (resp && resp->content && resp->content[0] &&
-        strncmp(resp->content, "NONE", 4) != 0) {
+        strncmp(resp->content, "NONE", 4) != 0)
+        bullets = filter_bullet_lines(resp->content);
+    if (bullets) {
         sc_memory_t *mem = (args->isolated && args->namespace_id)
             ? sc_memory_new_namespaced(args->workspace, args->namespace_id)
             : sc_memory_new(args->workspace);
@@ -104,7 +140,7 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
             sc_strbuf_t sb;
             sc_strbuf_init(&sb);
             sc_strbuf_appendf(&sb, "\n### Auto-consolidated (%s)\n%s",
-                              args->session_key, resp->content);
+                              args->session_key, bullets);
             char *entry = sc_strbuf_finish(&sb);
             char *redacted = sc_redact_secrets(entry);
             const char *to_write = redacted ? redacted : entry;
@@ -122,8 +158,14 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
             free(entry);
             sc_memory_free(mem);
         }
+    } else if (resp && resp->content && resp->content[0] &&
+               strncmp(resp->content, "NONE", 4) != 0) {
+        SC_LOG_WARN("agent",
+            "Dropped consolidation output: no bullet lines (model emitted "
+            "commentary instead)");
     }
 
+    free(bullets);
     if (resp) sc_llm_response_free(resp);
     sc_llm_message_free_fields(&msgs[0]);
     sc_llm_message_free_fields(&msgs[1]);

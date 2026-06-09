@@ -27,10 +27,9 @@ static const char COMPACT_SYSTEM_PROMPT[] =
     "must return a compacted version organized into structured sections.\n\n"
     "Output structure — use EXACTLY these sections (omit empty ones):\n\n"
     "# Memory\n"
-    "## Current State\n"
-    "What the agent is working on right now. ONE entry, always overwritten.\n\n"
     "## Active Tasks\n"
-    "Unfinished work, pending items, blocked tasks. Remove when done.\n\n"
+    "Unfinished work, pending items, blocked tasks the USER asked for. "
+    "Remove when done. Never per-run/delegated work (see rule 11).\n\n"
     "## Decisions\n"
     "Choices made and why. Keep indefinitely — these explain rationale.\n\n"
     "## User Preferences\n"
@@ -64,8 +63,12 @@ static const char COMPACT_SYSTEM_PROMPT[] =
     "decisions, surprises, non-obvious context, and user preferences.\n"
     "9. Convert all relative dates to absolute dates (e.g., 'yesterday' to "
     "'2026-03-30') so entries remain interpretable over time.\n"
-    "10. Current State must have exactly ONE entry reflecting the latest known "
-    "state. Replace older state entries entirely.";
+    "10. Do NOT add sections other than the ones listed above.\n"
+    "11. NEVER persist per-run or per-session state: run IDs, runs/<id>/ "
+    "workspace paths, delegate task descriptions, or the progress of a "
+    "single workflow run. Drop these entirely even if recent — they go "
+    "stale immediately and contaminate unrelated future runs. This rule "
+    "overrides rules 1 and 2.";
 
 int sc_memory_compact(const char *workspace, sc_provider_t *provider,
                        const char *model, size_t threshold_bytes)
