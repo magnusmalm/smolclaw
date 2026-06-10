@@ -36,6 +36,7 @@ FEATURE_SYMS = [
     "SC_ENABLE_MCP_SERVER",
     "SC_ENABLE_CODE_GRAPH",
     "SC_ENABLE_GITEA",
+    "SC_ENABLE_CAMERA",
     # Security and infrastructure (auto-selected, not user-facing)
     "SC_STRICT_SECURITY",
     "NEED_OPENSSL",
