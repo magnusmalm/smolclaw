@@ -110,6 +110,11 @@ typedef struct {
      * (smolswarm delegate convention). See
      * docs/design/session-isolation-plan.md §6.4-§6.5. */
     char *isolation_pattern;
+    /* Optional live-stream URL (e.g. a motion-daemon MJPEG stream).
+     * If set, the embedded chat UI shows a "live view" toggle that
+     * embeds this URL. The channel is agnostic about what it points
+     * at; auth/exposure of the stream is the operator's concern. */
+    char *embed_stream_url;
 } sc_web_config_t;
 
 /* Web tools config */

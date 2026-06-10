@@ -1011,6 +1011,8 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
             "request_timeout_secs", cfg->web.request_timeout_secs);
         override_str_field(&cfg->web.isolation_pattern, webcfg,
                            "isolation_pattern");
+        override_str_field(&cfg->web.embed_stream_url, webcfg,
+                           "embed_stream_url");
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -1855,6 +1857,7 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->web.tls_key);
     free(cfg->web.dm_policy);
     free(cfg->web.isolation_pattern);
+    free(cfg->web.embed_stream_url);
     for (int i = 0; i < cfg->web.allow_from_count; i++)
         free(cfg->web.allow_from[i]);
     free(cfg->web.allow_from);

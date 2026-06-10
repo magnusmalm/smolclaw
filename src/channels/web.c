@@ -109,6 +109,9 @@ typedef struct {
     /* Workspace path for memory access */
     char *workspace;
 
+    /* Optional live-stream URL surfaced to the UI (see config.h) */
+    char *embed_stream_url;
+
     /* Per-request server-side timeout (seconds). Source priority:
      *   1. channels.web.request_timeout_secs if explicitly set
      *   2. agents.defaults.max_turn_secs + 30s grace
@@ -225,11 +228,18 @@ static const char *CHAT_HTML =
     "cursor:pointer;margin-left:.5em}"
     "#vwrap{font-size:.75em;color:#8a8aa8;margin-left:.6em;white-space:nowrap;"
     "user-select:none;cursor:pointer}"
+    "#live{display:none;background:#000;text-align:center}"
+    "#live img{max-width:100%;max-height:45vh}"
+    "#livebtn{display:none;padding:.5em .8em;background:#16213e;color:#8a8aa8;"
+    "border:1px solid #333;border-radius:4px;cursor:pointer;margin-left:.5em}"
+    "#livebtn.on{background:#0f3460;color:#eee}"
     "</style></head><body>"
+    "<div id='live'></div>"
     "<div id='chat'></div>"
     "<div id='input-area'>"
     "<input id='msg' placeholder='Type a message...' autocomplete='off'>"
     "<button id='send'>Send</button>"
+    "<button id='livebtn'>&#9679; Live</button>"
     "<label id='vwrap'><input type='checkbox' id='vlog'> live log</label>"
     "</div>"
     "<script>"
@@ -241,6 +251,17 @@ static const char *CHAT_HTML =
     "vlog.checked=localStorage.getItem('sc_vlog')==='1';"
     "vlog.onchange=()=>localStorage.setItem('sc_vlog',vlog.checked?'1':'0');"
     "const H=()=>({'Content-Type':'application/json','Authorization':'Bearer '+token});"
+    "const live=document.getElementById('live');"
+    "const livebtn=document.getElementById('livebtn');"
+    "let streamUrl=null;"
+    "fetch('/api/ui-config',{headers:{'Authorization':'Bearer '+token}})"
+    ".then(r=>r.json()).then(j=>{if(j.stream_url){streamUrl=j.stream_url;"
+    "livebtn.style.display='inline-block'}}).catch(e=>{});"
+    "livebtn.onclick=()=>{"
+    "if(live.style.display==='block'){live.style.display='none';"
+    "live.innerHTML='';livebtn.classList.remove('on')}"
+    "else{live.innerHTML='<img src=\"'+streamUrl+'\">';"
+    "live.style.display='block';livebtn.classList.add('on')}};"
     "function add(text,cls){const d=document.createElement('div');"
     "d.className='msg '+cls;d.textContent=text;chat.appendChild(d);"
     "chat.scrollTop=chat.scrollHeight;return d}"
@@ -493,6 +514,33 @@ static void handle_progress(struct evhttp_request *req, void *arg)
 
     char *str = cJSON_PrintUnformatted(j);
     cJSON_Delete(j);
+    struct evbuffer *buf = evbuffer_new();
+    evbuffer_add(buf, str, strlen(str));
+    free(str);
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+}
+
+/* GET /api/ui-config — UI bootstrap info (authed). Currently just the
+ * optional live-stream URL; the UI hides the Live toggle when unset. */
+static void handle_ui_config(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    cJSON *j = cJSON_CreateObject();
+    if (wd->embed_stream_url && wd->embed_stream_url[0])
+        cJSON_AddStringToObject(j, "stream_url", wd->embed_stream_url);
+    char *str = cJSON_PrintUnformatted(j);
+    cJSON_Delete(j);
+
     struct evbuffer *buf = evbuffer_new();
     evbuffer_add(buf, str, strlen(str));
     free(str);
@@ -1239,6 +1287,7 @@ static int web_start(sc_channel_t *self)
     evhttp_set_cb(wd->http, "/api/audit", handle_audit, self);
     evhttp_set_cb(wd->http, "/api/progress", handle_progress, self);
     evhttp_set_cb(wd->http, "/api/media", handle_media, self);
+    evhttp_set_cb(wd->http, "/api/ui-config", handle_ui_config, self);
     evhttp_set_cb(wd->http, "/api/health", handle_health, self);
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
@@ -1357,6 +1406,7 @@ static void web_destroy(sc_channel_t *self)
         free(wd->tls_cert);
         free(wd->tls_key);
         free(wd->workspace);
+        free(wd->embed_stream_url);
         pthread_mutex_destroy(&wd->pending_lock);
         free(wd);
     }
@@ -1389,6 +1439,7 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
      * need an absolute path, unlike the memory helpers which expand
      * internally. */
     wd->workspace = workspace ? sc_expand_home(workspace) : NULL;
+    wd->embed_stream_url = sc_strdup(cfg->embed_stream_url);
     wd->base = NULL;
     wd->http = NULL;
     wd->thread_started = 0;
