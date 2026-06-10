@@ -1050,6 +1050,57 @@ static void test_tool_allowlist(void)
     free(cmd);
 }
 
+static void test_tool_denylist(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_deny_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg, sc_tool_read_file_new(tmpdir, 0));
+    sc_tool_registry_register(reg, sc_tool_write_file_new(tmpdir, 0));
+
+    /* Denylist hides a tool even with no allowlist set */
+    const char *denied[] = { "write_file" };
+    sc_tool_registry_set_denied(reg, denied, 1);
+    ASSERT_INT_EQ(sc_tool_registry_is_allowed(reg, "read_file"), 1);
+    ASSERT_INT_EQ(sc_tool_registry_is_allowed(reg, "write_file"), 0);
+
+    int count = 0;
+    sc_tool_definition_t *defs = sc_tool_registry_to_defs(reg, &count);
+    ASSERT_INT_EQ(count, 1);
+    sc_tool_definitions_free(defs, count);
+
+    /* Denylist overrides allowlist membership */
+    char *allowed[] = { "read_file", "write_file" };
+    sc_tool_registry_set_allowed(reg, allowed, 2);
+    ASSERT_INT_EQ(sc_tool_registry_is_allowed(reg, "write_file"), 0);
+    ASSERT_INT_EQ(sc_tool_registry_is_allowed(reg, "read_file"), 1);
+
+    /* Execution of a denied tool fails */
+    cJSON *args = cJSON_CreateObject();
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "write_file", args,
+                                                    NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+
+    /* Clearing the denylist restores the tool */
+    sc_tool_registry_set_denied(reg, NULL, 0);
+    ASSERT_INT_EQ(sc_tool_registry_is_allowed(reg, "write_file"), 1);
+
+    sc_tool_registry_free(reg);
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 static void test_expanded_deny_patterns(void)
 {
     char tmpdir[] = "/tmp/sc_test_deny_XXXXXX";
@@ -1999,6 +2050,7 @@ int main(void)
     RUN_TEST(test_exec_timeout);
     RUN_TEST(test_confirm_callback);
     RUN_TEST(test_tool_allowlist);
+    RUN_TEST(test_tool_denylist);
     RUN_TEST(test_expanded_deny_patterns);
     RUN_TEST(test_secret_scanning);
     RUN_TEST(test_needs_confirm_flags);

@@ -206,12 +206,26 @@ void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspa
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name)
 {
     if (!reg || !name) return 0;
+    /* Per-turn denylist (isolated sessions) overrides everything */
+    for (int i = 0; i < reg->denied_count; i++) {
+        if (reg->denied_tools && reg->denied_tools[i] &&
+            strcmp(reg->denied_tools[i], name) == 0)
+            return 0;
+    }
     if (!reg->allowed_tools || reg->allowed_count == 0) return 1;
     for (int i = 0; i < reg->allowed_count; i++) {
         if (reg->allowed_tools[i] && strcmp(reg->allowed_tools[i], name) == 0)
             return 1;
     }
     return 0;
+}
+
+void sc_tool_registry_set_denied(sc_tool_registry_t *reg,
+                                  const char **tools, int count)
+{
+    if (!reg) return;
+    reg->denied_tools = tools;
+    reg->denied_count = (tools && count > 0) ? count : 0;
 }
 
 void sc_tool_registry_register(sc_tool_registry_t *reg, sc_tool_t *tool)

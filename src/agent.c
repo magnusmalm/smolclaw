@@ -1692,12 +1692,27 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         }
         agent->response_format = (cJSON *)response_format_override;
     }
+    /* Isolated turns: deny tools whose handles are pinned to the shared
+     * agent workspace. Phase 4/5 isolate the prompt and file tools, but
+     * these would still let a delegate pull (or push) agent-wide memory
+     * on demand — the secondary vector from the 2026-06-05 contamination
+     * diagnosis. Cleared right after the turn, like the allowlist swap
+     * above and the set_workspace swap in sc_agent_process_channel. */
+    static const char *SHARED_MEMORY_TOOLS[] = {
+        "memory_read", "memory_write", "memory_log", "memory_search", "note"
+    };
+    if (isolated) {
+        sc_tool_registry_set_denied(agent->tools, SHARED_MEMORY_TOOLS,
+            (int)(sizeof(SHARED_MEMORY_TOOLS) / sizeof(SHARED_MEMORY_TOOLS[0])));
+    }
     char *final_content = sc_run_llm_iteration(agent, use_provider, use_model,
                                                 messages, msg_count,
                                                 session_key, channel, chat_id,
                                                 &iterations, &failure_reason,
                                                 &final_thinking,
                                                 isolated, namespace_id);
+    if (isolated)
+        sc_tool_registry_set_denied(agent->tools, NULL, 0);
     if (response_format_override) {
         sc_tool_registry_set_allowed(agent->tools, saved_allowed_tools,
                                      saved_allowed_count);

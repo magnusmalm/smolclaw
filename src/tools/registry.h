@@ -51,6 +51,10 @@ typedef struct sc_tool_registry {
     int post_hook_count;
     int post_hook_cap;
     char *workspace;  /* current workspace path (owned, for oversized output persistence) */
+    /* Per-turn denylist for isolated sessions (borrowed array, set/cleared
+     * around the turn like set_workspace). NULL = none denied. */
+    const char **denied_tools;
+    int denied_count;
     /* Deferred tool discovery tracking */
     char **discovered_tools;  /* tools fetched via tool_search (owned names) */
     int    discovered_count;
@@ -114,6 +118,15 @@ void sc_tool_registry_set_allowed(sc_tool_registry_t *reg,
 
 /* Check if a tool is allowed by the allowlist */
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name);
+
+/* Set per-turn denylist — these tools are hidden from definitions and
+ * blocked at execution, on top of the allowlist. Used for isolated
+ * delegate turns to suppress tools whose handles are pinned to the
+ * shared agent workspace (memory_*, note). The array is borrowed, not
+ * copied: set it before the turn, clear with (NULL, 0) right after,
+ * mirroring the set_workspace swap discipline. */
+void sc_tool_registry_set_denied(sc_tool_registry_t *reg,
+    const char **tools, int count);
 
 /* Switch workspace for all tools that support it.
  * Calls set_workspace on each tool in the registry. */
