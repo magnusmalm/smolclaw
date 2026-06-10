@@ -1385,7 +1385,10 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
     wd->request_timeout_secs = cfg->request_timeout_secs;
     wd->tls_cert = sc_strdup(cfg->tls_cert);
     wd->tls_key = sc_strdup(cfg->tls_key);
-    wd->workspace = sc_strdup(workspace);
+    /* Expand ~ once here: the media/attachment paths (opendir/realpath)
+     * need an absolute path, unlike the memory helpers which expand
+     * internally. */
+    wd->workspace = workspace ? sc_expand_home(workspace) : NULL;
     wd->base = NULL;
     wd->http = NULL;
     wd->thread_started = 0;
