@@ -1,5 +1,12 @@
 # smolclaw TODO
 
+**Roadmap:** Planned features and execution order are consolidated in
+[`docs/design/master-plan.md`](docs/design/master-plan.md), with per-phase
+checklists in [`docs/design/phases/`](docs/design/phases/). This file remains
+the informal backlog; the master plan is the index.
+
+---
+
 ## xAI Grok OAuth (SuperGrok Subscription)
 
 Design doc: `docs/design/xai-grok-oauth.md` (detailed treatment of the "smol" philosophy, security model for the PKCE loopback + JWT-refresh flow using the public Grok CLI client ID, and comprehensive test coverage plan).

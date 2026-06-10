@@ -1,0 +1,159 @@
+# Phase 1: Context Efficiency
+
+**Status**: Not started  
+**Master plan**: [`../master-plan.md`](../master-plan.md)  
+**Prerequisite**: [Phase 0](phase-0-safety-and-stability.md) complete  
+**Goal**: Reduce token waste and improve local-model behavior without new channels.  
+**LOC budget**: ~700–1,200  
+**Binary target**: +≤40 KB with new config defaults unchanged (all new behavior opt-in)
+
+---
+
+## 1. Scope
+
+| # | Task | Source | LOC | Binary | Default |
+|---|------|--------|-----|--------|---------|
+| 1.1 | Tool result spill-to-disk | claude-code P0 #1 | 80–120 | +5 KB | config threshold |
+| 1.2 | Per-turn aggregate tool output cap | claude-code P0 #1 | 30–50 | ~0 | config |
+| 1.3 | Token-aware auto-compaction | claude-code P0 #2 | 80–120 | ~0 | uses existing summarization |
+| 1.4 | Reactive compaction on context error | claude-code P0 #2 | 40–60 | ~0 | always safe |
+| 1.5 | Adaptive tool selection (`auto`) | smallharness §6.1 | 150–250 | +5 KB | **`fixed`** (current) |
+| 1.6 | Streaming inline tool-call buffer | smallharness §6.3 | 80–120 | ~0 | always |
+| 1.7 | JSON-aware tool result compaction | smallharness §6.4 | 60–100 | ~0 | always |
+| 1.8 | Prompt prefix warmup (local providers) | smallharness §6.2 | 80–120 | +5 KB | **`false`** |
+
+**Out of scope:** project memory, operator modes, OAuth, Signal.
+
+---
+
+## 2. Task Details
+
+### 1.1–1.2 Tool result size management
+
+**Source:** [`docs/claude-code-improvements.md`](../../claude-code-improvements.md) P0 #1
+
+**Files:** `src/tools/registry.c`, `src/config.c`, `src/agent_turn.c`
+
+- [ ] Config: `max_tool_result_chars` (default 50000), `tool_result_preview_chars` (2000)
+- [ ] Oversized `for_llm` → write `{workspace}/tool_outputs/{tool}_{ts}.txt`
+- [ ] Replace with preview + path hint for model
+- [ ] Per-turn cumulative cap (~200K); stop tool loop with message if exceeded
+- [ ] Full output remains in audit log / tee if enabled
+
+**Acceptance:** `exec cat large_file` → preview in context, file on disk, `file_read` can recover.
+
+### 1.3–1.4 Token-aware compaction
+
+**Source:** claude-code P0 #2
+
+**Files:** `src/agent_turn.c`, `src/agent_session.c`
+
+- [ ] Track `last_prompt_tokens` from provider usage
+- [ ] Pre-call: if >85% of `context_window`, trigger sync summarization
+- [ ] Reactive: on HTTP 400 context-length errors, truncate to last 2 msgs + summary, retry
+- [ ] Keep `session_summary_threshold` as fallback when usage unavailable
+
+### 1.5 Adaptive tool selection
+
+**Source:** [`smallharness-integration.md`](../smallharness-integration.md) task 1, SmallHarness `tools/mod.rs`
+
+**Files:** new `src/tools/tool_selection.c`, `src/agent_turn.c`, `src/config.c`
+
+- [ ] Config: `tool_selection`: `"fixed"` | `"auto"` (default **`fixed`**)
+- [ ] Keyword heuristics: chat → no tools; fileish → read/search; editish → write tools; shellish → exec
+- [ ] Ceiling = enabled tool pool (Kconfig + config allowlist)
+- [ ] Log selected tools at DEBUG
+
+**Acceptance:** Ollama turn with "hello" sends zero tool schemas; "grep for config in src" sends read/search subset.
+
+### 1.6 Streaming inline tool-call buffer
+
+**Source:** smallharness-integration task 3
+
+**Files:** `src/agent_turn.c`, streaming callbacks
+
+- [ ] Detect start of inline JSON tool call during stream (`{"name":...`)
+- [ ] Buffer instead of emitting to channel until stream end
+- [ ] Parse with `arguments` / `parameters` / `args` aliases
+- [ ] Port test cases from SmallHarness `agent.rs` tests
+
+### 1.7 JSON-aware compaction
+
+**Source:** smallharness-integration task 4
+
+**Files:** `src/agent_turn.c` or `src/tools/output_filter.c`
+
+- [ ] After tool execute, before session insert: compact JSON results
+- [ ] Cap string fields (`content`, `output`, `diff`) at ~4 KB
+- [ ] Cap arrays (`matches`, `entries`) at 50 items with `compacted: true` metadata
+- [ ] Do not compact error payloads
+
+### 1.8 Prompt prefix warmup
+
+**Source:** smallharness-integration task 2
+
+**Files:** new `src/providers/warmup.c`, `src/providers/http.c`, `src/agent.c`
+
+- [ ] Config: `local_optimizations.warmup` (default **false**)
+- [ ] Provider allowlist: ollama, vllm (configurable)
+- [ ] Non-streaming request, `max_tokens: 1`, full system + tools
+- [ ] Fingerprint: backend + model + system prompt + tool set; skip if unchanged
+- [ ] Once per agent session on fingerprint change (not every message)
+
+---
+
+## 3. Configuration additions
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "tool_selection": "fixed",
+      "max_tool_result_chars": 50000,
+      "tool_result_preview_chars": 2000,
+      "max_tool_output_per_turn_chars": 200000,
+      "local_optimizations": {
+        "warmup": false,
+        "warmup_providers": ["ollama", "vllm"]
+      }
+    }
+  }
+}
+```
+
+Env overrides: `SMOLCLAW_AGENTS_DEFAULTS_TOOL_SELECTION`, etc.
+
+---
+
+## 4. Exit Criteria
+
+- [ ] All tasks 1.1–1.8 complete or explicitly deferred with reason
+- [ ] Default config behavior unchanged from pre-Phase-1 (fixed tools, no warmup)
+- [ ] `tool_selection: auto` documented in README config section
+- [ ] New tests: tool_selection, inline buffer, compaction, spill-to-disk
+- [ ] ctest green; binary delta documented vs Phase 0 baseline
+
+---
+
+## 5. Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Adaptive tools hide needed tool from model | `fixed` escape hatch; log selection |
+| Warmup adds startup latency | Opt-in; skip on fingerprint match |
+| Spill-to-disk fills workspace | Prune old `tool_outputs/` optionally in Phase 2 |
+| Compaction loses debugging info | Audit log retains full output |
+
+---
+
+## 6. Suggested PR order
+
+1. `feat: tool result spill-to-disk and per-turn cap`
+2. `feat: token-aware session compaction`
+3. `feat: adaptive tool selection (default fixed)`
+4. `feat: streaming inline tool-call buffer + JSON compaction`
+5. `feat: optional local provider prompt warmup`
+
+---
+
+**Next phase:** [Phase 2 — Operator & Provider UX](phase-2-operator-provider-ux.md)
