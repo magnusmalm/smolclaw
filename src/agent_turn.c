@@ -1450,39 +1450,18 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
 
 /* ---------- Smolchat cost reporting ---------- */
 
-/* Rough per-million-token pricing for cost estimation.
- * Updated periodically — doesn't need to be exact, just ballpark. */
-static double estimate_cost(const char *model, int prompt, int completion)
-{
-    struct { const char *prefix; double in_per_m; double out_per_m; } prices[] = {
-        { "google/gemini-2.5-flash",   0.30,   2.50 },
-        { "google/gemini-2.5-pro",     1.25,  10.00 },
-        { "deepseek/deepseek-v3",      0.26,   0.38 },
-        { "deepseek/deepseek-r1",      0.55,   2.19 },
-        { "openai/gpt-4.1-mini",       0.40,   1.60 },
-        { "openai/gpt-4.1",            2.00,   8.00 },
-        { "qwen/qwen3-coder",          0.20,   0.60 },
-        { "anthropic/claude-sonnet",    3.00,  15.00 },
-        { "anthropic/claude-haiku",     0.80,   4.00 },
-        { NULL, 0.50, 1.50 }  /* default fallback */
-    };
-    double in_rate = 0.50, out_rate = 1.50;
-    if (model) {
-        for (int i = 0; prices[i].prefix; i++) {
-            if (strncmp(model, prices[i].prefix, strlen(prices[i].prefix)) == 0) {
-                in_rate = prices[i].in_per_m;
-                out_rate = prices[i].out_per_m;
-                break;
-            }
-        }
-    }
-    return (prompt * in_rate + completion * out_rate) / 1e6;
-}
-
 /* Fire-and-forget POST to smolchat /api/cost. Non-critical — errors are
- * silently ignored so they never block the agent loop. */
-static void report_cost_to_smolchat(const char *model, int prompt_tokens,
-                                      int completion_tokens)
+ * silently ignored so they never block the agent loop.
+ *
+ * Cost truth: the posted cost_usd is the provider-reported ACTUAL when
+ * available, else cost.c's estimate (config overrides + built-in table;
+ * local models are $0). A previous private rate table here had a paid
+ * fallback for unknown models, which billed phantom dollars for every
+ * local-ollama turn into the fleet ledger. */
+static void report_cost_to_smolchat(sc_agent_t *agent, const char *model,
+                                      int prompt_tokens,
+                                      int completion_tokens,
+                                      double actual_cost_usd)
 {
     const char *url = getenv("SMOLCHAT_URL");
     const char *token = getenv("SMOLCHAT_TOKEN");
@@ -1496,7 +1475,11 @@ static void report_cost_to_smolchat(const char *model, int prompt_tokens,
         if (last && last[1]) agent_name = last + 1;
     }
 
-    double cost = estimate_cost(model, prompt_tokens, completion_tokens);
+    double cost = actual_cost_usd >= 0
+        ? actual_cost_usd
+        : sc_cost_tracker_estimate(
+              agent ? (sc_cost_tracker_t *)agent->cost_tracker : NULL,
+              model, prompt_tokens, completion_tokens);
 
     char endpoint[512];
     snprintf(endpoint, sizeof(endpoint), "%s/api/cost", url);
@@ -1556,7 +1539,8 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
                                        tc->actual_cost_usd);
 
     /* Report cost to smolchat for fleet-wide tracking */
-    report_cost_to_smolchat(model, tc->prompt_tokens, tc->completion_tokens);
+    report_cost_to_smolchat(agent, model, tc->prompt_tokens,
+                            tc->completion_tokens, tc->actual_cost_usd);
 
     /* Record tokens in hourly budget tracker */
     if (agent->max_tokens_per_hour > 0)

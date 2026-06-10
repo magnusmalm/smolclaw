@@ -38,6 +38,15 @@ void sc_cost_tracker_print_sessions(sc_cost_tracker_t *ct);
 /* Reset all tracked data */
 void sc_cost_tracker_reset(sc_cost_tracker_t *ct);
 
+/* Estimate USD for one turn using the tracker's pricing (config
+ * overrides + built-in table; local models — ollama ':' tags and
+ * local-inference prefixes — are $0). NULL tracker uses defaults only.
+ * This is THE pricing function: anything reporting cost externally
+ * (e.g. the smolchat ledger) must use it, never its own table. */
+double sc_cost_tracker_estimate(const sc_cost_tracker_t *ct,
+                                 const char *model,
+                                 int prompt_tokens, int completion_tokens);
+
 /* Recompute every model's estimated_cost_usd against the current pricing
  * table (DEFAULT_PRICING + any pricing_overrides). Returns the number of
  * entries changed, or -1 on error. Use after rate updates to retroactively

@@ -167,6 +167,16 @@ lookup_rate(const sc_cost_tracker_t *ct, const char *model,
     }
 }
 
+double
+sc_cost_tracker_estimate(const sc_cost_tracker_t *ct, const char *model,
+                          int prompt_tokens, int completion_tokens)
+{
+    sc_cost_tracker_t defaults_only = {0};
+    double p = 0, c = 0;
+    lookup_rate(ct ? ct : &defaults_only, model, &p, &c);
+    return (prompt_tokens * p + completion_tokens * c) / 1e6;
+}
+
 /* Warn once per process per unknown model. Returns 1 if this is the first
  * sighting and a warning was emitted. Suppressed for known-zero-cost
  * (local-inference) prefixes. */
