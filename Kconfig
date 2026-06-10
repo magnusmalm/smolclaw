@@ -75,6 +75,15 @@ config SC_ENABLE_GITEA
 	  Enable the gitea tool for creating repos, issues, and PRs
 	  via the Gitea REST API. Requires API credentials in config.
 
+config SC_ENABLE_CAMERA
+	bool "Camera tool (capture + vision describe)"
+	default n
+	help
+	  Enable the camera tool: capture stills via an external command
+	  (e.g. rpicam-still), list motion-daemon event captures, and
+	  describe images through a remote vision model (ollama API).
+	  For camera-equipped embedded deployments.
+
 config SC_ENABLE_WEB_TOOLS
 	bool "Web search and fetch tools"
 	default y

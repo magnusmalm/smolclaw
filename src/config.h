@@ -306,6 +306,15 @@ typedef struct {
         char *default_org;  /* Default org for repo creation */
     } gitea;
 
+    /* Camera tool */
+    struct {
+        char *snap_command;  /* argv prefix; output path appended */
+        char *events_dir;    /* motion captures dir, workspace-relative */
+        char *vision_url;    /* ollama-compatible vision endpoint */
+        char *vision_model;  /* e.g. "gemma4:e4b" */
+        int   vision_timeout_secs;  /* default 120 */
+    } camera;
+
     /* Heartbeat */
     sc_heartbeat_config_t heartbeat;
 

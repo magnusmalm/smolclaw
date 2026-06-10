@@ -1286,6 +1286,25 @@ sc_config_t *sc_config_load(const char *path)
             sc_json_get_string(gitea, "default_org", NULL));
     }
 
+    /* camera */
+    const cJSON *camera = sc_json_get_object(root, "camera");
+    if (camera) {
+        free(cfg->camera.snap_command);
+        cfg->camera.snap_command = sc_strdup(
+            sc_json_get_string(camera, "snap_command", NULL));
+        free(cfg->camera.events_dir);
+        cfg->camera.events_dir = sc_strdup(
+            sc_json_get_string(camera, "events_dir", "camera/motion"));
+        free(cfg->camera.vision_url);
+        cfg->camera.vision_url = sc_strdup(
+            sc_json_get_string(camera, "vision_url", NULL));
+        free(cfg->camera.vision_model);
+        cfg->camera.vision_model = sc_strdup(
+            sc_json_get_string(camera, "vision_model", NULL));
+        cfg->camera.vision_timeout_secs = sc_json_get_int(
+            camera, "vision_timeout_secs", 120);
+    }
+
     /* heartbeat */
     const cJSON *hb = sc_json_get_object(root, "heartbeat");
     if (hb) {
@@ -1861,6 +1880,11 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->gitea.url);
     free(cfg->gitea.token);
     free(cfg->gitea.default_org);
+
+    free(cfg->camera.snap_command);
+    free(cfg->camera.events_dir);
+    free(cfg->camera.vision_url);
+    free(cfg->camera.vision_model);
 
     /* MCP */
     for (int i = 0; i < cfg->mcp.server_count; i++) {

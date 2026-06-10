@@ -59,6 +59,9 @@
 #if SC_ENABLE_GITEA
 #include "tools/gitea.h"
 #endif
+#if SC_ENABLE_CAMERA
+#include "tools/camera.h"
+#endif
 #if SC_ENABLE_CODE_GRAPH
 #include "tools/code_graph.h"
 #include "tools/symbol_lookup.h"
@@ -376,6 +379,18 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                                                       cfg->gitea.default_org));
 #endif
 
+    /* Camera tool */
+#if SC_ENABLE_CAMERA
+    if (cfg->camera.snap_command || cfg->camera.vision_url)
+        sc_tool_registry_register(reg,
+            sc_tool_camera_new(workspace,
+                               cfg->camera.snap_command,
+                               cfg->camera.events_dir,
+                               cfg->camera.vision_url,
+                               cfg->camera.vision_model,
+                               cfg->camera.vision_timeout_secs));
+#endif
+
     /* Notify tool */
     if (cfg->notify_urls && cfg->notify_urls[0])
         sc_tool_registry_register(reg,
@@ -585,6 +600,18 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                    sc_tool_gitea_new(cfg->gitea.url,
                                                       cfg->gitea.token,
                                                       cfg->gitea.default_org));
+#endif
+
+    /* Camera tool */
+#if SC_ENABLE_CAMERA
+    if (cfg->camera.snap_command || cfg->camera.vision_url)
+        sc_tool_registry_register(agent->tools,
+            sc_tool_camera_new(workspace,
+                               cfg->camera.snap_command,
+                               cfg->camera.events_dir,
+                               cfg->camera.vision_url,
+                               cfg->camera.vision_model,
+                               cfg->camera.vision_timeout_secs));
 #endif
 
     /* Notify tool */
