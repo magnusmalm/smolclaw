@@ -22,6 +22,9 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
+#include <dirent.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 #include <time.h>
 
@@ -57,12 +60,22 @@
                                           * cover multi-step delegation chains. */
 #define WEB_MAX_PENDING     100
 
+#define WEB_PROGRESS_MAX_LINES 200
+#define WEB_ATTACH_MAX 6
+
 /* Pending request entry */
 typedef struct web_pending {
     char *request_id;
     struct evhttp_request *req;
     struct event *timeout_ev;
     int structured_response;
+    /* Live-progress feed: client-chosen id polled via /api/progress
+     * while the turn runs; lines come from is_progress outbound
+     * messages (agent verbose mode). Protected by pending_lock. */
+    char *progress_id;
+    char **progress;
+    int progress_count;
+    time_t turn_start;
     struct web_pending *next;
 } web_pending_t;
 
@@ -202,34 +215,69 @@ static const char *CHAT_HTML =
     ".msg{margin:.5em 0;padding:.5em;border-radius:4px}"
     ".user{background:#16213e;text-align:right}"
     ".bot{background:#0f3460}"
-    "#input-area{display:flex;padding:.5em;background:#0a0a1a}"
+    ".msg img{max-width:100%;border-radius:4px;display:block;margin:.5em 0}"
+    ".log{background:#0a0a1a;color:#8a8aa8;font-size:.8em;white-space:pre-wrap;"
+    "margin:.3em 0;padding:.4em;border-radius:4px;border-left:2px solid #e94560}"
+    "#input-area{display:flex;align-items:center;padding:.5em;background:#0a0a1a}"
     "#msg{flex:1;padding:.5em;background:#16213e;color:#eee;border:1px solid #333;"
     "border-radius:4px;font-family:monospace}"
     "#send{padding:.5em 1em;background:#e94560;color:#fff;border:none;border-radius:4px;"
     "cursor:pointer;margin-left:.5em}"
+    "#vwrap{font-size:.75em;color:#8a8aa8;margin-left:.6em;white-space:nowrap;"
+    "user-select:none;cursor:pointer}"
     "</style></head><body>"
     "<div id='chat'></div>"
     "<div id='input-area'>"
     "<input id='msg' placeholder='Type a message...' autocomplete='off'>"
     "<button id='send'>Send</button>"
+    "<label id='vwrap'><input type='checkbox' id='vlog'> live log</label>"
     "</div>"
     "<script>"
     "let token=sessionStorage.getItem('sc_token');"
     "if(!token){token=prompt('Bearer token:');if(token)sessionStorage.setItem('sc_token',token)}"
     "const chat=document.getElementById('chat');"
     "const inp=document.getElementById('msg');"
+    "const vlog=document.getElementById('vlog');"
+    "vlog.checked=localStorage.getItem('sc_vlog')==='1';"
+    "vlog.onchange=()=>localStorage.setItem('sc_vlog',vlog.checked?'1':'0');"
+    "const H=()=>({'Content-Type':'application/json','Authorization':'Bearer '+token});"
     "function add(text,cls){const d=document.createElement('div');"
     "d.className='msg '+cls;d.textContent=text;chat.appendChild(d);"
+    "chat.scrollTop=chat.scrollHeight;return d}"
+    "async function addImg(parent,path){"
+    "try{const r=await fetch('/api/media?path='+encodeURIComponent(path),"
+    "{headers:{'Authorization':'Bearer '+token}});"
+    "if(!r.ok)return;const b=await r.blob();"
+    "const img=document.createElement('img');img.src=URL.createObjectURL(b);"
+    "img.title=path;parent.appendChild(img);chat.scrollTop=chat.scrollHeight}"
+    "catch(e){}}"
+    "function pollProgress(pid,logEl,state){"
+    "const tick=async()=>{if(state.stop)return;"
+    "try{const r=await fetch('/api/progress?id='+pid+'&after='+state.next,"
+    "{headers:{'Authorization':'Bearer '+token}});"
+    "const j=await r.json();"
+    "if(j.lines&&j.lines.length){state.next=j.next;"
+    "logEl.textContent+=(logEl.textContent?'\\n':'')+j.lines.join('\\n');"
     "chat.scrollTop=chat.scrollHeight}"
+    "if(!state.stop&&!j.done)setTimeout(tick,1000)}"
+    "catch(e){}};"
+    "setTimeout(tick,600)}"
     "async function send(){"
     "const t=inp.value.trim();if(!t)return;inp.value='';"
-    "add(t,'user');add('...','bot');"
-    "try{const r=await fetch('/api/message',{method:'POST',"
-    "headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},"
-    "body:JSON.stringify({message:t})});"
-    "const j=await r.json();"
-    "chat.lastChild.textContent=j.response||j.error||'No response'}"
-    "catch(e){chat.lastChild.textContent='Error: '+e.message}}"
+    "add(t,'user');const bot=add('...','bot');"
+    "const body={message:t};let logEl=null;const state={next:0,stop:false};"
+    "if(vlog.checked){"
+    "body.progress_id=([...crypto.getRandomValues(new Uint8Array(8))]"
+    ".map(b=>b.toString(16).padStart(2,'0')).join(''));"
+    "logEl=document.createElement('div');logEl.className='log';"
+    "chat.insertBefore(logEl,bot);"
+    "pollProgress(body.progress_id,logEl,state)}"
+    "try{const r=await fetch('/api/message',{method:'POST',headers:H(),"
+    "body:JSON.stringify(body)});"
+    "const j=await r.json();state.stop=true;"
+    "bot.textContent=j.response||j.error||'No response';"
+    "if(j.attachments)for(const a of j.attachments)addImg(bot,a)}"
+    "catch(e){state.stop=true;bot.textContent='Error: '+e.message}}"
     "document.getElementById('send').onclick=send;"
     "inp.onkeydown=e=>{if(e.key==='Enter')send()};"
     "</script></body></html>";
@@ -280,7 +328,8 @@ static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
 /* Add a pending request. Returns 0 on success, -1 if at capacity. */
 static int add_pending(web_data_t *wd, const char *request_id,
                          struct evhttp_request *req,
-                         int structured_response)
+                         int structured_response,
+                         const char *progress_id)
 {
     /* Allocate outside lock, then re-check count under lock to close
      * the TOCTOU window between capacity check and insertion. */
@@ -290,6 +339,9 @@ static int add_pending(web_data_t *wd, const char *request_id,
     wp->request_id = sc_strdup(request_id);
     wp->req = req;
     wp->structured_response = structured_response;
+    if (progress_id && progress_id[0])
+        wp->progress_id = sc_strdup(progress_id);
+    wp->turn_start = time(NULL);
     wp->next = NULL;
 
     /* Set timeout */
@@ -306,6 +358,7 @@ static int add_pending(web_data_t *wd, const char *request_id,
         pthread_mutex_unlock(&wd->pending_lock);
         if (wp->timeout_ev) event_free(wp->timeout_ev);
         free(wp->request_id);
+        free(wp->progress_id);
         free(wp);
         return -1;
     }
@@ -366,7 +419,267 @@ static void free_pending(web_pending_t *wp)
         event_free(wp->timeout_ev);
     }
     free(wp->request_id);
+    free(wp->progress_id);
+    for (int i = 0; i < wp->progress_count; i++)
+        free(wp->progress[i]);
+    free(wp->progress);
     free(wp);
+}
+
+/* Append a progress line to the pending request it belongs to.
+ * Called from the agent thread (web_send); readers hold pending_lock. */
+static void append_progress(web_data_t *wd, const char *request_id,
+                             const char *line)
+{
+    pthread_mutex_lock(&wd->pending_lock);
+    for (web_pending_t *cur = wd->pending_head; cur; cur = cur->next) {
+        if (strcmp(cur->request_id, request_id) != 0) continue;
+        if (!cur->progress_id) break;             /* client not listening */
+        if (cur->progress_count >= WEB_PROGRESS_MAX_LINES) break;
+        char **tmp = realloc(cur->progress,
+            (size_t)(cur->progress_count + 1) * sizeof(char *));
+        if (!tmp) break;
+        cur->progress = tmp;
+        cur->progress[cur->progress_count] = sc_strdup(line);
+        if (cur->progress[cur->progress_count])
+            cur->progress_count++;
+        break;
+    }
+    pthread_mutex_unlock(&wd->pending_lock);
+}
+
+/* GET /api/progress?id=<progress_id>&after=<n> — poll live progress
+ * lines for an in-flight /api/message turn. Returns done:true once the
+ * turn has completed (pending entry gone). */
+static void handle_progress(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    struct evkeyvalq params;
+    const char *uri = evhttp_request_get_uri(req);
+    evhttp_parse_query(uri, &params);
+    const char *pid = evhttp_find_header(&params, "id");
+    const char *after_s = evhttp_find_header(&params, "after");
+    int after = after_s ? atoi(after_s) : 0;
+    if (after < 0) after = 0;
+
+    cJSON *j = cJSON_CreateObject();
+    cJSON *lines = cJSON_AddArrayToObject(j, "lines");
+    int found = 0, next = after;
+
+    if (pid && pid[0]) {
+        pthread_mutex_lock(&wd->pending_lock);
+        for (web_pending_t *cur = wd->pending_head; cur; cur = cur->next) {
+            if (!cur->progress_id || strcmp(cur->progress_id, pid) != 0)
+                continue;
+            found = 1;
+            for (int i = after; i < cur->progress_count; i++)
+                cJSON_AddItemToArray(lines,
+                                     cJSON_CreateString(cur->progress[i]));
+            next = cur->progress_count;
+            break;
+        }
+        pthread_mutex_unlock(&wd->pending_lock);
+    }
+    cJSON_AddNumberToObject(j, "next", next);
+    cJSON_AddBoolToObject(j, "done", !found);
+    evhttp_clear_headers(&params);
+
+    char *str = cJSON_PrintUnformatted(j);
+    cJSON_Delete(j);
+    struct evbuffer *buf = evbuffer_new();
+    evbuffer_add(buf, str, strlen(str));
+    free(str);
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+}
+
+/* ---- Image attachments ---------------------------------------------- */
+
+static int web_is_image_ext(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    if (!dot) return 0;
+    return strcasecmp(dot, ".jpg") == 0 || strcasecmp(dot, ".jpeg") == 0 ||
+           strcasecmp(dot, ".png") == 0;
+}
+
+/* Resolve a path (absolute or workspace-relative) and confine it to the
+ * workspace. Returns malloc'd workspace-RELATIVE path, or NULL. */
+static char *web_confine_image(const char *workspace, const char *path)
+{
+    if (!workspace || !path || !path[0]) return NULL;
+    if (!web_is_image_ext(path)) return NULL;
+
+    char joined[PATH_MAX];
+    if (path[0] == '/')
+        snprintf(joined, sizeof(joined), "%s", path);
+    else
+        snprintf(joined, sizeof(joined), "%s/%s", workspace, path);
+
+    char *resolved = realpath(joined, NULL);
+    if (!resolved) return NULL;
+    char *ws = realpath(workspace, NULL);
+    if (!ws) { free(resolved); return NULL; }
+
+    size_t wlen = strlen(ws);
+    char *rel = NULL;
+    if (strncmp(resolved, ws, wlen) == 0 && resolved[wlen] == '/') {
+        struct stat st;
+        if (stat(resolved, &st) == 0 && S_ISREG(st.st_mode))
+            rel = sc_strdup(resolved + wlen + 1);
+    }
+    free(ws);
+    free(resolved);
+    return rel;
+}
+
+static void attach_add(cJSON *arr, const char *rel)
+{
+    if (!rel || cJSON_GetArraySize(arr) >= WEB_ATTACH_MAX) return;
+    for (cJSON *it = arr->child; it; it = it->next)
+        if (cJSON_IsString(it) && strcmp(it->valuestring, rel) == 0)
+            return;
+    cJSON_AddItemToArray(arr, cJSON_CreateString(rel));
+}
+
+/* Scan one workspace subdir for images newer than `since`. */
+static void attach_scan_dir(cJSON *arr, const char *workspace,
+                             const char *sub, time_t since)
+{
+    char dir_path[PATH_MAX];
+    snprintf(dir_path, sizeof(dir_path), "%s/%s", workspace, sub);
+    DIR *d = opendir(dir_path);
+    if (!d) return;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.' || !web_is_image_ext(de->d_name)) continue;
+        char fpath[PATH_MAX];
+        snprintf(fpath, sizeof(fpath), "%s/%s", dir_path, de->d_name);
+        struct stat st;
+        if (stat(fpath, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (st.st_mtime < since) continue;
+        char rel[PATH_MAX];
+        snprintf(rel, sizeof(rel), "%s/%s", sub, de->d_name);
+        attach_add(arr, rel);
+    }
+    closedir(d);
+}
+
+/* Collect image attachments for a finished turn: images mentioned in
+ * the response text (resolved + confined to the workspace) plus any
+ * image written under camera/ or camera/motion since the turn began. */
+static cJSON *collect_attachments(web_data_t *wd, web_pending_t *wp,
+                                   const char *text)
+{
+    cJSON *arr = cJSON_CreateArray();
+    if (!wd->workspace) return arr;
+
+    /* Paths mentioned in the response text */
+    if (text) {
+        const char *p = text;
+        while (*p && cJSON_GetArraySize(arr) < WEB_ATTACH_MAX) {
+            const char *dot = strstr(p, ".");
+            if (!dot) break;
+            if (strncasecmp(dot, ".jpg", 4) == 0 ||
+                strncasecmp(dot, ".jpeg", 5) == 0 ||
+                strncasecmp(dot, ".png", 4) == 0) {
+                const char *end = dot;
+                while (*end && *end != ' ' && *end != '\n' && *end != ')' &&
+                       *end != ']' && *end != '"' && *end != '\'' &&
+                       *end != ',')
+                    end++;
+                const char *start = dot;
+                while (start > text) {
+                    char c = *(start - 1);
+                    if (c == ' ' || c == '\n' || c == '(' || c == '[' ||
+                        c == '"' || c == '\'' || c == '`' || c == ',')
+                        break;
+                    start--;
+                }
+                if (end > start && end - start < PATH_MAX - 1) {
+                    char cand[PATH_MAX];
+                    snprintf(cand, sizeof(cand), "%.*s",
+                             (int)(end - start), start);
+                    char *rel = web_confine_image(wd->workspace, cand);
+                    if (rel) { attach_add(arr, rel); free(rel); }
+                }
+                p = end;
+            } else {
+                p = dot + 1;
+            }
+        }
+    }
+
+    /* Fresh captures from this turn */
+    if (wp) {
+        attach_scan_dir(arr, wd->workspace, "camera", wp->turn_start);
+        attach_scan_dir(arr, wd->workspace, "camera/motion", wp->turn_start);
+    }
+    return arr;
+}
+
+/* GET /api/media?path=<workspace-relative image> — serve a captured
+ * image. Same bearer auth as the rest of the API; path is confined to
+ * the workspace and must have an image extension. */
+static void handle_media(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+
+    struct evkeyvalq params;
+    const char *uri = evhttp_request_get_uri(req);
+    evhttp_parse_query(uri, &params);
+    const char *path = evhttp_find_header(&params, "path");
+
+    char *rel = path ? web_confine_image(wd->workspace, path) : NULL;
+    if (!rel) {
+        evhttp_clear_headers(&params);
+        send_json_error(req, 404, "Image not found");
+        return;
+    }
+
+    char full[PATH_MAX];
+    snprintf(full, sizeof(full), "%s/%s", wd->workspace, rel);
+    struct stat st;
+    FILE *f = NULL;
+    if (stat(full, &st) != 0 || st.st_size > 10 * 1024 * 1024 ||
+        !(f = fopen(full, "rb"))) {
+        free(rel);
+        evhttp_clear_headers(&params);
+        send_json_error(req, 404, "Image not readable");
+        return;
+    }
+
+    struct evbuffer *buf = evbuffer_new();
+    char chunk[8192];
+    size_t n;
+    while ((n = fread(chunk, 1, sizeof(chunk), f)) > 0)
+        evbuffer_add(buf, chunk, n);
+    fclose(f);
+
+    const char *dot = strrchr(rel, '.');
+    const char *ctype = (dot && strcasecmp(dot, ".png") == 0)
+                        ? "image/png" : "image/jpeg";
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                       "Content-Type", ctype);
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+    free(rel);
+    evhttp_clear_headers(&params);
 }
 
 /* Handle POST /api/message */
@@ -429,7 +742,9 @@ static void handle_message(struct evhttp_request *req, void *arg)
     free(rid);
 
     /* Store pending request */
-    if (add_pending(wd, request_id, req, response_format != NULL) != 0) {
+    const char *progress_id = sc_json_get_string(json, "progress_id", NULL);
+    if (add_pending(wd, request_id, req, response_format != NULL,
+                    progress_id) != 0) {
         cJSON_Delete(json);
         send_json_error(req, 503, "Too many pending requests");
         return;
@@ -798,6 +1113,8 @@ static void pipe_read_cb(evutil_socket_t fd, short what, void *arg)
         struct evbuffer *buf = evbuffer_new();
         cJSON *j = cJSON_CreateObject();
         cJSON_AddStringToObject(j, "response", resp.text ? resp.text : "");
+        cJSON_AddItemToObject(j, "attachments",
+                              collect_attachments(wd, wp, resp.text));
         char *str = cJSON_PrintUnformatted(j);
         evbuffer_add(buf, str, strlen(str));
         free(str);
@@ -828,9 +1145,12 @@ static int web_send(sc_channel_t *self, sc_outbound_msg_t *msg)
     web_data_t *wd = self->data;
     if (!msg || !msg->chat_id || !msg->content) return -1;
 
-    /* Skip verbose progress messages — hold the request for the final response */
-    if (msg->is_progress)
+    /* Verbose progress messages feed the /api/progress poll buffer of
+     * the in-flight request instead of completing it. */
+    if (msg->is_progress) {
+        append_progress(wd, msg->chat_id, msg->content);
         return 0;
+    }
     if (pending_requires_final_response(wd, msg->chat_id) && !msg->is_final_response)
         return 0;
 
@@ -917,6 +1237,8 @@ static int web_start(sc_channel_t *self)
     evhttp_set_cb(wd->http, "/api/memory/search", handle_memory_search, self);
 #endif
     evhttp_set_cb(wd->http, "/api/audit", handle_audit, self);
+    evhttp_set_cb(wd->http, "/api/progress", handle_progress, self);
+    evhttp_set_cb(wd->http, "/api/media", handle_media, self);
     evhttp_set_cb(wd->http, "/api/health", handle_health, self);
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);

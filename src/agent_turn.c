@@ -1666,8 +1666,10 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         SC_LOG_DEBUG("agent", "LLM iteration %d/%d (messages=%d, tools=%d)",
                      iteration, agent->max_iterations, tc.msgs_len, tool_count);
 
-        emit_progress(agent, &tc, "[%d/%d] Calling %s (%d messages)...",
-                      iteration, agent->max_iterations, model, tc.msgs_len);
+        emit_progress(agent, &tc, "[%d/%d] Calling %s via %s (%d messages)...",
+                      iteration, agent->max_iterations, model,
+                      provider && provider->name ? provider->name : "?",
+                      tc.msgs_len);
 
         sc_llm_response_t *resp = call_llm_with_fallback(
             agent, provider, model, tc.msgs, tc.msgs_len,
