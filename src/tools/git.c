@@ -295,8 +295,18 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
 static int is_push_remote_allowed(git_data_t *gd, const char *dir,
                                    const char *args_str)
 {
-    if (!gd->push_allowed_remotes || gd->push_allowed_remote_count <= 0)
-        return 1;  /* no restrictions configured */
+    if (!gd->push_allowed_remotes || gd->push_allowed_remote_count <= 0) {
+        /* Default-closed: with no allowlist configured, push is denied.
+         * An agent running with ambient user credentials (ssh keys,
+         * credential.helper=store) must be explicitly granted push
+         * destinations — 2026-06-10 investigation found fleet agents
+         * pushing to arbitrary repos as the invoking user because this
+         * defaulted to allow. */
+        SC_LOG_WARN(GIT_TAG,
+            "push blocked: no git.push_allowed_remotes configured "
+            "(push is deny-by-default)");
+        return 0;
+    }
 
     /* Extract remote name from push args (first non-flag arg, default "origin") */
     const char *remote = "origin";
@@ -418,8 +428,9 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
         for (int j = 0; j < extra_count; j++) free(extra_args[j]);
         free(resolved_repo);
         return sc_tool_result_error(
-            "Push blocked: remote URL not in git_push_allowed_remotes. "
-            "Check your config or use the gitea tool to manage repositories.");
+            "Push blocked: destination not allowlisted (push is "
+            "deny-by-default; an operator must configure "
+            "git.push_allowed_remotes). Do not retry.");
     }
 
     /* Fork + exec */

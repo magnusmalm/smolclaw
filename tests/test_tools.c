@@ -1498,6 +1498,72 @@ static void test_git_blocks_config_flag(void)
     snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
     system(cmd);
 }
+
+/* Push is deny-by-default: with no push_allowed_remotes configured the
+ * push must be blocked before any subprocess runs; with a matching
+ * allowlist entry the same push succeeds (local bare remote). */
+static void test_git_push_deny_by_default(void)
+{
+    char tmpdir[] = "/tmp/sc_test_gitpush_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd),
+        "cd %s && git init -q work && git init -q --bare remote.git && "
+        "cd work && git config user.email t@t && git config user.name t && "
+        "git remote add origin %s/remote.git && "
+        "echo x > f && git add f && git commit -qm c", tmpdir, tmpdir);
+    ASSERT_INT_EQ(system(cmd), 0);
+
+    char workdir[1100];
+    snprintf(workdir, sizeof(workdir), "%s/work", tmpdir);
+
+    /* No allowlist -> push denied */
+    sc_tool_t *tool = sc_tool_git_new(workdir, 0, NULL, 0);
+    ASSERT_NOT_NULL(tool);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "push");
+    cJSON_AddStringToObject(args, "args", "origin master");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    ASSERT(strstr(r->for_llm, "Push blocked") != NULL,
+           "default push should report blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    /* Allowlist matching the remote path -> push succeeds */
+    const char *allow[] = { tmpdir };
+    tool = sc_tool_git_new(workdir, 0, allow, 1);
+    ASSERT_NOT_NULL(tool);
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "push");
+    cJSON_AddStringToObject(args, "args", "origin master");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    /* Allowlist NOT matching the remote -> denied */
+    const char *wrong[] = { "example.com/elsewhere" };
+    tool = sc_tool_git_new(workdir, 0, wrong, 1);
+    ASSERT_NOT_NULL(tool);
+    args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "subcommand", "push");
+    cJSON_AddStringToObject(args, "args", "origin master");
+    r = tool->execute(tool, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 1);
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+
+    snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
+    system(cmd);
+}
 #endif /* SC_ENABLE_GIT */
 
 /* C-2: Test that control characters in commands are blocked */
@@ -2062,6 +2128,7 @@ int main(void)
 #endif
 #if SC_ENABLE_GIT
     RUN_TEST(test_git_blocks_config_flag);
+    RUN_TEST(test_git_push_deny_by_default);
 #endif
     RUN_TEST(test_exec_blocks_control_chars);
     RUN_TEST(test_symlink_nofollow);
