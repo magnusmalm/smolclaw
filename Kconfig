@@ -102,7 +102,7 @@ config SC_ENABLE_X_TOOLS
 
 config SC_ENABLE_VOICE
 	bool "Voice transcription (Groq Whisper)"
-	default y
+	default n
 	help
 	  Enable voice message transcription via Groq Whisper API.
 	  Used by Telegram voice messages and Discord audio attachments.
@@ -116,7 +116,7 @@ config SC_ENABLE_BACKGROUND
 
 config SC_ENABLE_CODE_GRAPH
 	bool "Code dependency graph tool"
-	default y
+	default n
 	help
 	  Enable the code_graph tool for analyzing import dependencies and
 	  C/C++ symbols (for researcher Drill-down).
