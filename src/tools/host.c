@@ -6,12 +6,15 @@
  */
 
 #include "tools/host.h"
+#include "sc_features.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#if SC_ENABLE_HOST_METRICS
 #include <sqlite3.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +30,9 @@
 #include "memory_index.h"
 #endif
 #include "util/sandbox.h"
+#if SC_ENABLE_HOST_METRICS
 #include "util/db_migrate.h"
+#endif
 #include "util/json_helpers.h"
 #include "util/str.h"
 
@@ -100,6 +105,7 @@ static const char *const tracked_dpkg_packages[] = {
     NULL
 };
 
+#if SC_ENABLE_HOST_METRICS
 static const char HOST_METRICS_MIGRATION_V1[] =
     "CREATE TABLE IF NOT EXISTS host_samples ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -122,6 +128,7 @@ static const char HOST_METRICS_MIGRATION_V1[] =
 static const char *const HOST_METRICS_MIGRATIONS[] = {
     HOST_METRICS_MIGRATION_V1,
 };
+#endif /* SC_ENABLE_HOST_METRICS */
 
 static char *
 read_small_file(const char *path, size_t max_bytes)
@@ -1102,6 +1109,7 @@ join_path2(const char *a, const char *b)
     return out;
 }
 
+#if SC_ENABLE_HOST_METRICS
 static int
 host_db_open(const char *workspace, sqlite3 **out_db)
 {
@@ -1264,6 +1272,15 @@ sc_host_record_sample(const char *workspace, int force)
     host_db_close(db);
     return rc;
 }
+#else /* !SC_ENABLE_HOST_METRICS */
+int
+sc_host_record_sample(const char *workspace, int force)
+{
+    (void)workspace;
+    (void)force;
+    return -1; /* metrics retention not built; callers treat as no-op */
+}
+#endif /* SC_ENABLE_HOST_METRICS */
 
 int
 sc_host_sample_interval_sec(void)
@@ -1271,6 +1288,7 @@ sc_host_sample_interval_sec(void)
     return HOST_SAMPLE_INTERVAL_SEC;
 }
 
+#if SC_ENABLE_HOST_METRICS
 static int
 load_recent_samples(sqlite3 *db, int period_hours, int max_samples,
                     host_sample_t **out_samples, int *out_count)
@@ -1350,6 +1368,7 @@ load_recent_samples(sqlite3 *db, int period_hours, int max_samples,
     *out_count = count;
     return 0;
 }
+#endif /* SC_ENABLE_HOST_METRICS */
 
 static double
 sample_value_rss(const host_sample_t *s) { return s ? (double)s->vmrss_kb : -1.0; }
@@ -1796,6 +1815,11 @@ host_trend_destroy(sc_tool_t *self)
 static sc_tool_result_t *
 host_trend_execute(sc_tool_t *self, cJSON *args, void *ctx)
 {
+#if !SC_ENABLE_HOST_METRICS
+    (void)self; (void)args; (void)ctx;
+    return sc_tool_result_error(
+        "host metrics retention not built (SC_ENABLE_HOST_METRICS=n)");
+#else
     (void)ctx;
     host_tool_data_t *d = self ? self->data : NULL;
     if (!d || !d->workspace)
@@ -1845,6 +1869,7 @@ host_trend_execute(sc_tool_t *self, cJSON *args, void *ctx)
     sc_tool_result_t *result = sc_tool_result_user(json);
     free(json);
     return result;
+#endif /* SC_ENABLE_HOST_METRICS */
 }
 
 sc_tool_t *

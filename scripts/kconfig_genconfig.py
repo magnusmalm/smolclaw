@@ -37,6 +37,7 @@ FEATURE_SYMS = [
     "SC_ENABLE_CODE_GRAPH",
     "SC_ENABLE_GITEA",
     "SC_ENABLE_CAMERA",
+    "SC_ENABLE_HOST_METRICS",
     # Security and infrastructure (auto-selected, not user-facing)
     "SC_STRICT_SECURITY",
     "NEED_OPENSSL",

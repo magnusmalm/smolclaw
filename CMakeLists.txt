@@ -227,7 +227,6 @@ set(SC_SOURCES
     src/util/secrets.c
     src/util/curl_common.c
     src/util/prompt_guard.c
-    src/util/db_migrate.c
     src/util/sandbox.c
     src/util/sha256.c
     src/util/glob.c
@@ -456,8 +455,12 @@ else()
     target_compile_definitions(smolclaw_lib PUBLIC SC_HAVE_EVENT_OPENSSL=0)
 endif()
 
-# SQLite is a core dependency for host metrics/inventory persistence.
-target_link_libraries(smolclaw_lib PUBLIC sqlite3)
+# SQLite is only linked when a feature actually needs it; the
+# amalgamation alone is ~700 KB and must stay out of minimal builds.
+if(SC_ENABLE_HOST_METRICS OR SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
+    target_sources(smolclaw_lib PRIVATE src/util/db_migrate.c)
+    target_link_libraries(smolclaw_lib PUBLIC sqlite3)
+endif()
 
 # Main executable
 add_executable(smolclaw src/main.c)

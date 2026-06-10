@@ -57,3 +57,32 @@ jobs:
           ls -lh build/smolclaw
           file build/smolclaw
           ./build/smolclaw version
+
+  size-budget:
+    # "smol" is a regression test: the minimal build must stay inside
+    # the SCOPE.md budget (320 KB dynamic, stripped). See
+    # scripts/check_size_budget.sh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential python3-pip \
+            libcurl4-openssl-dev libevent-dev libssl-dev \
+            libreadline-dev libsqlite3-dev
+          pip3 install kconfiglib
+
+      - name: Build minimal (MinSizeRel + gc-sections)
+        run: |
+          cp configs/defconfig.minimal .config
+          cmake -B build-size \
+            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_C_FLAGS="-ffunction-sections -fdata-sections" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections"
+          cmake --build build-size -j$(nproc) --target smolclaw
+
+      - name: Check size budget
+        run: ./scripts/check_size_budget.sh build-size/smolclaw 320 minimal-dynamic

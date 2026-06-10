@@ -154,6 +154,16 @@ config SC_ENABLE_ANALYTICS
 	  Time-series tracking of LLM usage: tokens, tool calls, latency.
 	  Stored in {workspace}/state/analytics.db. Complements cost.c.
 
+config SC_ENABLE_HOST_METRICS
+	bool "Retained host metrics (SQLite) + host_trend tool"
+	default y
+	help
+	  Persist periodic host samples (load, memory, FDs, temperature)
+	  to {workspace}/state/host_metrics.db and enable the host_trend
+	  analysis tool. Pulls the SQLite amalgamation (~700 KB) into the
+	  binary — disable for minimal/embedded builds. The host_status
+	  and host_inventory tools do not need this.
+
 endmenu
 
 menu "Services"
