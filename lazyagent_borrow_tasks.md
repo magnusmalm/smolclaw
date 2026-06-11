@@ -40,8 +40,3 @@ Source: 2026-05-12 cross-repo analysis of https://github.com/illegalstudio/lazya
 ## Open question
 
 Should smolclaw expose its `sessions/{key}.json` in a format lazyagent could optionally tail? Probably not — adds a stable-API obligation for a tiny audience. Revisit only if there's a real reason to view smolclaw sessions in lazyagent's TUI.
-
-## Cross-refs
-
-- ../smolswarm/lazyagent_borrow_tasks.md — bigger borrow list (activity-state inference, rate-limit windows, PBKDF2 auth)
-- Memory: `project_lazyagent_analysis.md` in ~/.claude/projects/-home-magnus-ideas/memory/

@@ -129,10 +129,10 @@ the audit log (`{workspace}/audit.log` by default) for `session_key`
 entries; the consolidation log line includes the original session_key:
 
 ```
-[INFO] agent: Consolidated memory from session web:e8c224f5a698f8ae:wf-researcher-XYZ in 119.5s
+[INFO] agent: Consolidated memory from session web:0123456789abcdef:wf-researcher-XYZ in 119.5s
 ```
 
-The middle component (`e8c224f5a698f8ae`) is the hashed bearer-token
+The middle component (`0123456789abcdef`) is the hashed bearer-token
 identifier, and the suffix is the caller-supplied `session` field.
 
 ### Inspecting a session's content

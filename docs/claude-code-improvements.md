@@ -1,7 +1,7 @@
 # smolclaw: Improvements Inspired by Claude Code CLI
 
 **Date:** 2026-03-31
-**Source analysis:** [smol-vs-claude-code-comparison.md](../../../ideas/smol-vs-claude-code-comparison.md)
+**Source analysis:** internal cross-codebase comparison vs the Claude Code CLI (not tracked in this repo)
 **Claude Code source:** `instructkr/claude-code` (Anthropic CLI, ~512K LOC TypeScript)
 
 This document extracts the recommendations from the cross-codebase comparison

@@ -13,7 +13,7 @@
  * events_dir:   directory of motion-daemon captures, relative to the
  *               workspace (default "camera/motion").
  * vision_url:   base URL of an ollama-compatible vision endpoint
- *               (e.g. "http://10.100.0.3:11434"); NULL disables describe.
+ *               (e.g. "http://192.0.2.10:11434"); NULL disables describe.
  * vision_model: model name for describe (e.g. "gemma4:e4b").
  */
 sc_tool_t *sc_tool_camera_new(const char *workspace,

@@ -1,9 +1,9 @@
 # Design: Session Isolation for smolclaw
 
 **Status**: Design Complete — Implementation Not Started
-**Author**: 2026-05-24 session (root-caused contamination during smolswarm Phase 4 work)
+**Author**: 2026-05-24 design session
 **Last Updated**: 2026-05-24
-**Related**: `src/agent_session.c`, `src/context.c`, `src/memory.c`, `src/channels/web.c`, smolswarm `docs/acceptance-tests/reliability-aggregate-2026-05-23.md` (addendum)
+**Related**: `src/agent_session.c`, `src/context.c`, `src/memory.c`, `src/channels/web.c`
 
 ---
 
@@ -19,20 +19,20 @@ The design is backwards-compatible (opt-in via web-channel config), preserves th
 
 ## 2. Motivation
 
-### 2.1 The contamination incident (2026-05-24)
+### 2.1 The contamination class
 
-After the v2 Phase 2 work landed on 2026-05-23, a smoke test against the smolswarm researcher reported a 3/4 = 75% reliability rate. A follow-up campaign on 2026-05-24 to confirm this rate produced two consecutive failures with a distinctive symptom: the researcher's `research_outline` and `research_progress` for a **smolswarm README append task** contained content about **smolchat per-channel retention policies** (`sc_chat_config_t`, `archive_after_days`, `fnmatch`).
+During multi-workflow reliability testing, two consecutive research runs failed with a distinctive symptom: the researcher's `research_outline` and `research_progress` for one task contained content from an *unrelated earlier caller's* research topic.
 
-Tracing the researcher journal showed:
+Tracing the agent journal showed back-to-back memory consolidations from different workflow sessions sharing the same web-channel token hash:
 
 ```
-01:53:44  Consolidated memory from session web:e8c224f5a698f8ae:wf-researcher-123d2223c6
-02:04:14  Consolidated memory from session web:e8c224f5a698f8ae:wf-researcher-123df94873
+01:53:44  Consolidated memory from session web:<token-hash>:wf-researcher-<id1>
+02:04:14  Consolidated memory from session web:<token-hash>:wf-researcher-<id2>
 ```
 
-Earlier the same day, an unrelated caller had triggered a smolchat retention research turn under the same web-channel token (the `e8c224f5a698f8ae` component is a hash of the bearer token, shared across all web callers). After that turn finished, smolclaw consolidated its memory and appended to today's workspace memory file. When the smoke test's new turn began, the agent's prompt builder loaded the same workspace memory back out, and the LLM — presented with new task instructions plus a heavy load of prior smolchat-retention context (229,345 prompt tokens vs ~50k in a clean run) — continued the prior research narrative instead of honoring the new prompt.
+Earlier the same day, an unrelated caller had run a research turn under the same web-channel token (the middle component is a hash of the bearer token, shared across all web callers). After that turn finished, smolclaw consolidated its memory and appended to the day's workspace memory file. When the next turn began, the agent's prompt builder loaded the same workspace memory back out, and the LLM — presented with new task instructions plus a heavy load of the prior caller's context (a ~4–5x larger prompt than a clean run) — continued the prior research narrative instead of honoring the new prompt.
 
-The reliability runs that "passed" earlier did so because their workspace memory was already smolswarm-flavored from immediately-prior runs. The measured number was an artifact of memory alignment, not of architectural correctness.
+Reliability runs that "passed" earlier did so because their workspace memory was already aligned with their own topic from immediately-prior runs. The measured number was an artifact of memory alignment, not of architectural correctness.
 
 ### 2.2 Why this matters
 
@@ -401,16 +401,15 @@ The feature is "done" when:
 
 1. All stages land in master with passing CI.
 2. The end-to-end contamination scenario in Stage 8 produces clean output.
-3. The smolswarm reliability smoke (`scripts/smoke-test-research-flow.sh`), run after a deliberate cross-task contamination attempt, passes ≥3 consecutive times — meaning the prior cross-task content does not appear in the Outline/Drill-down/Synthesis of the new task.
-4. `docs/acceptance-tests/session-isolation-*.md` records the validation.
+3. The fleet reliability smoke test, run after a deliberate cross-task contamination attempt, passes ≥3 consecutive times — meaning the prior cross-task content does not appear in the Outline/Drill-down/Synthesis of the new task.
+4. Validation results are recorded in acceptance-test notes.
 5. `docs/operations/session-isolation.md` is published.
 
-After validation, smolswarm's `docs/acceptance-tests/reliability-aggregate-2026-05-23.md` addendum is replaced (or amended) with the post-isolation reliability number, which is the first statistically meaningful number for the v2 architecture.
+After validation, the post-isolation reliability number replaces the pre-isolation baseline as the first statistically meaningful number for the architecture.
 
 ---
 
 ## 13. Related work
 
-- v2 plan Phase 4 ("Ephemeral Research Scratchpad + Memory Hygiene"): `smolswarm/docs/reviews/v2-final-unified-multi-agent-execution-plan-2026-05-16.md:148`. The original framing was scratchpad-only; this design covers the broader memory contamination vector that was discovered during 2026-05-24 diagnosis.
-- Contamination evidence: `smolswarm/docs/acceptance-tests/reliability-aggregate-2026-05-23.md` (addendum).
-- 330s `max_turn_secs` fix (2026-05-23, smolclaw `constants_limits.h:35` driven from smolswarm researcher config): independent of this work, already validated.
+- The original fleet-plan framing was scratchpad-only ("Ephemeral Research Scratchpad + Memory Hygiene"); this design covers the broader memory contamination vector that was discovered during diagnosis.
+- 330s `max_turn_secs` fix (smolclaw `constants_limits.h:35`): independent of this work, already validated.

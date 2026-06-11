@@ -1,6 +1,6 @@
 # Zed Patterns — Actionable Items for smolclaw
 
-Extracted from the cross-codebase analysis: [zed-patterns-for-smol-ecosystem.md](../../../ideas/zed-patterns-for-smol-ecosystem.md)
+Extracted from an internal cross-codebase analysis of the Zed editor's agent patterns (not tracked in this repo).
 
 **Date**: 2026-03-31
 

@@ -8,10 +8,10 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 ## Highlights
 
-- **257 KB** dynamic-minimal binary (CI-enforced budget: 320 KB), **4.6 MB** fully static (musl, zero runtime deps)
+- **256 KB** dynamic-minimal binary (CI-enforced budget: 320 KB), **4.6 MB** fully static (musl, zero runtime deps)
 - **672 KB** peak RSS (musl-static)
 - **28** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
-- C11 strict, zero warnings, no garbage collector, no runtime
+- C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector, no runtime
 
 ## Features
 
@@ -93,7 +93,7 @@ cmake --build build-armv7l -j$(nproc)
 
 ### Feature flags (Kconfig)
 
-smolclaw uses [Kconfig](https://www.kernel.org/doc/html/latest/kbuild/kconfig-language.html) for compile-time feature selection. All features default to ON.
+smolclaw uses [Kconfig](https://www.kernel.org/doc/html/latest/kbuild/kconfig-language.html) for compile-time feature selection. Most features default ON; newer or optional ones (camera, gitea, X, voice, code graph, analytics, delegate, output filter) default OFF — see `Kconfig` for the authoritative defaults.
 
 ```bash
 # Interactive configuration
@@ -107,7 +107,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_GIT`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
 
 ## Architecture
 
@@ -220,7 +220,7 @@ SMOLCLAW_HOME=~/.smolclaw/agents/coder smolclaw gateway
 SMOLCLAW_HOME=~/.smolclaw/agents/researcher smolclaw gateway
 ```
 
-For fleet deployment, [smolswarm](https://github.com/magnusmalm/smolswarm) manages multi-agent provisioning with systemd template units (`smolclaw-agent@<name>.service`), per-agent vault provisioning, and a dispatcher agent that routes tasks to workers via the `delegate` tool.
+For fleet deployment, a companion tool (smolswarm) manages multi-agent provisioning with systemd template units (`smolclaw-agent@<name>.service`), per-agent vault provisioning, and a dispatcher agent that routes tasks to workers via the `delegate` tool.
 
 #### Delegation
 
@@ -232,7 +232,7 @@ The `delegate` tool sends tasks to remote agents via their Web REST API:
     "targets": [
       {
         "name": "researcher",
-        "url": "http://10.100.0.3:8082/api/message",
+        "url": "http://192.0.2.10:8082/api/message",
         "bearer_token": "vault://researcher_token",
         "timeout_secs": 120
       }
@@ -430,10 +430,10 @@ Build-time version includes git metadata:
 
 ```
 $ smolclaw version
-🦞 smolclaw 0.9.0 (34938ea4, 2026-03-07T00:00:00Z)
+🦞 smolclaw 0.9.1 (34938ea4, 2026-03-07T00:00:00Z)
 ```
 
-The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.9.0+34938ea4`).
+The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.9.1+34938ea4`).
 
 ### Commands
 

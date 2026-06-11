@@ -6,7 +6,7 @@
 /*
  * Gitea API tool — create repos, issues, PRs, and comments.
  *
- * api_url:     Gitea base URL (e.g. "http://192.168.1.118:3000")
+ * api_url:     Gitea base URL (e.g. "https://gitea.example.com")
  * api_token:   Personal access token
  * default_org: Default org for repo creation (NULL for user repos)
  */

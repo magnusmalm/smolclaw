@@ -176,7 +176,7 @@ typedef struct {
 /* Delegation target config */
 typedef struct {
     char *name;           /* "researcher" */
-    char *url;            /* "http://10.100.0.3:8082/api/message" */
+    char *url;            /* "http://192.0.2.10:8082/api/message" */
     char *bearer_token;   /* supports vault:// */
     int   timeout_secs;   /* default 120 */
 } sc_delegate_target_t;
@@ -306,7 +306,7 @@ typedef struct {
 
     /* Gitea */
     struct {
-        char *url;          /* Base URL, e.g. "http://192.168.1.118:3000" */
+        char *url;          /* Base URL, e.g. "https://gitea.example.com" */
         char *token;        /* API token (vault:// supported) */
         char *default_org;  /* Default org for repo creation */
     } gitea;
