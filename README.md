@@ -8,9 +8,9 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 ## Highlights
 
-- **280 KB** dynamic-minimal binary, **4.6 MB** fully static (musl, zero runtime deps)
+- **257 KB** dynamic-minimal binary (CI-enforced budget: 320 KB), **4.6 MB** fully static (musl, zero runtime deps)
 - **672 KB** peak RSS (musl-static)
-- **25** compile-time feature flags via Kconfig — build exactly what you need
+- **28** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
 - C11 strict, zero warnings, no garbage collector, no runtime
 
 ## Features
@@ -19,10 +19,11 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 |-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
 | **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
-| **Tools**       | File read/write/edit/append/list, shell exec, git (init/config/push/pull + remote allowlist), gitea (repos/issues/PRs), web search/fetch, X read, memory read/write/log/search, context search, code graph, message, note (scratchpad), cron, spawn, delegate, converse, notify, background processes (up to 26 built-in) |
+| **Tools**       | File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is deny-by-default without an explicit remote allowlist), gitea (repos/issues/PRs), web search/fetch, X read, memory read/write/log/search, context search, code graph, message, note (scratchpad), cron, spawn, delegate, converse, notify, background processes, camera (capture stills, list motion events, describe images via a remote vision model — `SC_ENABLE_CAMERA`) |
 | **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic action log |
 | **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense, tool output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API |
-| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost reporting to smolchat |
+| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost reporting to smolchat (single pricing path via cost.c; local models report $0, provider actuals preferred) |
+| **Web UI**      | Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn progress log with provider/model per step (`/api/progress`), optional live-stream embed (`channels.web.embed_stream_url`, e.g. a motion-daemon MJPEG feed) |
 | **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote delegation via REST, multi-turn dialogue (converse tool), cross-agent memory search, per-session workspace isolation (`workspace_per_session` with auto-prune), per-agent workspaces via `SMOLCLAW_HOME`, [per-session memory isolation](docs/operations/session-isolation.md) for delegate sessions (`channels.web.isolation_pattern`, default `wf-*`), per-turn tool-workspace narrowing via inbound `run_repo_dir` (gateway scopes `read_file`/`list_dir`/`exec`/`git` to `<workspace>/<run_repo_dir>` for the duration of one turn — agent-wide memory paths untouched) |
 | **Services**    | Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics                                                                                               |
 
