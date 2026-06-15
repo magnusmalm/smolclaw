@@ -2,114 +2,117 @@
 
 ## At a Glance
 
-| Dimension | **grok-cli** | **smolclaw** |
-|-----------|-------------|-------------|
-| **Language** | TypeScript (Bun runtime) | C11 (zero runtime) |
-| **Binary size** | ~100+ MB (node_modules) | 280 KB dynamic / 4.6 MB static |
-| **Peak RSS** | Not documented (Node-class) | 672 KB (musl-static) |
-| **LOC** | ~11K TS | ~34K C |
-| **Source files** | ~59 modules | ~161 files |
-| **License** | MIT | Private (Gitea) |
-| **Target** | Developer desktops | Edge devices to servers |
+| Dimension        | **grok-cli**                | **smolclaw**                   |
+|------------------|-----------------------------|--------------------------------|
+| **Language**     | TypeScript (Bun runtime)    | C11 (zero runtime)             |
+| **Binary size**  | ~100+ MB (node_modules)     | 280 KB dynamic / 4.6 MB static |
+| **Peak RSS**     | Not documented (Node-class) | 672 KB (musl-static)           |
+| **LOC**          | ~11K TS                     | ~34K C                         |
+| **Source files** | ~59 modules                 | ~161 files                     |
+| **License**      | MIT                         | Private (Gitea)                |
+| **Target**       | Developer desktops          | Edge devices to servers        |
 
 ## Architecture
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Core loop** | Vercel AI SDK `streamText()` -> tool calls -> iterate | Custom C loop: context build -> LLM call -> tool exec -> iterate |
-| **Concurrency** | Single-threaded (Bun event loop) | Single-threaded agent + channel threads + async summarization thread |
-| **Message bus** | Direct function calls | Thread-safe pipe-based bus (libevent) |
-| **Abstraction style** | TypeScript modules + Zod schemas | C vtables (`sc_tool_t`, `sc_provider_t`, `sc_channel_t`) |
-| **Error recovery** | Basic retry | 2-level rewind with checkpoints, exponential backoff, fallback provider chain |
+- **Core loop** — grok-cli: Vercel AI SDK `streamText()` -> tool calls -> iterate; smolclaw: Custom
+  C loop: context build -> LLM call -> tool exec -> iterate
+- **Concurrency** — grok-cli: Single-threaded (Bun event loop); smolclaw: Single-threaded agent +
+  channel threads + async summarization thread
+- **Message bus** — grok-cli: Direct function calls; smolclaw: Thread-safe pipe-based bus (libevent)
+- **Abstraction style** — grok-cli: TypeScript modules + Zod schemas; smolclaw: C vtables
+  (`sc_tool_t`, `sc_provider_t`, `sc_channel_t`)
+- **Error recovery** — grok-cli: Basic retry; smolclaw: 2-level rewind with checkpoints, exponential
+  backoff, fallback provider chain
 
 grok-cli leans on the Vercel AI SDK to abstract the agent loop — clean but coupled to that framework. smolclaw owns the entire stack from socket to tool execution, giving it fine-grained control over retry, rate limiting, and error budgets.
 
 ## LLM Providers
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Providers** | 1 (xAI Grok only) | 9+ (Anthropic, OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM/Ollama) |
-| **Models** | 11 Grok models | Any model behind supported providers |
-| **Fallback chain** | None | Configurable fallback sequence |
-| **Streaming** | Yes (AI SDK streams) | Yes (SSE callbacks) |
-| **Model routing** | CLI flag / config | Inline (`Use opus: message`), per-channel, per-agent, config, env |
+- **Providers** — grok-cli: 1 (xAI Grok only); smolclaw: 9+ (Anthropic, OpenAI, OpenRouter, Groq,
+  Gemini, DeepSeek, xAI, Zhipu, vLLM/Ollama)
+- **Models** — grok-cli: 11 Grok models; smolclaw: Any model behind supported providers
+- **Fallback chain** — grok-cli: None; smolclaw: Configurable fallback sequence
+- **Streaming** — grok-cli: Yes (AI SDK streams); smolclaw: Yes (SSE callbacks)
+- **Model routing** — grok-cli: CLI flag / config; smolclaw: Inline (`Use opus: message`),
+  per-channel, per-agent, config, env
 
 smolclaw is provider-agnostic by design. grok-cli is locked to xAI — it's a Grok-specific product, not a general agent framework.
 
 ## Channels (User Interfaces)
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Interactive TUI** | React + OpenTUI (rich) | readline CLI (minimal) |
-| **Headless** | `--prompt` + JSONL output | `-m "message"` single-turn |
-| **Telegram** | Yes (long-polling bot) | Yes (long-polling) |
-| **Discord** | No | Yes (WebSocket gateway) |
-| **IRC** | No | Yes (TLS) |
-| **Slack** | No | Yes (Socket Mode) |
-| **Web** | No | Yes (HTTP + WebSocket, port 8080) |
-| **X/Twitter** | No (has search tool, not channel) | Yes (full channel) |
-| **Gateway mode** | No | Yes — all channels + services in one process |
+- **Interactive TUI** — grok-cli: React + OpenTUI (rich); smolclaw: readline CLI (minimal)
+- **Headless** — grok-cli: `--prompt` + JSONL output; smolclaw: `-m "message"` single-turn
+- **Telegram** — grok-cli: Yes (long-polling bot); smolclaw: Yes (long-polling)
+- **Discord** — grok-cli: No; smolclaw: Yes (WebSocket gateway)
+- **IRC** — grok-cli: No; smolclaw: Yes (TLS)
+- **Slack** — grok-cli: No; smolclaw: Yes (Socket Mode)
+- **Web** — grok-cli: No; smolclaw: Yes (HTTP + WebSocket, port 8080)
+- **X/Twitter** — grok-cli: No (has search tool, not channel); smolclaw: Yes (full channel)
+- **Gateway mode** — grok-cli: No; smolclaw: Yes — all channels + services in one process
 
 smolclaw has 7 channels vs grok-cli's 2 (TUI + Telegram). smolclaw's gateway mode runs everything in a single process — a proper multi-channel agent server. grok-cli is firmly a single-user desktop tool.
 
 ## Tools
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Built-in count** | ~12 | 23 |
-| **Filesystem** | read/write/edit | read/write/edit/list/append |
-| **Shell** | bash (bg processes) | exec (fork+exec, deny patterns, Landlock, seccomp) |
-| **Web** | search_web, search_x (Grok Responses API) | web_search (Brave/SearXNG/DDG), web_fetch (SSRF-protected) |
-| **Git** | No dedicated tool | Yes (safe subcommand allowlist) |
-| **Memory** | No (session persistence only) | memory_read/write/log/search (FTS5) |
-| **Messaging** | No | message (cross-channel), notify (Apprise) |
-| **Sub-agents** | task + delegate | spawn + delegate + converse (multi-agent debate) |
-| **Background** | Yes (child process fork) | exec_background + bg_poll + bg_kill |
-| **Media** | image + video generation | No |
-| **Code analysis** | No | code_graph (dependency analysis) |
-| **Cron** | Yes (schedule tool + daemon) | Yes (cron tool) |
-| **MCP** | Client only | Client + Server (bidirectional) |
+- **Built-in count** — grok-cli: ~12; smolclaw: 23
+- **Filesystem** — grok-cli: read/write/edit; smolclaw: read/write/edit/list/append
+- **Shell** — grok-cli: bash (bg processes); smolclaw: exec (fork+exec, deny patterns, Landlock,
+  seccomp)
+- **Web** — grok-cli: search_web, search_x (Grok Responses API); smolclaw: web_search
+  (Brave/SearXNG/DDG), web_fetch (SSRF-protected)
+- **Git** — grok-cli: No dedicated tool; smolclaw: Yes (safe subcommand allowlist)
+- **Memory** — grok-cli: No (session persistence only); smolclaw: memory_read/write/log/search
+  (FTS5)
+- **Messaging** — grok-cli: No; smolclaw: message (cross-channel), notify (Apprise)
+- **Sub-agents** — grok-cli: task + delegate; smolclaw: spawn + delegate + converse (multi-agent
+  debate)
+- **Background** — grok-cli: Yes (child process fork); smolclaw: exec_background + bg_poll + bg_kill
+- **Media** — grok-cli: image + video generation; smolclaw: No
+- **Code analysis** — grok-cli: No; smolclaw: code_graph (dependency analysis)
+- **Cron** — grok-cli: Yes (schedule tool + daemon); smolclaw: Yes (cron tool)
+- **MCP** — grok-cli: Client only; smolclaw: Client + Server (bidirectional)
 
 grok-cli has media generation (images/video) that smolclaw lacks. smolclaw has memory, git, code_graph, cross-channel messaging, notify, and multi-agent debate that grok-cli lacks.
 
 ## Security
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Sandbox** | Shuru microVM (macOS Apple Silicon only) | Landlock + seccomp-bpf (Linux kernel) |
-| **Command filtering** | None | ~90 deny patterns + allowlist/denylist modes |
-| **Prompt injection defense** | None visible | CDATA wrapping, prompt guard, output filtering |
-| **SSRF protection** | None visible | Yes (web_fetch) |
-| **Secret management** | `.env` files | Encrypted vault (`vault://` references) |
-| **Audit logging** | None | Per-day JSONL audit log of all tool calls |
-| **Rate limiting** | None | Per-turn (50 calls), per-hour (configurable), per-minute (gateway) |
+- **Sandbox** — grok-cli: Shuru microVM (macOS Apple Silicon only); smolclaw: Landlock + seccomp-bpf
+  (Linux kernel)
+- **Command filtering** — grok-cli: None; smolclaw: ~90 deny patterns + allowlist/denylist modes
+- **Prompt injection defense** — grok-cli: None visible; smolclaw: CDATA wrapping, prompt guard,
+  output filtering
+- **SSRF protection** — grok-cli: None visible; smolclaw: Yes (web_fetch)
+- **Secret management** — grok-cli: `.env` files; smolclaw: Encrypted vault (`vault://` references)
+- **Audit logging** — grok-cli: None; smolclaw: Per-day JSONL audit log of all tool calls
+- **Rate limiting** — grok-cli: None; smolclaw: Per-turn (50 calls), per-hour (configurable),
+  per-minute (gateway)
 
 This is the widest gap. smolclaw treats security as a first-class concern with defense-in-depth. grok-cli delegates to an optional macOS-only sandbox and has no visible prompt injection or command injection defenses.
 
 ## Persistence & Memory
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Sessions** | SQLite per workspace | JSONL trees with branching |
-| **Long-term memory** | None | Markdown files + FTS5 full-text search |
-| **Memory consolidation** | Context compaction (summarize old turns) | LLM-curated consolidation (recent 3 days kept, older compressed) |
-| **Daily notes** | No | Yes (`YYYY-MM-DD.md`) |
-| **Analytics** | Usage tracking in SQLite | Full analytics (by model, channel, day/week/month) |
-| **State** | Session metadata | Dedicated state tracker + audit log |
+- **Sessions** — grok-cli: SQLite per workspace; smolclaw: JSONL trees with branching
+- **Long-term memory** — grok-cli: None; smolclaw: Markdown files + FTS5 full-text search
+- **Memory consolidation** — grok-cli: Context compaction (summarize old turns); smolclaw:
+  LLM-curated consolidation (recent 3 days kept, older compressed)
+- **Daily notes** — grok-cli: No; smolclaw: Yes (`YYYY-MM-DD.md`)
+- **Analytics** — grok-cli: Usage tracking in SQLite; smolclaw: Full analytics (by model, channel,
+  day/week/month)
+- **State** — grok-cli: Session metadata; smolclaw: Dedicated state tracker + audit log
 
 grok-cli has in-session compaction. smolclaw has a full cross-session memory system with search, consolidation, and daily journaling.
 
 ## Build & Distribution
 
-| | **grok-cli** | **smolclaw** |
-|---|---|---|
-| **Build tool** | tsc + Bun | CMake 3.14+ |
-| **Distribution** | npm (`npm i -g grok-dev`) | Static binary (scp/curl) |
-| **Feature flags** | None | 25 Kconfig flags |
-| **Cross-compile** | N/A (JS) | x86_64, aarch64, armv7l |
-| **Minimal build** | Full only | `defconfig.minimal` -> 280 KB |
-| **Self-update** | npm update | Built-in updater (check/apply/rollback) |
-| **Tests** | Vitest | ctest (per-module) |
+|                   | **grok-cli**              | **smolclaw**                            |
+|-------------------|---------------------------|-----------------------------------------|
+| **Build tool**    | tsc + Bun                 | CMake 3.14+                             |
+| **Distribution**  | npm (`npm i -g grok-dev`) | Static binary (scp/curl)                |
+| **Feature flags** | None                      | 28 Kconfig flags                        |
+| **Cross-compile** | N/A (JS)                  | x86_64, aarch64, armv7l                 |
+| **Minimal build** | Full only                 | `defconfig.minimal` -> 280 KB           |
+| **Self-update**   | npm update                | Built-in updater (check/apply/rollback) |
+| **Tests**         | Vitest                    | ctest (per-module)                      |
 
 ## Design Philosophy
 

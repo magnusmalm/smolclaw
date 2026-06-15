@@ -34,10 +34,10 @@ skills, tools) intact.
 
 Isolation is decided per inbound web request. The deciding inputs:
 
-| Input              | Where it lives                                      |
-|--------------------|-----------------------------------------------------|
-| `isolation_pattern`| `channels.web.isolation_pattern` (config)           |
-| `session`          | the `session` field in the POST body to `/api/message` |
+| Input               | Where it lives                                         |
+|---------------------|--------------------------------------------------------|
+| `isolation_pattern` | `channels.web.isolation_pattern` (config)              |
+| `session`           | the `session` field in the POST body to `/api/message` |
 
 If `isolation_pattern` is non-empty and the request's `session` matches
 it as a glob (`*` = any characters, `?` = one character), the message
@@ -75,13 +75,13 @@ SMOLCLAW_CHANNELS_WEB_ISOLATION_PATTERN=""
 
 Use any glob pattern. Examples:
 
-| Pattern    | Matches                          | Doesn't match                 |
-|------------|----------------------------------|-------------------------------|
-| `wf-*`     | `wf-researcher-abc`, `wf-`       | `chat-1`, `x-wf-y`            |
-| `task-*`   | `task-foo`                       | `wf-foo`                      |
-| `*-iso`    | `smoke-iso`, `-iso`              | `iso`, `iso-x`                |
-| `iso?`     | `iso1`, `isoX`                   | `iso`, `iso12`                |
-| (empty)    | nothing — isolation disabled     | everything                    |
+| Pattern  | Matches                      | Doesn't match      |
+|----------|------------------------------|--------------------|
+| `wf-*`   | `wf-researcher-abc`, `wf-`   | `chat-1`, `x-wf-y` |
+| `task-*` | `task-foo`                   | `wf-foo`           |
+| `*-iso`  | `smoke-iso`, `-iso`          | `iso`, `iso-x`     |
+| `iso?`   | `iso1`, `isoX`               | `iso`, `iso12`     |
+| (empty)  | nothing — isolation disabled | everything         |
 
 Only the web channel honors `isolation_pattern` today. Other channels
 (IRC, CLI, Slack, Discord, Telegram, X) always run shared.

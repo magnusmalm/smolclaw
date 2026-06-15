@@ -179,21 +179,44 @@ OAuth for a powerful LLM backend is high-value; we must be **more paranoid** tha
 
 ### 6.1 Threat Model & Mitigations
 
-| Threat | Mitigation |
-|--------|------------|
-| **Token theft** from disk | `~/.smolclaw/auth.json` created 0600. User home directory perms are the outer boundary (standard for `~/.ssh/`, `~/.netrc`, `~/.aws/credentials`). Never world-readable. |
-| **MITM / cache poisoning** of discovery or token_endpoint | On every refresh we re-validate that the `token_endpoint` from cached discovery is under `auth.x.ai` (or `*.x.ai`). See Hermes `_xai_validate_oauth_endpoint`. Discovery itself is fetched over HTTPS with normal curl verification. |
-| **CSRF / state mismatch** on callback | Cryptographically random `state` (uuid4 hex) + `nonce`. Server rejects if returned state != sent state. |
-| **Redirect URI confusion / open redirect** | Strict validation in C: scheme must be `http`, host exactly `127.0.0.1`, explicit port present. Loopback-only binding (`evhttp_bind_socket` on 127.0.0.1, never 0.0.0.0 or `::`). |
-| **Malicious callback server on same port** | `allow_reuse_address` is used carefully; we bind first and fail fast if port busy. Short-lived (180s timeout). |
-| **JWT confusion / alg:none / signature bypass** | We **never** verify the signature for expiry check. We only parse the `exp` claim after base64url decode (untrusted input). All real validation happens at xAI when the bearer token is presented. If the JWT is garbage we treat it as "not expiring soon" (safe fallback). |
-| **Refresh token replay / invalid_grant** | On 400/401 from refresh we surface a typed error with `relogin_required` and tell the user to run `smolclaw auth login xai` again. We do **not** retry forever. |
-| **Token leakage in logs / audit / traces / crash dumps** | All token fields go through the existing redaction filter (`src/util/redact.c` / prompt guard). `Authorization` headers are never logged at INFO level. |
-| **Long-lived refresh token** | `offline_access` scope is required for refresh; this is intentional (matches official CLI + Hermes). User can revoke at accounts.x.ai settings or via `smolclaw auth logout xai`. |
-| **Browser / local attacker** | Callback page is minimal static HTML. No JavaScript. CORS allowlist is extremely narrow (only `https://accounts.x.ai` and `https://auth.x.ai`). |
-| **Remote / SSH session abuse** | Automatic detection (env vars `SSH_CONNECTION`, `SSH_CLIENT`, `TERM=dumb`, no controlling tty, `SMOLCLAW_NO_BROWSER=1`) forces `--no-browser` behavior: URL is printed, user must open it on their workstation. The callback listener still runs on the remote host. |
-| **Client impersonation** | We are a public client (no client_secret). Security comes from PKCE + exact redirect_uri + short-lived codes. We add `referrer=smolclaw` for attribution (same as Hermes uses `hermes-agent`). |
-| **Supply-chain / future client_id rotation** | Client ID is a constant in the source (easy to update in one place + release note). Document that xAI could change it and we will follow. |
+- ****Token theft** from disk** — `~/.smolclaw/auth.json` created 0600. User home directory perms
+  are the outer boundary (standard for `~/.ssh/`, `~/.netrc`, `~/.aws/credentials`). Never
+  world-readable.
+- ****MITM / cache poisoning** of discovery or token_endpoint** — On every refresh we re-validate
+  that the `token_endpoint` from cached discovery is under `auth.x.ai` (or `*.x.ai`). See Hermes
+  `_xai_validate_oauth_endpoint`. Discovery itself is fetched over HTTPS with normal curl
+  verification.
+- ****CSRF / state mismatch** on callback** — Cryptographically random `state` (uuid4 hex) +
+  `nonce`. Server rejects if returned state != sent state.
+- **Redirect URI confusion / open redirect** — Strict validation in C: scheme must be `http`, host
+  exactly `127.0.0.1`, explicit port present. Loopback-only binding (`evhttp_bind_socket` on
+  127.0.0.1, never 0.0.0.0 or `::`).
+- **Malicious callback server on same port** — `allow_reuse_address` is used carefully; we bind
+  first and fail fast if port busy. Short-lived (180s timeout).
+- **JWT confusion / alg:none / signature bypass** — We **never** verify the signature for expiry
+  check. We only parse the `exp` claim after base64url decode (untrusted input). All real validation
+  happens at xAI when the bearer token is presented. If the JWT is garbage we treat it as "not
+  expiring soon" (safe fallback).
+- **Refresh token replay / invalid_grant** — On 400/401 from refresh we surface a typed error with
+  `relogin_required` and tell the user to run `smolclaw auth login xai` again. We do **not** retry
+  forever.
+- **Token leakage in logs / audit / traces / crash dumps** — All token fields go through the
+  existing redaction filter (`src/util/redact.c` / prompt guard). `Authorization` headers are never
+  logged at INFO level.
+- **Long-lived refresh token** — `offline_access` scope is required for refresh; this is intentional
+  (matches official CLI + Hermes). User can revoke at accounts.x.ai settings or via `smolclaw auth
+  logout xai`.
+- **Browser / local attacker** — Callback page is minimal static HTML. No JavaScript. CORS allowlist
+  is extremely narrow (only `https://accounts.x.ai` and `https://auth.x.ai`).
+- **Remote / SSH session abuse** — Automatic detection (env vars `SSH_CONNECTION`, `SSH_CLIENT`,
+  `TERM=dumb`, no controlling tty, `SMOLCLAW_NO_BROWSER=1`) forces `--no-browser` behavior: URL is
+  printed, user must open it on their workstation. The callback listener still runs on the remote
+  host.
+- **Client impersonation** — We are a public client (no client_secret). Security comes from PKCE +
+  exact redirect_uri + short-lived codes. We add `referrer=smolclaw` for attribution (same as Hermes
+  uses `hermes-agent`).
+- **Supply-chain / future client_id rotation** — Client ID is a constant in the source (easy to
+  update in one place + release note). Document that xAI could change it and we will follow.
 
 ### 6.2 Comparison to Existing OAuth 1.0a (X Channel)
 

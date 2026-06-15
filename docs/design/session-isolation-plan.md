@@ -114,10 +114,10 @@ Every caller shares the same `workspace/memory/` namespace. Session keys differ 
 
 ### 5.3 Channel responsibility split
 
-| Channel | Default isolation behavior | Configurable via |
-|---|---|---|
-| `web` | Pattern-based: session-name matches `isolation_pattern` ⇒ isolated. Default pattern: `wf-*`. | `channels.web.isolation_pattern` |
-| `irc`, `discord`, `telegram`, `slack`, `x`, `cli` | Always non-isolated (unchanged) | — (no config) |
+- **`web`** — Default isolation behavior: Pattern-based: session-name matches `isolation_pattern` ⇒
+  isolated. Default pattern: `wf-*`.; Configurable via: `channels.web.isolation_pattern`
+- **`irc`, `discord`, `telegram`, `slack`, `x`, `cli`** — Default isolation behavior: Always
+  non-isolated (unchanged); Configurable via: — (no config)
 
 For now only the web channel needs to set isolation, because only the web channel receives smolswarm delegate calls. Other channels keep their existing semantics. The `sc_inbound_msg_t.isolated` flag is wired through generically, so future channels can opt in.
 
@@ -348,15 +348,18 @@ Each stage is small enough to review on its own; the build/test/doc requirement 
 
 ## 9. Tests summary
 
-| File | Stage | What it proves |
-|---|---|---|
-| `tests/test_glob.c` | 1 | Glob helper correctness |
-| `tests/test_memory_namespaced.c` | 2 | Memory layer enforces namespace boundaries |
-| `tests/test_context_isolation.c` (or extension) | 3 | System prompt omits memory when isolated |
-| `tests/test_session_isolation.c` | 4 | Consolidation honors isolation; post-compact uses per-session scratchpad |
-| `tests/test_web_isolation.c` (or extension) | 5 | Web channel sets the flag based on pattern + config |
-| Cleanup test | 6 | TTL-based reaper works |
-| `docs/acceptance-tests/session-isolation-*.md` | 8 | End-to-end contamination scenario produces clean output |
+- **`tests/test_glob.c`** — Stage: 1; What it proves: Glob helper correctness
+- **`tests/test_memory_namespaced.c`** — Stage: 2; What it proves: Memory layer enforces namespace
+  boundaries
+- **`tests/test_context_isolation.c` (or extension)** — Stage: 3; What it proves: System prompt
+  omits memory when isolated
+- **`tests/test_session_isolation.c`** — Stage: 4; What it proves: Consolidation honors isolation;
+  post-compact uses per-session scratchpad
+- **`tests/test_web_isolation.c` (or extension)** — Stage: 5; What it proves: Web channel sets the
+  flag based on pattern + config
+- **Cleanup test** — Stage: 6; What it proves: TTL-based reaper works
+- **`docs/acceptance-tests/session-isolation-*.md`** — Stage: 8; What it proves: End-to-end
+  contamination scenario produces clean output
 
 CI (`ctest --test-dir build`) must pass at every stage. No skipped tests, no `xfail`.
 

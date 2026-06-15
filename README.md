@@ -15,17 +15,37 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 ## Features
 
-| Category        | Features                                                                                                                                                  |
-|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Channels**    | CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat UI), X/Twitter (REST polling, OAuth 1.0a)                                                 |
-| **Providers**   | Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM, Ollama                                                                                 |
-| **Tools**       | File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is deny-by-default without an explicit remote allowlist), gitea (repos/issues/PRs), web search/fetch, X read, memory read/write/log/search, context search, code graph, message, note (scratchpad), cron, spawn, delegate, converse, notify, background processes, camera (capture stills, list motion events, describe images via a remote vision model — `SC_ENABLE_CAMERA`) |
-| **Memory**      | Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic action log |
-| **Security**    | ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense, tool output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API |
-| **Integration** | SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost reporting to smolchat (single pricing path via cost.c; local models report $0, provider actuals preferred) |
-| **Web UI**      | Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn progress log with provider/model per step (`/api/progress`), optional live-stream embed (`channels.web.embed_stream_url`, e.g. a motion-daemon MJPEG feed) |
-| **Multi-agent** | Subagent spawning (in-process, depth limit 3), remote delegation via REST, multi-turn dialogue (converse tool), cross-agent memory search, per-session workspace isolation (`workspace_per_session` with auto-prune), per-agent workspaces via `SMOLCLAW_HOME`, [per-session memory isolation](docs/operations/session-isolation.md) for delegate sessions (`channels.web.isolation_pattern`, default `wf-*`), per-turn tool-workspace narrowing via inbound `run_repo_dir` (gateway scopes `read_file`/`list_dir`/`exec`/`git` to `<workspace>/<run_repo_dir>` for the duration of one turn — agent-wide memory paths untouched) |
-| **Services**    | Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics                                                                                               |
+- **Channels** — CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat
+  UI), X/Twitter (REST polling, OAuth 1.0a)
+- **Providers** — Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM,
+  Ollama
+- **Tools** — File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is
+  deny-by-default without an explicit remote allowlist), gitea (repos/issues/PRs), web search/fetch,
+  X read, memory read/write/log/search, context search, code graph, message, note (scratchpad),
+  cron, spawn, delegate, converse, notify, background processes, camera (capture stills, list motion
+  events, describe images via a remote vision model — `SC_ENABLE_CAMERA`)
+- **Memory** — Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search
+  (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic
+  action log
+- **Security** — ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool
+  confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense, tool
+  output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec
+  blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API
+- **Integration** — SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for
+  Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost
+  reporting to smolchat (single pricing path via cost.c; local models report $0, provider actuals
+  preferred)
+- **Web UI** — Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn
+  progress log with provider/model per step (`/api/progress`), optional live-stream embed
+  (`channels.web.embed_stream_url`, e.g. a motion-daemon MJPEG feed)
+- **Multi-agent** — Subagent spawning (in-process, depth limit 3), remote delegation via REST,
+  multi-turn dialogue (converse tool), cross-agent memory search, per-session workspace isolation
+  (`workspace_per_session` with auto-prune), per-agent workspaces via `SMOLCLAW_HOME`, [per-session
+  memory isolation](docs/operations/session-isolation.md) for delegate sessions
+  (`channels.web.isolation_pattern`, default `wf-*`), per-turn tool-workspace narrowing via inbound
+  `run_repo_dir` (gateway scopes `read_file`/`list_dir`/`exec`/`git` to `<workspace>/<run_repo_dir>`
+  for the duration of one turn — agent-wide memory paths untouched)
+- **Services** — Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics
 
 ## Quickstart
 
@@ -121,25 +141,25 @@ User ─── Channel ──┘         │
                              └── Services (Cron, Heartbeat, Updater)
 ```
 
-| Component       | Location                     | Purpose                                         |
-|-----------------|------------------------------|--------------------------------------------------|
-| Agent           | `src/agent.c`                | Initialization, model routing, tool registration, observation masking |
-| Agent Turn      | `src/agent_turn.c`           | Core loop, retry logic, rate limiting, action log |
-| Agent Session   | `src/agent_session.c`        | Async summarization, memory consolidation, action-only compaction |
-| Bus             | `src/bus.c`                  | Thread-safe message queue (libevent pipes)       |
-| Providers       | `src/providers/`             | Claude, HTTP (OpenAI-compat), factory routing    |
-| Tools           | `src/tools/`                 | Registry + individual tools                      |
-| MCP             | `src/mcp/`                   | External tool servers via JSON-RPC 2.0           |
-| Channels        | `src/channels/`              | CLI, Telegram, Discord, IRC, Slack, Web, X       |
-| Memory          | `src/memory.c`               | Long-term memory + daily notes                   |
-| Sessions        | `src/session.c`              | Per-conversation JSON, auto-truncation + summarization |
-| Context         | `src/context.c`              | System prompt builder, scratchpad + action log injection |
-| Config          | `src/config.c`               | JSON config + env var overrides                  |
-| Analytics       | `src/analytics.c`            | Token usage and performance tracking             |
-| Tee             | `src/tee.c`                  | Tool output mirroring                            |
-| Output Filter   | `src/tools/output_filter.c`  | Tool output sanitization and truncation          |
-| Updater         | `src/updater/`               | Transport-agnostic self-update (HTTP built-in)   |
-| Security        | `src/util/`                  | Sandbox, secrets, prompt guard, path validation  |
+| Component     | Location                    | Purpose                                         |
+|---------------|-----------------------------|-------------------------------------------------|
+| Agent         | `src/agent.c`               | Init, model routing, tool registration          |
+| Agent Turn    | `src/agent_turn.c`          | Core loop, retries, rate limiting, action log   |
+| Agent Session | `src/agent_session.c`       | Summarization, consolidation, compaction        |
+| Bus           | `src/bus.c`                 | Thread-safe message queue (libevent pipes)      |
+| Providers     | `src/providers/`            | Claude, HTTP (OpenAI-compat), factory routing   |
+| Tools         | `src/tools/`                | Registry + individual tools                     |
+| MCP           | `src/mcp/`                  | External tool servers via JSON-RPC 2.0          |
+| Channels      | `src/channels/`             | CLI, Telegram, Discord, IRC, Slack, Web, X      |
+| Memory        | `src/memory.c`              | Long-term memory + daily notes                  |
+| Sessions      | `src/session.c`             | Per-conversation JSON, truncation + summary     |
+| Context       | `src/context.c`             | System prompt builder, scratchpad/action log    |
+| Config        | `src/config.c`              | JSON config + env var overrides                 |
+| Analytics     | `src/analytics.c`           | Token usage and performance tracking            |
+| Tee           | `src/tee.c`                 | Tool output mirroring                           |
+| Output Filter | `src/tools/output_filter.c` | Tool output sanitization and truncation         |
+| Updater       | `src/updater/`              | Transport-agnostic self-update (HTTP built-in)  |
+| Security      | `src/util/`                 | Sandbox, secrets, prompt guard, path validation |
 
 ## Configuration
 

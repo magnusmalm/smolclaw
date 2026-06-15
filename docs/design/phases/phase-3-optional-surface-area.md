@@ -11,14 +11,17 @@
 
 ## 1. Scope
 
-| # | Task | Source | LOC | Binary | Gate |
-|---|------|--------|-----|--------|------|
-| 3.1 | Signal channel MVP (Phase 0+1) | signal-channel.md | 800–1,000 | +40–80 KB | `SC_ENABLE_SIGNAL` **default n** |
-| 3.2 | Operator mode presets | smallharness §6 task 5 | 150–250 | ~5 KB | config |
-| 3.3 | Enhanced tool confirmation | smallharness §6 task 6 | 200–350 | ~10 KB | config |
-| 3.4 | X `note_tweet` field | todo.md | 10–20 | ~0 | always |
-| 3.5 | Notify: Slack + ntfy backends | todo.md | 80–120 | ~5 KB | optional |
-| 3.6 | Subagent tool deny matrices | claude-code P1 #3 | 40–60 | ~0 | always |
+- **3.1** — Task: Signal channel MVP (Phase 0+1); Source: signal-channel.md; LOC: 800–1,000; Binary:
+  +40–80 KB; Gate: `SC_ENABLE_SIGNAL` **default n**
+- **3.2** — Task: Operator mode presets; Source: smallharness §6 task 5; LOC: 150–250; Binary: ~5
+  KB; Gate: config
+- **3.3** — Task: Enhanced tool confirmation; Source: smallharness §6 task 6; LOC: 200–350; Binary:
+  ~10 KB; Gate: config
+- **3.4** — Task: X `note_tweet` field; Source: todo.md; LOC: 10–20; Binary: ~0; Gate: always
+- **3.5** — Task: Notify: Slack + ntfy backends; Source: todo.md; LOC: 80–120; Binary: ~5 KB; Gate:
+  optional
+- **3.6** — Task: Subagent tool deny matrices; Source: claude-code P1 #3; LOC: 40–60; Binary: ~0;
+  Gate: always
 
 ---
 
@@ -117,12 +120,12 @@ Each mode sets:
 
 ## 4. Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Signal daemon API drift | Version note in docs; defensive JSON parsing |
-| UUID vs phone pairing bugs | Explicit test cases from design §8.2 |
-| Diff confirm on Telegram | Summary text fallback |
-| Operator mode clobber custom config | `custom` mode no-op on reload |
+| Risk                                | Mitigation                                   |
+|-------------------------------------|----------------------------------------------|
+| Signal daemon API drift             | Version note in docs; defensive JSON parsing |
+| UUID vs phone pairing bugs          | Explicit test cases from design §8.2         |
+| Diff confirm on Telegram            | Summary text fallback                        |
+| Operator mode clobber custom config | `custom` mode no-op on reload                |
 
 ---
 

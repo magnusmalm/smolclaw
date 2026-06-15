@@ -12,15 +12,19 @@
 
 Phase 0 fixes foundations before any feature work touches `agent_turn.c`, providers, or channels.
 
-| # | Task | Source | LOC | Binary | Smol |
-|---|------|--------|-----|--------|------|
-| 0.1 | Record size & test baseline | master-plan §7 | — | — | ✓ |
-| 0.2 | Audit high-severity fixes (H-1–H-11) | code-analysis-report | 250–400 | +0–5 KB | ✓ |
-| 0.3 | Audit medium fixes (priority subset) | code-analysis-report | 100–200 | ~0 | ✓ |
-| 0.4 | Binary size build profile | todo.md | 50–100 CMake | **−10–25%** | ✓✓ |
-| 0.5 | Optional SQLite FTS5 gate | todo.md | 20–50 CMake | **−50–200 KB** minimal | ✓✓ |
-| 0.6 | Checkpoint & rewind | plan-checkpoint-rewind | 100–150 | ~0 | ✓ |
-| 0.7 | sc_task_t + summarization join (M-8) | zed-patterns T2 | 150–250 | ~5 KB | ✓ |
+- **0.1** — Task: Record size & test baseline; Source: master-plan §7; LOC: —; Binary: —; Smol: ✓
+- **0.2** — Task: Audit high-severity fixes (H-1–H-11); Source: code-analysis-report; LOC: 250–400;
+  Binary: +0–5 KB; Smol: ✓
+- **0.3** — Task: Audit medium fixes (priority subset); Source: code-analysis-report; LOC: 100–200;
+  Binary: ~0; Smol: ✓
+- **0.4** — Task: Binary size build profile; Source: todo.md; LOC: 50–100 CMake; Binary:
+  **−10–25%**; Smol: ✓✓
+- **0.5** — Task: Optional SQLite FTS5 gate; Source: todo.md; LOC: 20–50 CMake; Binary: **−50–200
+  KB** minimal; Smol: ✓✓
+- **0.6** — Task: Checkpoint & rewind; Source: plan-checkpoint-rewind; LOC: 100–150; Binary: ~0;
+  Smol: ✓
+- **0.7** — Task: sc_task_t + summarization join (M-8); Source: zed-patterns T2; LOC: 150–250;
+  Binary: ~5 KB; Smol: ✓
 
 **Out of scope for Phase 0:** arena allocator (Phase 4 or early if provider fixes proliferate), new features, new channels.
 
@@ -38,17 +42,17 @@ Phase 0 fixes foundations before any feature work touches `agent_turn.c`, provid
 
 **Files:** `src/providers/provider_common.c`, `src/providers/http.c`, `src/channels/discord.c`, `src/channels/telegram.c`, `src/tools/file_tools.c`, `src/logger.c`
 
-| ID | Fix |
-|----|-----|
-| H-1 | NULL check after malloc in `sc_curl_write_cb` |
-| H-2, H-3 | NULL check after calloc for tool_calls |
-| H-4 | Bounds check after SSE realloc failure |
-| H-5, H-6 | Validate author/user id before use |
-| H-7 | Block `.git/hooks/` in write paths |
-| H-8 | Mutex around logger writes |
-| H-9 | Serialize Discord SSL access |
-| H-10 | Atomic write (temp + rename) for edit_file |
-| H-11 | Remaining unchecked allocs in http provider |
+| ID       | Fix                                           |
+|----------|-----------------------------------------------|
+| H-1      | NULL check after malloc in `sc_curl_write_cb` |
+| H-2, H-3 | NULL check after calloc for tool_calls        |
+| H-4      | Bounds check after SSE realloc failure        |
+| H-5, H-6 | Validate author/user id before use            |
+| H-7      | Block `.git/hooks/` in write paths            |
+| H-8      | Mutex around logger writes                    |
+| H-9      | Serialize Discord SSL access                  |
+| H-10     | Atomic write (temp + rename) for edit_file    |
+| H-11     | Remaining unchecked allocs in http provider   |
 
 **Acceptance:** Each fix has a test or is covered by existing tests; no new HIGH findings in touched files.
 
@@ -121,12 +125,12 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 
 ## 4. Risks & Mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| Discord SSL mutex changes behavior | Test gateway reconnect |
-| LTO breaks obscure platform | CI matrix glibc + musl |
+| Risk                                   | Mitigation                                    |
+|----------------------------------------|-----------------------------------------------|
+| Discord SSL mutex changes behavior     | Test gateway reconnect                        |
+| LTO breaks obscure platform            | CI matrix glibc + musl                        |
 | Checkpoint rewind loses valid progress | Only rewind on stuck detection; cap at 2/turn |
-| FTS5 gate breaks accidental FTS use | Grep for FTS5 API usage |
+| FTS5 gate breaks accidental FTS use    | Grep for FTS5 API usage                       |
 
 ---
 

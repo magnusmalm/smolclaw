@@ -30,12 +30,12 @@ are real work. Items 3 and 4 are verify-and-document — the audit may
 show they are already lazy, in which case the deliverable is a comment
 that documents the invariant so it doesn't regress.
 
-| # | Target | Status | Expected win |
-|---|--------|--------|-------------:|
-| 1 | FTS5 memory index rebuild | Eager — needs defer | Largest |
-| 2 | Exec deny-regex table (compiled twice) | Eager + duplicated — needs defer + dedup | Medium |
-| 3 | TLS context init (IRC / Web / WSS) | Likely lazy — verify | Small / nil |
-| 4 | Vault unlock probe | Likely lazy — verify | Small / nil |
+- **1** — Target: FTS5 memory index rebuild; Status: Eager — needs defer; Expected win: Largest
+- **2** — Target: Exec deny-regex table (compiled twice); Status: Eager + duplicated — needs defer +
+  dedup; Expected win: Medium
+- **3** — Target: TLS context init (IRC / Web / WSS); Status: Likely lazy — verify; Expected win:
+  Small / nil
+- **4** — Target: Vault unlock probe; Status: Likely lazy — verify; Expected win: Small / nil
 
 Out of scope for this spec: perf wins that *add* state or code without
 reducing RSS (memoization caches, adaptive-poll state machines, regex

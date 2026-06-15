@@ -11,16 +11,21 @@
 
 ## 1. Scope
 
-| # | Task | Source | LOC | Binary | Gate |
-|---|------|--------|-----|--------|------|
-| 2.1 | xAI Grok OAuth provider | xai-grok-oauth.md | <650 | +40–60 KB | `SC_ENABLE_XAI_OAUTH` |
-| 2.2 | `smolclaw auth` subcommand | xai-grok-oauth.md | (in 2.1) | — | same |
-| 2.3 | `smolclaw session compact` | lazyagent #2 | 150–250 | ~5 KB | CLI |
-| 2.4 | `smolclaw session prune` | lazyagent #3 | 80–150 | ~5 KB | CLI |
-| 2.5 | Incremental session reload (optional) | lazyagent #1 | 100–200 | ~5 KB | if needed |
-| 2.6 | Provider health tracking | zed-patterns T6 | 80–150 | ~5 KB | always |
-| 2.7 | Port conflict diagnostics | todo.md | 30–50 | ~0 | always |
-| 2.8 | Verify exponential backoff + fallback | claude-code P1 #5 | 20–50 | ~0 | always |
+- **2.1** — Task: xAI Grok OAuth provider; Source: xai-grok-oauth.md; LOC: <650; Binary: +40–60 KB;
+  Gate: `SC_ENABLE_XAI_OAUTH`
+- **2.2** — Task: `smolclaw auth` subcommand; Source: xai-grok-oauth.md; LOC: (in 2.1); Binary: —;
+  Gate: same
+- **2.3** — Task: `smolclaw session compact`; Source: lazyagent #2; LOC: 150–250; Binary: ~5 KB;
+  Gate: CLI
+- **2.4** — Task: `smolclaw session prune`; Source: lazyagent #3; LOC: 80–150; Binary: ~5 KB; Gate:
+  CLI
+- **2.5** — Task: Incremental session reload (optional); Source: lazyagent #1; LOC: 100–200; Binary:
+  ~5 KB; Gate: if needed
+- **2.6** — Task: Provider health tracking; Source: zed-patterns T6; LOC: 80–150; Binary: ~5 KB;
+  Gate: always
+- **2.7** — Task: Port conflict diagnostics; Source: todo.md; LOC: 30–50; Binary: ~0; Gate: always
+- **2.8** — Task: Verify exponential backoff + fallback; Source: claude-code P1 #5; LOC: 20–50;
+  Binary: ~0; Gate: always
 
 ---
 
@@ -122,12 +127,12 @@ Only implement if gateway restart / multi-process read is a measured bottleneck.
 
 ## 4. Risks
 
-| Risk | Mitigation |
-|------|------------|
-| OAuth token leakage in logs | Redaction tests |
-| Session compact breaks tree | Parse validation before swap; `.bak` |
+| Risk                         | Mitigation                                      |
+|------------------------------|-------------------------------------------------|
+| OAuth token leakage in logs  | Redaction tests                                 |
+| Session compact breaks tree  | Parse validation before swap; `.bak`            |
 | Loopback blocked on some VPS | Document `--no-browser`; user opens URL locally |
-| Compact during active turn | Session lock + `--force` gate |
+| Compact during active turn   | Session lock + `--force` gate                   |
 
 ---
 

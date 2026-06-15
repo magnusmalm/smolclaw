@@ -431,16 +431,18 @@ search then supports filtering by correlation ID.
 
 ## Files to Touch (Summary)
 
-| Change | Files | New code est. |
-|--------|-------|---------------|
-| Tool result size mgmt | `src/tools/registry.c` | ~40 lines |
-| Auto-compaction | `src/agent_turn.c` | ~30 lines |
-| Reactive compaction | `src/agent_turn.c` | ~20 lines |
-| Tool availability matrices | `src/tools/spawn.c`, `src/tools/registry.h` | ~25 lines |
-| Prompt caching | `src/providers/claude.c`, `src/context.c`, `src/providers/types.h` | ~60 lines |
-| Model fallback + backoff | `src/agent_turn.c` | ~35 lines |
-| Old result compression | new `src/tools/context_compress.c` + `src/agent.c` | ~40 lines |
-| Deferred tool loading | `src/tools/registry.c`, new tool | ~100 lines |
-| Correlation IDs | `src/bus.h`, `src/tools/types.h`, `src/tools/delegate.c` | ~30 lines |
+- **Tool result size mgmt** — Files: `src/tools/registry.c`; New code est.: ~40 lines
+- **Auto-compaction** — Files: `src/agent_turn.c`; New code est.: ~30 lines
+- **Reactive compaction** — Files: `src/agent_turn.c`; New code est.: ~20 lines
+- **Tool availability matrices** — Files: `src/tools/spawn.c`, `src/tools/registry.h`; New code
+  est.: ~25 lines
+- **Prompt caching** — Files: `src/providers/claude.c`, `src/context.c`, `src/providers/types.h`;
+  New code est.: ~60 lines
+- **Model fallback + backoff** — Files: `src/agent_turn.c`; New code est.: ~35 lines
+- **Old result compression** — Files: new `src/tools/context_compress.c` + `src/agent.c`; New code
+  est.: ~40 lines
+- **Deferred tool loading** — Files: `src/tools/registry.c`, new tool; New code est.: ~100 lines
+- **Correlation IDs** — Files: `src/bus.h`, `src/tools/types.h`, `src/tools/delegate.c`; New code
+  est.: ~30 lines
 
 Total: ~380 lines of new code across 7 recommendations.

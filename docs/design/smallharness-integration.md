@@ -22,13 +22,11 @@ This document lists concrete, prioritized tasks. None are urgent; all are patter
 
 Local models differ from cloud frontier models in predictable ways:
 
-| Constraint | Symptom without mitigation |
-|------------|---------------------------|
-| Large tool schemas in every turn | Slow prompt-eval, high latency, context waste |
-| Weak tool-call templates | Tool calls emitted as plain JSON text |
-| Prefix-cache engines (llama.cpp, Ollama) | First real prompt pays full system+tools eval |
-| Limited context window | Tool outputs blow the window quickly |
-| Operator uncertainty | Users don't know which local model/backend actually supports tools |
+- **Large tool schemas in every turn** — Slow prompt-eval, high latency, context waste
+- **Weak tool-call templates** — Tool calls emitted as plain JSON text
+- **Prefix-cache engines (llama.cpp, Ollama)** — First real prompt pays full system+tools eval
+- **Limited context window** — Tool outputs blow the window quickly
+- **Operator uncertainty** — Users don't know which local model/backend actually supports tools
 
 SmallHarness treats these as first-class design problems. smolclaw treats local providers as one of many backends — correctly, but without the local-model-specific optimizations SmallHarness has validated in production use.
 
@@ -211,12 +209,12 @@ Tasks are grouped by priority. Each item cites the SmallHarness source pattern a
 
 **Pattern:** SmallHarness `AgentConfig::apply_operator_mode()` in `config.rs`:
 
-| Mode | Tool pool (ceiling) | Approval | Steps |
-|------|---------------------|----------|-------|
-| explore | read/search | dangerous-only | 6–12 |
-| edit | read + edit + patch | always | ≥12 |
-| ship | full + shell | dangerous-only | ≥20 |
-| review | read + shell | dangerous-only | 8–16 |
+| Mode    | Tool pool (ceiling) | Approval       | Steps |
+|---------|---------------------|----------------|-------|
+| explore | read/search         | dangerous-only | 6–12  |
+| edit    | read + edit + patch | always         | ≥12   |
+| ship    | full + shell        | dangerous-only | ≥20   |
+| review  | read + shell        | dangerous-only | 8–16  |
 
 **Apply where:**
 
@@ -270,11 +268,10 @@ Tasks are grouped by priority. Each item cites the SmallHarness source pattern a
 
 **Pairing with existing tools:**
 
-| smolclaw today | Project memory adds |
-|----------------|---------------------|
-| `code_graph` (imports, C symbols) | Cross-language metadata, keyword/heading search, ranked snippets |
-| `memory_search` (FTS5 notes) | Codebase structure, not user notes |
-| `context_search` | Session-scoped, not repo index |
+- **`code_graph` (imports, C symbols)** — Cross-language metadata, keyword/heading search, ranked
+  snippets
+- **`memory_search` (FTS5 notes)** — Codebase structure, not user notes
+- **`context_search`** — Session-scoped, not repo index
 
 **Pitfalls:**
 
@@ -365,19 +362,17 @@ Tasks are grouped by priority. Each item cites the SmallHarness source pattern a
 
 ## 7. Skip — Already Covered or Out of Scope
 
-| SmallHarness feature | smolclaw status |
-|---------------------|-----------------|
-| TUI / bordered input / banner | Web UI + CLI channels — skip |
-| Flat JSONL sessions | Tree sessions in `session.c` — different model; borrow commands only |
-| `memory_search` equivalent | FTS5 in `memory_index.c` — keep |
-| Landlock / seccomp sandbox | smolclaw ahead — do not weaken for parity |
-| MCP tools | smolclaw ahead |
-| Multi-agent spawn/delegate | smolclaw ahead |
-| `/batch` multi-file editor | Lower priority vs spawn/worktree; defer |
-| `/test` smart test runner | Useful but orthogonal; defer |
-| `/prompt` template library | Skills system partially overlaps; defer |
-| OpenRouter `/compare` | Multi-provider fallback sufficient |
-| Mac MLX / LM Studio defaults | Document in user guide; don't encode in binary |
+- **TUI / bordered input / banner** — Web UI + CLI channels — skip
+- **Flat JSONL sessions** — Tree sessions in `session.c` — different model; borrow commands only
+- **`memory_search` equivalent** — FTS5 in `memory_index.c` — keep
+- **Landlock / seccomp sandbox** — smolclaw ahead — do not weaken for parity
+- **MCP tools** — smolclaw ahead
+- **Multi-agent spawn/delegate** — smolclaw ahead
+- **`/batch` multi-file editor** — Lower priority vs spawn/worktree; defer
+- **`/test` smart test runner** — Useful but orthogonal; defer
+- **`/prompt` template library** — Skills system partially overlaps; defer
+- **OpenRouter `/compare`** — Multi-provider fallback sufficient
+- **Mac MLX / LM Studio defaults** — Document in user guide; don't encode in binary
 
 ---
 
@@ -411,15 +406,14 @@ Phase A is the minimum viable "SmallHarness learnings" release.
 
 ## 9. Testing Strategy
 
-| Task | Test approach |
-|------|---------------|
-| Adaptive tool selection | Unit tests with fixed prompts; assert tool count in mock provider request |
-| Warmup | Mock HTTP server; assert single-token request shape; skip on fingerprint match |
-| Streaming buffer | Unit tests ported from SmallHarness `agent.rs` tests |
-| Compaction | Unit tests for JSON truncation paths |
-| Project memory | Temp dir fixture repo; index build, search ranking, incremental refresh |
-| Doctor | Mock provider returning/withholding tool_calls; cache read/write |
-| Session CLI | Integration tests on temp session tree |
+- **Adaptive tool selection** — Unit tests with fixed prompts; assert tool count in mock provider
+  request
+- **Warmup** — Mock HTTP server; assert single-token request shape; skip on fingerprint match
+- **Streaming buffer** — Unit tests ported from SmallHarness `agent.rs` tests
+- **Compaction** — Unit tests for JSON truncation paths
+- **Project memory** — Temp dir fixture repo; index build, search ranking, incremental refresh
+- **Doctor** — Mock provider returning/withholding tool_calls; cache read/write
+- **Session CLI** — Integration tests on temp session tree
 
 All new code: C11, zero warnings, `ctest` coverage for pure logic.
 

@@ -11,16 +11,22 @@
 
 ## 1. Scope
 
-| # | Task | Source | LOC | Binary | Default |
-|---|------|--------|-----|--------|---------|
-| 1.1 | Tool result spill-to-disk | claude-code P0 #1 | 80–120 | +5 KB | config threshold |
-| 1.2 | Per-turn aggregate tool output cap | claude-code P0 #1 | 30–50 | ~0 | config |
-| 1.3 | Token-aware auto-compaction | claude-code P0 #2 | 80–120 | ~0 | uses existing summarization |
-| 1.4 | Reactive compaction on context error | claude-code P0 #2 | 40–60 | ~0 | always safe |
-| 1.5 | Adaptive tool selection (`auto`) | smallharness §6.1 | 150–250 | +5 KB | **`fixed`** (current) |
-| 1.6 | Streaming inline tool-call buffer | smallharness §6.3 | 80–120 | ~0 | always |
-| 1.7 | JSON-aware tool result compaction | smallharness §6.4 | 60–100 | ~0 | always |
-| 1.8 | Prompt prefix warmup (local providers) | smallharness §6.2 | 80–120 | +5 KB | **`false`** |
+- **1.1** — Task: Tool result spill-to-disk; Source: claude-code P0 #1; LOC: 80–120; Binary: +5 KB;
+  Default: config threshold
+- **1.2** — Task: Per-turn aggregate tool output cap; Source: claude-code P0 #1; LOC: 30–50; Binary:
+  ~0; Default: config
+- **1.3** — Task: Token-aware auto-compaction; Source: claude-code P0 #2; LOC: 80–120; Binary: ~0;
+  Default: uses existing summarization
+- **1.4** — Task: Reactive compaction on context error; Source: claude-code P0 #2; LOC: 40–60;
+  Binary: ~0; Default: always safe
+- **1.5** — Task: Adaptive tool selection (`auto`); Source: smallharness §6.1; LOC: 150–250; Binary:
+  +5 KB; Default: **`fixed`** (current)
+- **1.6** — Task: Streaming inline tool-call buffer; Source: smallharness §6.3; LOC: 80–120; Binary:
+  ~0; Default: always
+- **1.7** — Task: JSON-aware tool result compaction; Source: smallharness §6.4; LOC: 60–100; Binary:
+  ~0; Default: always
+- **1.8** — Task: Prompt prefix warmup (local providers); Source: smallharness §6.2; LOC: 80–120;
+  Binary: +5 KB; Default: **`false`**
 
 **Out of scope:** project memory, operator modes, OAuth, Signal.
 
@@ -137,12 +143,12 @@ Env overrides: `SMOLCLAW_AGENTS_DEFAULTS_TOOL_SELECTION`, etc.
 
 ## 5. Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Adaptive tools hide needed tool from model | `fixed` escape hatch; log selection |
-| Warmup adds startup latency | Opt-in; skip on fingerprint match |
-| Spill-to-disk fills workspace | Prune old `tool_outputs/` optionally in Phase 2 |
-| Compaction loses debugging info | Audit log retains full output |
+| Risk                                       | Mitigation                                      |
+|--------------------------------------------|-------------------------------------------------|
+| Adaptive tools hide needed tool from model | `fixed` escape hatch; log selection             |
+| Warmup adds startup latency                | Opt-in; skip on fingerprint match               |
+| Spill-to-disk fills workspace              | Prune old `tool_outputs/` optionally in Phase 2 |
+| Compaction loses debugging info            | Audit log retains full output                   |
 
 ---
 

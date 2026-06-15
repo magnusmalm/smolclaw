@@ -11,18 +11,26 @@
 
 ## 1. Scope
 
-| # | Task | Source | LOC | Binary | Gate |
-|---|------|--------|-----|--------|------|
-| 4.1 | Arena allocator per turn | zed-patterns T1 | 250–400 | +5–15 KB | always |
-| 4.2 | MCP capability-based sandbox | zed-patterns T3 | 300–500 | +10–20 KB | per-server config |
-| 4.3 | Anthropic prompt caching | claude-code P1 #4 | 60–100 | ~5 KB | Anthropic only |
-| 4.4 | Old tool result compression transform | claude-code P1 #6 | 80–120 | ~5 KB | config |
-| 4.5 | Project memory + repo_search | smallharness §6 task 7 | 800–1,200 | +50–100 KB | `SC_ENABLE_PROJECT_MEMORY` **default n** |
-| 4.6 | `smolclaw doctor --local` | smallharness §6 task 8 | 200–350 | ~10 KB | CLI |
-| 4.7 | Prompt budget command | smallharness §6 task 9 | 80–120 | ~5 KB | CLI |
-| 4.8 | Remaining audit medium fixes | code-analysis M-* | 150–300 | ~0 | always |
-| 4.9 | Microsandbox exec backend | todo.md | 400–600 | +15–30 KB | `SC_ENABLE_MICROSANDBOX` + external daemon |
-| 4.10 | Updater binary split evaluation | todo.md | 200–400 | variable | research spike |
+- **4.1** — Task: Arena allocator per turn; Source: zed-patterns T1; LOC: 250–400; Binary: +5–15 KB;
+  Gate: always
+- **4.2** — Task: MCP capability-based sandbox; Source: zed-patterns T3; LOC: 300–500; Binary:
+  +10–20 KB; Gate: per-server config
+- **4.3** — Task: Anthropic prompt caching; Source: claude-code P1 #4; LOC: 60–100; Binary: ~5 KB;
+  Gate: Anthropic only
+- **4.4** — Task: Old tool result compression transform; Source: claude-code P1 #6; LOC: 80–120;
+  Binary: ~5 KB; Gate: config
+- **4.5** — Task: Project memory + repo_search; Source: smallharness §6 task 7; LOC: 800–1,200;
+  Binary: +50–100 KB; Gate: `SC_ENABLE_PROJECT_MEMORY` **default n**
+- **4.6** — Task: `smolclaw doctor --local`; Source: smallharness §6 task 8; LOC: 200–350; Binary:
+  ~10 KB; Gate: CLI
+- **4.7** — Task: Prompt budget command; Source: smallharness §6 task 9; LOC: 80–120; Binary: ~5 KB;
+  Gate: CLI
+- **4.8** — Task: Remaining audit medium fixes; Source: code-analysis M-*; LOC: 150–300; Binary: ~0;
+  Gate: always
+- **4.9** — Task: Microsandbox exec backend; Source: todo.md; LOC: 400–600; Binary: +15–30 KB; Gate:
+  `SC_ENABLE_MICROSANDBOX` + external daemon
+- **4.10** — Task: Updater binary split evaluation; Source: todo.md; LOC: 200–400; Binary: variable;
+  Gate: research spike
 
 Each task is a **separate milestone** — do not batch into one PR.
 
@@ -159,12 +167,12 @@ Prioritize by production impact.
 
 ## 5. Risks
 
-| Risk | Mitigation |
-|------|------------|
-| Context pipeline scope creep | **Not in Phase 4** — see Phase 5 |
+| Risk                          | Mitigation                                              |
+|-------------------------------|---------------------------------------------------------|
+| Context pipeline scope creep  | **Not in Phase 4** — see Phase 5                        |
 | Project memory secret leakage | Skip `.env`, credentials paths (SmallHarness skip list) |
-| Arena double-free | Arena owns turn-scoped only; document ownership |
-| Microsandbox ops burden | Document as advanced; default off |
+| Arena double-free             | Arena owns turn-scoped only; document ownership         |
+| Microsandbox ops burden       | Document as advanced; default off                       |
 
 ---
 

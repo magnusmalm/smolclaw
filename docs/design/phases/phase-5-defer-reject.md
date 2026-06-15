@@ -8,14 +8,18 @@
 
 ## 1. Rejected (anti-smol or wrong fit)
 
-| Item | Source | Reason |
-|------|--------|--------|
-| **Rich TUI (ncurses/React-style)** | grok-cli-vs-smolclaw | +100 KB+, large UX surface; Web UI + CLI sufficient |
-| **OpenRouter `/compare` A/B** | smallharness | Niche; multi-provider fallback covers need |
-| **SmallHarness batch multi-file editor** | smallharness | spawn/worktree/delegate patterns suffice |
-| **lazyagent multi-format session reading** | lazyagent | smolclaw owns its session format |
-| **Embed signal-cli / libsignal** | signal-channel | JVM/protocol bloat; external daemon only |
-| **macOS MLX hardware profiles** | smallharness | Too platform-specific; generalize as RAM tiers if ever needed |
+- **Rich TUI (ncurses/React-style)** — Source: grok-cli-vs-smolclaw; Reason: +100 KB+, large UX
+  surface; Web UI + CLI sufficient
+- **OpenRouter `/compare` A/B** — Source: smallharness; Reason: Niche; multi-provider fallback
+  covers need
+- **SmallHarness batch multi-file editor** — Source: smallharness; Reason: spawn/worktree/delegate
+  patterns suffice
+- **lazyagent multi-format session reading** — Source: lazyagent; Reason: smolclaw owns its session
+  format
+- **Embed signal-cli / libsignal** — Source: signal-channel; Reason: JVM/protocol bloat; external
+  daemon only
+- **macOS MLX hardware profiles** — Source: smallharness; Reason: Too platform-specific; generalize
+  as RAM tiers if ever needed
 
 ---
 
@@ -61,21 +65,21 @@ B-tree-like index over session tree for O(log n) branch/truncate/token queries.
 
 **Source:** smallharness-integration
 
-| Item | Notes |
-|------|-------|
+| Item                        | Notes                                   |
+|-----------------------------|-----------------------------------------|
 | `shipcheck` / `handoff` CLI | Release workflow helpers; no agent loop |
-| `/test` smart runner | Overlaps exec + output_filter |
-| `/prompt` template library | Overlaps skills system |
-| `/autotune` / `/recommend` | Needs capability cache (4.6) first |
-| RAM-tier presets | Docs-only until doctor/autotune exist |
+| `/test` smart runner        | Overlaps exec + output_filter           |
+| `/prompt` template library  | Overlaps skills system                  |
+| `/autotune` / `/recommend`  | Needs capability cache (4.6) first      |
+| RAM-tier presets            | Docs-only until doctor/autotune exist   |
 
 ### 3.4 Claude-code P2 items
 
 **Source:** claude-code-improvements
 
-| Item | Promote when |
-|------|--------------|
-| Deferred MCP tool loading (ToolSearch) | Total MCP tools >30 |
+| Item                                      | Promote when                        |
+|-------------------------------------------|-------------------------------------|
+| Deferred MCP tool loading (ToolSearch)    | Total MCP tools >30                 |
 | Correlation IDs across smolswarm/smolchat | Multi-agent debugging pain reported |
 
 ### 3.5 xAI OAuth Phase 2–3
@@ -103,11 +107,11 @@ B-tree-like index over session tree for O(log n) branch/truncate/token queries.
 
 ## 4. Deferred — low priority polish
 
-| Item | Source |
-|------|--------|
-| Port conflict logging | Moved to Phase 2 — if skipped, stays here |
-| Post-tool notify on session end | todo.md |
-| Open question: smolclaw session format for lazyagent | lazyagent_borrow_tasks |
+| Item                                                 | Source                                    |
+|------------------------------------------------------|-------------------------------------------|
+| Port conflict logging                                | Moved to Phase 2 — if skipped, stays here |
+| Post-tool notify on session end                      | todo.md                                   |
+| Open question: smolclaw session format for lazyagent | lazyagent_borrow_tasks                    |
 
 ---
 

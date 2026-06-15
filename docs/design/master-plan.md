@@ -38,20 +38,31 @@ Every item in this roadmap must satisfy:
 
 ## 3. Source Documents Index
 
-| Document | Status | Phase(s) | Notes |
-|----------|--------|----------|-------|
-| [`code-analysis-report.md`](../../code-analysis-report.md) | Audit remediation | 0 | 35 findings; 11 high |
-| [`todo.md`](../../todo.md) | Backlog | 0, 3, 4, 5 | Size opts, microsandbox, small fixes |
-| [`docs/plan-checkpoint-rewind.md`](../plan-checkpoint-rewind.md) | Ready | 0 | ~100 LOC agent loop |
-| [`docs/claude-code-improvements.md`](../claude-code-improvements.md) | Recommendations | 1, 4, 5 | ~380–800 LOC |
-| [`docs/design/smallharness-integration.md`](smallharness-integration.md) | Design complete | 1, 3, 4, 5 | Local-model patterns |
-| [`docs/design/xai-grok-oauth.md`](xai-grok-oauth.md) | Design complete | 2 | <650 LOC cap |
-| [`lazyagent_borrow_tasks.md`](../../lazyagent_borrow_tasks.md) | Pattern lifts | 2 | Session CLI |
-| [`docs/zed-patterns-actionable.md`](../zed-patterns-actionable.md) | Recommendations | 0, 2, 4, 5 | 6 architectural tasks |
-| [`docs/design/signal-channel.md`](signal-channel.md) | Design complete | 3, 5 | Kconfig `default n` |
-| [`docs/channels/signal.md`](../channels/signal.md) | User doc (planned) | 3 | Mirror of Signal design |
-| [`grok-cli-vs-smolclaw.md`](../../grok-cli-vs-smolclaw.md) | Comparative | 5 | Mostly skip TUI |
-| [`docs/development/using-grok-implement-skill.md`](../development/using-grok-implement-skill.md) | Process | — | How to implement designs |
+- **[`code-analysis-report.md`](../../code-analysis-report.md)** — Status: Audit remediation;
+  Phase(s): 0; Notes: 35 findings; 11 high
+- **[`todo.md`](../../todo.md)** — Status: Backlog; Phase(s): 0, 3, 4, 5; Notes: Size opts,
+  microsandbox, small fixes
+- **[`docs/plan-checkpoint-rewind.md`](../plan-checkpoint-rewind.md)** — Status: Ready; Phase(s): 0;
+  Notes: ~100 LOC agent loop
+- **[`docs/claude-code-improvements.md`](../claude-code-improvements.md)** — Status:
+  Recommendations; Phase(s): 1, 4, 5; Notes: ~380–800 LOC
+- **[`docs/design/smallharness-integration.md`](smallharness-integration.md)** — Status: Design
+  complete; Phase(s): 1, 3, 4, 5; Notes: Local-model patterns
+- **[`docs/design/xai-grok-oauth.md`](xai-grok-oauth.md)** — Status: Design complete; Phase(s): 2;
+  Notes: <650 LOC cap
+- **[`lazyagent_borrow_tasks.md`](../../lazyagent_borrow_tasks.md)** — Status: Pattern lifts;
+  Phase(s): 2; Notes: Session CLI
+- **[`docs/zed-patterns-actionable.md`](../zed-patterns-actionable.md)** — Status: Recommendations;
+  Phase(s): 0, 2, 4, 5; Notes: 6 architectural tasks
+- **[`docs/design/signal-channel.md`](signal-channel.md)** — Status: Design complete; Phase(s): 3,
+  5; Notes: Kconfig `default n`
+- **[`docs/channels/signal.md`](../channels/signal.md)** — Status: User doc (planned); Phase(s): 3;
+  Notes: Mirror of Signal design
+- **[`grok-cli-vs-smolclaw.md`](../../grok-cli-vs-smolclaw.md)** — Status: Comparative; Phase(s): 5;
+  Notes: Mostly skip TUI
+-
+  **[`docs/development/using-grok-implement-skill.md`](../development/using-grok-implement-skill.md)**
+  — Status: Process; Phase(s): —; Notes: How to implement designs
 
 **Not in roadmap** (implemented or out of scope):
 
@@ -65,43 +76,66 @@ Every item in this roadmap must satisfy:
 
 ### 4.1 By theme
 
-| Theme | Items | Primary sources |
-|-------|-------|-----------------|
-| **Reliability & safety** | Audit fixes, arena allocator, sc_task_t, checkpoint rewind | code-analysis, zed-patterns |
-| **Binary lean** | LTO/gc-sections, optional FTS5, updater split eval | todo.md |
-| **Context & tokens** | Spill-to-disk, token compaction, old-result compression, adaptive tools, warmup | claude-code, smallharness |
-| **Local models** | Adaptive tools, warmup, stream buffer, compaction, project memory, doctor | smallharness |
-| **Auth & providers** | xAI Grok OAuth, provider health, prompt caching, backoff | xai-grok-oauth, zed, claude-code |
-| **Channels & tools** | Signal MVP, notify extras, X note_tweet | signal-channel, todo |
-| **Session ops** | compact, prune, incremental reload | lazyagent |
-| **Architecture (large)** | Context pipeline, session index, MCP capability sandbox | zed-patterns |
-| **Security depth** | Microsandbox exec backend | todo.md |
-| **Explicitly deferred** | Rich TUI, Signal media/SSE, shipcheck/handoff, batch editor | grok-cli, smallharness, signal |
+- **Reliability & safety** — Items: Audit fixes, arena allocator, sc_task_t, checkpoint rewind;
+  Primary sources: code-analysis, zed-patterns
+- **Binary lean** — Items: LTO/gc-sections, optional FTS5, updater split eval; Primary sources:
+  todo.md
+- **Context & tokens** — Items: Spill-to-disk, token compaction, old-result compression, adaptive
+  tools, warmup; Primary sources: claude-code, smallharness
+- **Local models** — Items: Adaptive tools, warmup, stream buffer, compaction, project memory,
+  doctor; Primary sources: smallharness
+- **Auth & providers** — Items: xAI Grok OAuth, provider health, prompt caching, backoff; Primary
+  sources: xai-grok-oauth, zed, claude-code
+- **Channels & tools** — Items: Signal MVP, notify extras, X note_tweet; Primary sources:
+  signal-channel, todo
+- **Session ops** — Items: compact, prune, incremental reload; Primary sources: lazyagent
+- **Architecture (large)** — Items: Context pipeline, session index, MCP capability sandbox; Primary
+  sources: zed-patterns
+- **Security depth** — Items: Microsandbox exec backend; Primary sources: todo.md
+- **Explicitly deferred** — Items: Rich TUI, Signal media/SSE, shipcheck/handoff, batch editor;
+  Primary sources: grok-cli, smallharness, signal
 
 ### 4.2 Size impact summary
 
-| Item | LOC (rough) | Binary Δ (rough) | Kconfig / config gate |
-|------|-------------|------------------|------------------------|
-| Audit high/medium fixes | 300–600 | +0–5 KB | always |
-| Binary size optimizations | 50–200 (CMake) | **−10–25%** | build profile |
-| Optional FTS5 | 20–50 (CMake) | **−50–200 KB** on minimal | `SC_ENABLE_MEMORY_SEARCH` |
-| Checkpoint rewind | 100–150 | ~0 | always |
-| Arena allocator (Zed T1) | 250–400 | +5–15 KB | always |
-| sc_task_t (Zed T2) | 150–250 | ~5 KB | always |
-| Tool spill + token compaction (P0) | 200–350 | +10–20 KB | config |
-| SmallHarness Phase A | 400–700 | +15–40 KB | `tool_selection`, `warmup` flags |
-| xAI Grok OAuth | <650 | +40–60 KB | `SC_ENABLE_XAI_OAUTH` |
-| Session compact/prune CLI | 200–450 | ~5–15 KB | CLI only |
-| Provider health (Zed T6) | 80–150 | ~5 KB | always |
-| Signal channel MVP | 800–1,000 | +40–80 KB | `SC_ENABLE_SIGNAL` default **n** |
-| SmallHarness Phase B (modes, confirm) | 300–500 | +10–20 KB | config |
-| MCP capability sandbox (Zed T3) | 300–500 | +10–20 KB | config per server |
-| Anthropic prompt caching | 60–100 | ~5 KB | provider flag |
-| Project memory + repo_search | 800–1,200 | +50–100 KB | `SC_ENABLE_PROJECT_MEMORY` default **n** |
-| Context pipeline (Zed T4) | 800–1,200 | neutral/+ | refactor |
-| Session index (Zed T5) | 600–900 | +20–40 KB | optional |
-| Microsandbox exec | 400–600 | +15–30 KB | `SC_ENABLE_MICROSANDBOX` + external daemon |
-| Rich TUI (grok-cli borrow) | 2,000+ | +100 KB+ | **reject** |
+- **Audit high/medium fixes** — LOC (rough): 300–600; Binary Δ (rough): +0–5 KB; Kconfig / config
+  gate: always
+- **Binary size optimizations** — LOC (rough): 50–200 (CMake); Binary Δ (rough): **−10–25%**;
+  Kconfig / config gate: build profile
+- **Optional FTS5** — LOC (rough): 20–50 (CMake); Binary Δ (rough): **−50–200 KB** on minimal;
+  Kconfig / config gate: `SC_ENABLE_MEMORY_SEARCH`
+- **Checkpoint rewind** — LOC (rough): 100–150; Binary Δ (rough): ~0; Kconfig / config gate: always
+- **Arena allocator (Zed T1)** — LOC (rough): 250–400; Binary Δ (rough): +5–15 KB; Kconfig / config
+  gate: always
+- **sc_task_t (Zed T2)** — LOC (rough): 150–250; Binary Δ (rough): ~5 KB; Kconfig / config gate:
+  always
+- **Tool spill + token compaction (P0)** — LOC (rough): 200–350; Binary Δ (rough): +10–20 KB;
+  Kconfig / config gate: config
+- **SmallHarness Phase A** — LOC (rough): 400–700; Binary Δ (rough): +15–40 KB; Kconfig / config
+  gate: `tool_selection`, `warmup` flags
+- **xAI Grok OAuth** — LOC (rough): <650; Binary Δ (rough): +40–60 KB; Kconfig / config gate:
+  `SC_ENABLE_XAI_OAUTH`
+- **Session compact/prune CLI** — LOC (rough): 200–450; Binary Δ (rough): ~5–15 KB; Kconfig / config
+  gate: CLI only
+- **Provider health (Zed T6)** — LOC (rough): 80–150; Binary Δ (rough): ~5 KB; Kconfig / config
+  gate: always
+- **Signal channel MVP** — LOC (rough): 800–1,000; Binary Δ (rough): +40–80 KB; Kconfig / config
+  gate: `SC_ENABLE_SIGNAL` default **n**
+- **SmallHarness Phase B (modes, confirm)** — LOC (rough): 300–500; Binary Δ (rough): +10–20 KB;
+  Kconfig / config gate: config
+- **MCP capability sandbox (Zed T3)** — LOC (rough): 300–500; Binary Δ (rough): +10–20 KB; Kconfig /
+  config gate: config per server
+- **Anthropic prompt caching** — LOC (rough): 60–100; Binary Δ (rough): ~5 KB; Kconfig / config
+  gate: provider flag
+- **Project memory + repo_search** — LOC (rough): 800–1,200; Binary Δ (rough): +50–100 KB; Kconfig /
+  config gate: `SC_ENABLE_PROJECT_MEMORY` default **n**
+- **Context pipeline (Zed T4)** — LOC (rough): 800–1,200; Binary Δ (rough): neutral/+; Kconfig /
+  config gate: refactor
+- **Session index (Zed T5)** — LOC (rough): 600–900; Binary Δ (rough): +20–40 KB; Kconfig / config
+  gate: optional
+- **Microsandbox exec** — LOC (rough): 400–600; Binary Δ (rough): +15–30 KB; Kconfig / config gate:
+  `SC_ENABLE_MICROSANDBOX` + external daemon
+- **Rich TUI (grok-cli borrow)** — LOC (rough): 2,000+; Binary Δ (rough): +100 KB+; Kconfig / config
+  gate: **reject**
 
 Estimates are order-of-magnitude for stripped release builds on x86_64; measure after each phase.
 
@@ -109,12 +143,14 @@ Estimates are order-of-magnitude for stripped release builds on x86_64; measure 
 
 ## 5. Smol-Theme Scorecard
 
-| Rating | Items |
-|--------|-------|
-| **Strong smol** | Audit fixes, binary size opts, optional FTS5, checkpoint rewind, sc_task_t, provider health, port logging, X note_tweet, xAI OAuth (bounded), Signal MVP (Kconfig off) |
-| **Good if gated** | SmallHarness Phase A–B, claude-code P0/P1, MCP capabilities, session compact/prune, notify extras |
-| **Bloat risk** | Project memory, shipcheck/handoff, Zed context pipeline, session index, microsandbox ops, Signal Phase 2–3, Rich TUI |
-| **Skip / defer** | grok-cli TUI, OpenRouter compare, SmallHarness batch editor, lazyagent multi-format reading |
+- **Strong smol** — Audit fixes, binary size opts, optional FTS5, checkpoint rewind, sc_task_t,
+  provider health, port logging, X note_tweet, xAI OAuth (bounded), Signal MVP (Kconfig off)
+- **Good if gated** — SmallHarness Phase A–B, claude-code P0/P1, MCP capabilities, session
+  compact/prune, notify extras
+- **Bloat risk** — Project memory, shipcheck/handoff, Zed context pipeline, session index,
+  microsandbox ops, Signal Phase 2–3, Rich TUI
+- **Skip / defer** — grok-cli TUI, OpenRouter compare, SmallHarness batch editor, lazyagent
+  multi-format reading
 
 ---
 
@@ -133,14 +169,20 @@ Phase 5 — Defer / reject              docs/design/phases/phase-5-defer-reject.
 
 ### Phase summary
 
-| Phase | Goal | LOC budget | Binary target | Exit criteria |
-|-------|------|------------|---------------|---------------|
-| **0** | Fix known bugs; shrink binary; checkpoint rewind | ~500–900 | Net **smaller** or flat | Audit highs closed; ctest green; size baseline recorded |
-| **1** | Context/token efficiency + local-model quick wins | ~700–1,200 | +≤40 KB default config | Spill/compaction + SmallHarness Phase A behind flags |
-| **2** | Auth, session CLI, provider health | ~900–1,400 | +≤80 KB with OAuth on | xAI OAuth shippable; session compact works |
-| **3** | Kconfig-gated channels & modes | ~1,200–1,800 | +≤80 KB per flag enabled | Signal MVP; operator modes; no default-on bloat |
-| **4** | Memory index, arena, MCP caps, caching | ~1,500–2,500 | gated | Each item independently shippable |
-| **5** | Parking lot | — | — | Revisit only with demand |
+- **0** — Goal: Fix known bugs; shrink binary; checkpoint rewind; LOC budget: ~500–900; Binary
+  target: Net **smaller** or flat; Exit criteria: Audit highs closed; ctest green; size baseline
+  recorded
+- **1** — Goal: Context/token efficiency + local-model quick wins; LOC budget: ~700–1,200; Binary
+  target: +≤40 KB default config; Exit criteria: Spill/compaction + SmallHarness Phase A behind
+  flags
+- **2** — Goal: Auth, session CLI, provider health; LOC budget: ~900–1,400; Binary target: +≤80 KB
+  with OAuth on; Exit criteria: xAI OAuth shippable; session compact works
+- **3** — Goal: Kconfig-gated channels & modes; LOC budget: ~1,200–1,800; Binary target: +≤80 KB per
+  flag enabled; Exit criteria: Signal MVP; operator modes; no default-on bloat
+- **4** — Goal: Memory index, arena, MCP caps, caching; LOC budget: ~1,500–2,500; Binary target:
+  gated; Exit criteria: Each item independently shippable
+- **5** — Goal: Parking lot; LOC budget: —; Binary target: —; Exit criteria: Revisit only with
+  demand
 
 ### Dependency graph (simplified)
 
