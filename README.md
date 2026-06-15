@@ -145,6 +145,8 @@ User ─── Channel ──┘         │
 
 Config lives at `~/.smolclaw/config.json`. Override the config directory with `SMOLCLAW_HOME` (e.g., `SMOLCLAW_HOME=/tmp/my-agent` looks for `/tmp/my-agent/config.json`). Every field can be overridden via environment variables with `SMOLCLAW_` prefix.
 
+See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the complete reference — every config key, its type, default, and description — and **[docs/EXAMPLES.md](docs/EXAMPLES.md)** for ready-to-copy scenario configs. The examples below cover the common cases.
+
 ```json
 {
   "agents": {
@@ -229,14 +231,13 @@ The `delegate` tool sends tasks to remote agents via their Web REST API:
 ```json
 {
   "delegation": {
-    "targets": [
-      {
-        "name": "researcher",
+    "targets": {
+      "researcher": {
         "url": "http://192.0.2.10:8082/api/message",
         "bearer_token": "vault://researcher_token",
         "timeout_secs": 120
       }
-    ]
+    }
   }
 }
 ```

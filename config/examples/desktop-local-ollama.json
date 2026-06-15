@@ -1,0 +1,63 @@
+{
+  "config_version": 1,
+  "agents": {
+    "defaults": {
+      "provider": "ollama",
+      "model": "qwen2.5:14b",
+      "summary_model": "qwen2.5:3b",
+      "context_window": 32768,
+      "max_tokens": 8192,
+      "temperature": 0.7,
+      "network_scope": "local",
+      "restrict_to_workspace": true,
+      "sandbox": true,
+      "memory_consolidation": true,
+      "verbose": true
+    }
+  },
+  "providers": {
+    "ollama": {
+      "api_base": "http://127.0.0.1:11434/v1"
+    }
+  },
+  "channels": {
+    "web": {
+      "enabled": true,
+      "bind_addr": "127.0.0.1",
+      "port": 8080,
+      "bearer_token": "file:///home/you/.secrets/smolclaw-web-token"
+    },
+    "telegram": { "enabled": false },
+    "discord": { "enabled": false },
+    "irc": { "enabled": false },
+    "slack": { "enabled": false },
+    "x": { "enabled": false }
+  },
+  "tools": {
+    "web": {
+      "searxng": {
+        "enabled": true,
+        "base_url": "http://127.0.0.1:8081",
+        "max_results": 5
+      },
+      "duckduckgo": { "enabled": false },
+      "brave": { "enabled": false }
+    }
+  },
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "filesystem": {
+        "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home/you/projects"],
+        "capabilities": {
+          "fs_read": ["/home/you/projects"],
+          "fs_write": ["/home/you/projects"]
+        }
+      }
+    }
+  },
+  "heartbeat": { "enabled": true, "interval": 30 },
+  "git": {
+    "push_allowed_remotes": ["github.com/myuser", "gitea.example.com"]
+  }
+}
