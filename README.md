@@ -439,17 +439,21 @@ The version header (`sc_version.h`) is auto-generated at build time with `SC_VER
 ### Commands
 
 ```
-smolclaw onboard     Initialize configuration and workspace
-smolclaw agent       Interactive agent (or -m "message" for single turn)
-smolclaw gateway     Start all channels + services
-smolclaw pairing     Manage channel trust (list/approve/revoke)
-smolclaw vault       Manage encrypted secrets
-smolclaw update      Check for and apply updates
-smolclaw cost        View token usage and costs
-smolclaw analytics   Usage analytics (summary, today, week, month, model, channel)
-smolclaw doctor      Validate configuration and dependencies
-                     --config <path>  Validate a specific config file
-smolclaw version     Show version (includes git hash and build date)
+smolclaw onboard      Initialize configuration and workspace
+smolclaw agent        Interactive agent (or -m "message" for single turn)
+smolclaw gateway      Start all channels + services
+smolclaw mcp-server   Run as an MCP server (JSON-RPC over stdio; needs SC_ENABLE_MCP_SERVER)
+smolclaw pairing      Manage channel trust (list/approve/revoke)
+smolclaw vault        Manage encrypted secrets
+smolclaw update       Check for and apply updates
+smolclaw backup       Backup and restore state (create/verify/list/restore)
+smolclaw cost         View token usage and costs
+smolclaw analytics    Usage analytics (summary, today, week, month, model, channel)
+smolclaw host-refresh Refresh host inventory and retained metrics
+smolclaw doctor       Validate configuration and dependencies
+                      --config <path>  Validate a specific config file
+smolclaw selftest     Run doctor checks + an LLM round-trip; exits 0/1
+smolclaw version      Show version (includes git hash and build date)
 ```
 
 ## Security

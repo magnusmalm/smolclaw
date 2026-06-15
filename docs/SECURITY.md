@@ -152,7 +152,7 @@ Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Audit
 
 ## Access Control
 
-**DM policies** (per-channel): `"open"` (explicit only), `"allowlist"` (default, fail-closed), `"pairing"` (challenge code). `sc_dm_policy_from_str(NULL)` → allowlist (not open).
+**DM policies** (per-channel): `"open"` (allow all senders), `"allowlist"` (only `allow_from` IDs), `"pairing"` (challenge code). Stock (non-strict) builds default every channel to `"open"`; `SC_STRICT_SECURITY` builds default to `"allowlist"`. When a policy string is missing or unknown, `sc_dm_policy_from_str()` fails closed to allowlist (`src/pairing.c`).
 
 **Pairing** (`src/pairing.c`): 12-char codes (60-bit entropy, `/dev/urandom`), 1hr expiry, max 3 pending, 5-attempt brute force lockout (15min). Timing-safe comparison.
 

@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Phase 3 delivers lightweight, pure-C static analysis primitives that let Drill-down researchers replace expensive `read_file` loops with precise, bounded, citable symbol queries (`symbol_lookup("set_retention")` or `code_graph action=symbols` + filters). All functionality lives behind the existing `SC_ENABLE_CODE_GRAPH` Kconfig flag (default: y) and follows established smolclaw tool patterns (vtable + workspace restriction + cJSON schema).
+Phase 3 delivers lightweight, pure-C static analysis primitives that let Drill-down researchers replace expensive `read_file` loops with precise, bounded, citable symbol queries (`symbol_lookup("set_retention")` or `code_graph action=symbols` + filters). All functionality lives behind the existing `SC_ENABLE_CODE_GRAPH` Kconfig flag (default `y` when this note was written; now `n`) and follows established smolclaw tool patterns (vtable + workspace restriction + cJSON schema).
 
 The work was performed exclusively in the smolclaw repository (baseline `code_graph.c/.h` + `test_code_graph.c` were already present in the canonical tree).
 

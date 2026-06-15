@@ -2,7 +2,7 @@
 
 Lightweight, pure-C static analysis tool for import dependency graphs (multiple languages) and C/C++ symbol lookup (for researcher Drill-down).
 
-Registered behind `SC_ENABLE_CODE_GRAPH` (default: y). Does not require external parsers or processes.
+Registered behind `SC_ENABLE_CODE_GRAPH` (default: n). Does not require external parsers or processes.
 
 ## Actions
 
@@ -12,7 +12,7 @@ Registered behind `SC_ENABLE_CODE_GRAPH` (default: y). Does not require external
 - `cycles` — Detect circular import cycles (best-effort).
 - `symbols` — **Primary for Drill-down research**. Lightweight regex-based extraction of C/C++ symbols from `.c`/`.h` (and C++ variants). Returns structured, bounded, citable records without full `read_file`.
 
-The `symbols` action (and future thin `symbol_lookup` wrapper) replaces expensive broad `read_file` loops in the Outline → Drill-down → Synthesis flow.
+The `symbols` action (and the thin `symbol_lookup` wrapper) replace expensive broad `read_file` loops in the Outline → Drill-down → Synthesis flow.
 
 ## Parameters (JSON schema)
 
@@ -102,12 +102,11 @@ Running `symbols` on the smolclaw `src/` tree itself yields (among others):
 
 Use `name_filter=extract` or `path=src/tools` for targeted Drill-down on the tool itself.
 
-## Future / Related
+## Related (implemented)
 
-- `symbol_lookup` thin wrapper tool (planned next) — convenience alias with good defaults for `action=symbols`.
-- `kinds` post-filter.
+- `symbol_lookup` — thin wrapper tool; convenience alias with good defaults for `action=symbols`.
+- `kinds` post-filter (see Parameters above).
 - `set_workspace` support for dynamic workspace switching.
-- Integration notes will appear in `docs/workflows/research-phase.md` (Phase 2/5 coordination).
 
 ---
 
