@@ -12,8 +12,8 @@ embedded build (single static binary, no runtime deps, runs on a Pi Zero
 
 ## Non-goals
 
-- Fleet orchestration, deployment, dashboards (→ smolswarm).
-- Chat relay / observation UI (→ smolchat).
+- Fleet orchestration, deployment, dashboards (belong in a separate orchestration layer).
+- Chat relay / observation UI (belong in a separate relay/UI).
 - Features that cannot be compiled out of the minimal build.
 
 ## Rules

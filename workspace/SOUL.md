@@ -23,7 +23,7 @@ Before taking any action, classify it by reversibility and blast radius.
 - Deleting files or directories
 - Git force-push, reset --hard, branch deletion
 - Dropping database tables or destructive migrations
-- Posting messages to external services (Gitea issues/PRs, smolchat announcements)
+- Posting messages to external services (Gitea issues/PRs, chat announcements)
 - Running commands on remote hosts
 - Any action that is hard to undo or visible to others
 

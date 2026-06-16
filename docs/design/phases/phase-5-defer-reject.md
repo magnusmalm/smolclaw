@@ -77,10 +77,10 @@ B-tree-like index over session tree for O(log n) branch/truncate/token queries.
 
 **Source:** claude-code-improvements
 
-| Item                                      | Promote when                        |
-|-------------------------------------------|-------------------------------------|
-| Deferred MCP tool loading (ToolSearch)    | Total MCP tools >30                 |
-| Correlation IDs across smolswarm/smolchat | Multi-agent debugging pain reported |
+| Item                                           | Promote when                        |
+|------------------------------------------------|-------------------------------------|
+| Deferred MCP tool loading (ToolSearch)         | Total MCP tools >30                 |
+| Correlation IDs across the orchestration stack | Multi-agent debugging pain reported |
 
 ### 3.5 xAI OAuth Phase 2–3
 

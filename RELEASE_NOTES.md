@@ -67,7 +67,7 @@ A C11 lightweight AI agent framework.
 
 - **Session isolation for delegate calls** — fixes a cross-session memory
   contamination class where a long-running agent shared by multiple
-  callers (e.g. a smolswarm fleet) could leak one delegate's consolidated
+  callers (e.g. a multi-agent fleet) could leak one delegate's consolidated
   memory into another delegate's system prompt. Web channel sessions
   matching a configurable glob (`channels.web.isolation_pattern`,
   default `"wf-*"`) now run in a per-session memory namespace under

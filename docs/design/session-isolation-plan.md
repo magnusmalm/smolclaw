@@ -9,7 +9,7 @@
 
 ## 1. Summary
 
-A single smolclaw agent process (e.g. the smolswarm `researcher`) is shared by many independent callers — different smolswarm tasks, IRC users, MCP clients. Today, every turn the agent runs reads from and writes to a single workspace-wide memory store and a single workspace scratchpad. Consolidated content from one caller's turn leaks into the system prompt of the next caller's turn, and the model continues the prior caller's narrative regardless of the new prompt.
+A single smolclaw agent process (e.g. a shared `researcher` agent) is shared by many independent callers — different orchestrated tasks, IRC users, MCP clients. Today, every turn the agent runs reads from and writes to a single workspace-wide memory store and a single workspace scratchpad. Consolidated content from one caller's turn leaks into the system prompt of the next caller's turn, and the model continues the prior caller's narrative regardless of the new prompt.
 
 This document specifies **session isolation**: a mechanism by which channels can mark inbound messages as ephemeral, and the agent responds by running them in a per-session memory namespace that neither reads from nor writes to the shared workspace memory.
 
@@ -36,7 +36,7 @@ Reliability runs that "passed" earlier did so because their workspace memory was
 
 ### 2.2 Why this matters
 
-Smolclaw was originally designed as a *single-user companion agent*. In that mode, workspace-wide memory is a feature: the agent remembers preferences, file paths, and ongoing decisions across sessions. The smolswarm fleet uses smolclaw differently — a single agent process is *delegated to* by many independent workflows, each with its own task and its own scope. The single-user assumption breaks the fleet's research correctness guarantees.
+Smolclaw was originally designed as a *single-user companion agent*. In that mode, workspace-wide memory is a feature: the agent remembers preferences, file paths, and ongoing decisions across sessions. A multi-agent fleet uses smolclaw differently — a single agent process is *delegated to* by many independent workflows, each with its own task and its own scope. The single-user assumption breaks the fleet's research correctness guarantees.
 
 The fix needs to honor both modes: a CLI user or a heartbeat tick should keep behaving exactly as before, while a delegate call from a workflow should run with a clean slate.
 
@@ -55,7 +55,7 @@ The fix needs to honor both modes: a CLI user or a heartbeat tick should keep be
 ## 4. Non-Goals
 
 - **NG1**: Authentication / per-session bearer tokens. The web channel already namespaces sessions by hashed bearer token; this design layers isolation on top, not authentication.
-- **NG2**: Reworking smolswarm's delegate protocol. The plumbing only requires the web channel to recognize the existing `wf-*` session-name convention.
+- **NG2**: Reworking the orchestrator's delegate protocol. The plumbing only requires the web channel to recognize the existing `wf-*` session-name convention.
 - **NG3**: Per-tool sandboxing. Tools already use `restrict_to_workspace`. Isolation here is about memory and prompt context, not filesystem access.
 - **NG4**: Persistence beyond the TTL. Isolated sessions are by design ephemeral.
 
@@ -119,7 +119,7 @@ Every caller shares the same `workspace/memory/` namespace. Session keys differ 
 - **`irc`, `discord`, `telegram`, `slack`, `x`, `cli`** — Default isolation behavior: Always
   non-isolated (unchanged); Configurable via: — (no config)
 
-For now only the web channel needs to set isolation, because only the web channel receives smolswarm delegate calls. Other channels keep their existing semantics. The `sc_inbound_msg_t.isolated` flag is wired through generically, so future channels can opt in.
+For now only the web channel needs to set isolation, because only the web channel receives orchestrator delegate calls. Other channels keep their existing semantics. The `sc_inbound_msg_t.isolated` flag is wired through generically, so future channels can opt in.
 
 To explicitly disable isolation at the web channel (return to today's behavior), set `isolation_pattern: ""`.
 
@@ -338,8 +338,8 @@ Each stage is its own commit. CI must pass at each stage. Hard rule from the use
 ### Stage 8 — Acceptance: run the contamination scenario clean
 - After all stages land, validate end-to-end in a real fleet:
   - Reset researcher's workspace memory (back it up first).
-  - Manually trigger a smolchat retention turn via the researcher web channel (e.g., curl); confirm it consolidated.
-  - Run the smolswarm smoke against the same researcher; assert the smoke's Outline is about smolswarm README, not retention.
+  - Manually trigger an unrelated retention-topic turn via the researcher web channel (e.g., curl); confirm it consolidated.
+  - Run the orchestrator smoke against the same researcher; assert the smoke's Outline is about its own task, not the retention topic.
 - Document the result in `docs/acceptance-tests/session-isolation-2026-XX-XX.md`.
 
 Each stage is small enough to review on its own; the build/test/doc requirement applies per-stage.
@@ -392,7 +392,7 @@ The user-visible config knob is documented and the default is conservative (only
 - **Q2: Should the namespace_id be derivable by operators from session_key, or fully opaque?**
   Tentative: opaque on disk. Operators map ns→session_key via `audit.log` (every turn already logs its `session_key`; we'll add the `ns` to the same record). No reverse lookup needed offline.
 - **Q3: TTL value?**
-  Tentative: 24h. Aggressive enough to keep disk clean, conservative enough that a long-running smolswarm workflow can span the gap. Make it a `SC_ISOLATION_CLEANUP_SECS` constant; tune later if needed.
+  Tentative: 24h. Aggressive enough to keep disk clean, conservative enough that a long-running orchestrated workflow can span the gap. Make it a `SC_ISOLATION_CLEANUP_SECS` constant; tune later if needed.
 - **Q4: Future channels (Slack, Discord) — should they default to isolation for bot-like callers?**
   Out of scope here. The plumbing supports it; future channel-specific PRs decide.
 

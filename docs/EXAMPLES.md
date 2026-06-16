@@ -78,7 +78,7 @@ cmake --build build-armv7l -j2
 
 ## More scenarios
 
-- **smolswarm worker node** — Web channel; `isolation_pattern: "wf-*"`;
+- **Orchestrated worker node** — Web channel; `isolation_pattern: "wf-*"`;
   `auto_confirm`; delegation target on a dispatcher (object-map format).
 - **Strict production gateway** — `SC_STRICT_SECURITY` build; all channels
   `dm_policy: "allowlist"`; `exec_mode: "allowlist"`; vault for secrets;

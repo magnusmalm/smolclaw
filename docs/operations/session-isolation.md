@@ -1,7 +1,7 @@
 # Operator Guide: Session Isolation
 
 **Audience**: anyone running smolclaw as a delegate target for one or more
-multi-tenant callers (e.g. a smolswarm fleet, a multi-user IRC bot,
+multi-tenant callers (e.g. an orchestrated agent fleet, a multi-user IRC bot,
 multiple MCP clients).
 
 **Related**: [`design/session-isolation-plan.md`](../design/session-isolation-plan.md)
@@ -11,7 +11,7 @@ multiple MCP clients).
 ## Why this exists
 
 A single smolclaw agent process is often shared by many independent
-callers: every smolswarm delegate, every IRC user, every MCP client.
+callers: every orchestrator delegate, every IRC user, every MCP client.
 Without isolation, those callers share one workspace memory
 (`{workspace}/memory/`) — and smolclaw's normal turn-end consolidation
 appends a summary of every turn to today's memory file. The *next* turn,
@@ -20,8 +20,7 @@ prompt.
 
 The result: caller B can see caller A's consolidated content, and the
 LLM has been observed to continue caller A's narrative inside caller B's
-turn. This is the contamination documented in the 2026-05-24 smolswarm
-investigation.
+turn. This is the contamination documented in the original investigation.
 
 Session isolation routes specific inbound calls through a per-session
 memory namespace and skips the shared `# Memory` block in the system
@@ -45,9 +44,9 @@ runs isolated. Otherwise it runs shared (the legacy behavior).
 
 **Defaults:**
 
-- `isolation_pattern` defaults to `"wf-*"` (smolswarm's delegate
-  convention). A fresh install with smolswarm pointed at it gets
-  isolation out of the box.
+- `isolation_pattern` defaults to `"wf-*"` (a common orchestrator
+  delegate-session convention). A fresh install with an orchestration
+  layer pointed at it gets isolation out of the box.
 - All other web sessions (chat sessions, dashboard usage) keep shared
   behavior.
 
@@ -217,14 +216,14 @@ will start fresh.
 ## Verification checklist after enabling
 
 1. `cmake --build build && ctest --test-dir build` — full suite green.
-2. Issue a smolswarm `implement_feature` orchestrate against the agent.
+2. Issue an orchestrated `implement_feature` request (or any delegate call) against the agent.
    In the smolclaw journal, look for the new identity line:
    `"isolated session"` in the system prompt build (check via
    `audit.log` or by raising agent log level).
 3. Inspect `{workspace}/memory/_sessions/` — there should be a fresh
    per-session directory after the delegate runs.
 4. Confirm `{workspace}/memory/YYYYMM/YYYYMMDD.md` did **not** grow.
-5. Re-run the smolswarm smoke a second time with a different task; the
+5. Re-run the smoke a second time with a different task; the
    smoke's Outline should be about its own task, not the prior one.
 
 ---

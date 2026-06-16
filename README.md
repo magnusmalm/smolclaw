@@ -33,8 +33,8 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
   blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API
 - **Integration** — SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for
   Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost
-  reporting to smolchat (single pricing path via cost.c; local models report $0, provider actuals
-  preferred)
+  reporting to an external collector (single pricing path via cost.c; local models report $0,
+  provider actuals preferred)
 - **Web UI** — Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn
   progress log with provider/model per step (`/api/progress`), optional live-stream embed
   (`channels.web.embed_stream_url`, e.g. a motion-daemon MJPEG feed)
@@ -133,7 +133,7 @@ Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC
 
 ```
 User ─── Channel ──┐
-                    ├─── Bus ─── Agent Loop ─── LLM Provider
+                   ├─── Bus ─── Agent Loop ─── LLM Provider
 User ─── Channel ──┘         │
                              ├── Tool Registry ─── Tools
                              ├── Session Manager
@@ -242,7 +242,7 @@ SMOLCLAW_HOME=~/.smolclaw/agents/coder smolclaw gateway
 SMOLCLAW_HOME=~/.smolclaw/agents/researcher smolclaw gateway
 ```
 
-For fleet deployment, a companion tool (smolswarm) manages multi-agent provisioning with systemd template units (`smolclaw-agent@<name>.service`), per-agent vault provisioning, and a dispatcher agent that routes tasks to workers via the `delegate` tool.
+For fleet deployment, an external orchestration layer can manage multi-agent provisioning — e.g. systemd template units (`smolclaw-agent@<name>.service`), per-agent vault provisioning, and a dispatcher agent that routes tasks to workers via the `delegate` tool. smolclaw provides the config options, CLI parameters (`SMOLCLAW_HOME`, the `delegate`/`converse` tools, the Web REST API), and per-session isolation that such a layer builds on.
 
 #### Delegation
 

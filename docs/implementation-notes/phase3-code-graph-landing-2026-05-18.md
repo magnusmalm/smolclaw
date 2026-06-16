@@ -46,7 +46,7 @@ The work was performed exclusively in the smolclaw repository (baseline `code_gr
 - **Post-filter for `kinds`**: Cheap in-place filter after extraction (no change to scanner). Supports the documented set; absent/empty = all (backward compat).
 - **Provisional output format**: Kept the proven `"kind: name at path:line (sig)\n  context: ..."` shape (highly greppable and citable). Explicit TODO left in code + docs for future refinement once more usage data exists.
 - **set_workspace vtable**: Added to both tools for dynamic workspace correctness (e.g., per-task subdirs) following the established pattern.
-- **No smolswarm / prompt changes**: Strictly smolclaw + tests + docs (Phase 5 owns profile `allowed_tools` + `research-phase.md` updates).
+- **No orchestrator / prompt changes**: Strictly smolclaw + tests + docs (Phase 5 owns profile `allowed_tools` + `research-phase.md` updates).
 
 ## Before / After for the Researcher (Drill-down)
 

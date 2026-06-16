@@ -412,20 +412,20 @@ for the requested tool and re-inject it into the next provider call.
 
 **Ref:** Comparison doc R16 (cross-cutting)
 
-**Problem:** smolclaw has `analytics.c` and publishes events to smolchat, but
-events from different parts of the stack (smolswarm orchestration -> smolclaw
-agent execution -> smolchat message log) have no correlation IDs. Debugging
-a multi-agent task requires manually searching across multiple log sources.
+**Problem:** smolclaw has `analytics.c` and publishes events to an external
+collector, but events from different parts of a multi-agent stack (orchestration
+layer -> smolclaw agent execution -> message relay) have no correlation IDs.
+Debugging a multi-agent task requires manually searching across multiple log sources.
 
 **Implementation:** Add a `correlation_id` field to:
-- `sc_inbound_msg_t` (set by smolswarm's orchestrate endpoint or the
+- `sc_inbound_msg_t` (set by the orchestrator's endpoint or the
   delegate tool)
 - `sc_tool_result_t` (propagated through tool execution)
-- smolchat messages (sent via the `/api/send` payload)
+- relay messages (sent via the `/api/send` payload)
 
-Generate a UUID at task start (in the delegate tool or via smolswarm's
-`/api/orchestrate`). Pass it through the entire execution chain. smolchat's
-search then supports filtering by correlation ID.
+Generate a UUID at task start (in the delegate tool or the orchestrator).
+Pass it through the entire execution chain. The relay's search then supports
+filtering by correlation ID.
 
 ---
 
