@@ -107,7 +107,7 @@ typedef struct {
      * matches this pattern, the inbound message is marked isolated and
      * the agent runs it in a per-session memory namespace. NULL or empty
      * disables isolation. Default in config.c initialization: "wf-*"
-     * (smolswarm delegate convention). See
+     * (a common orchestrator delegate convention). See
      * docs/design/session-isolation-plan.md §6.4-§6.5. */
     char *isolation_pattern;
     /* Optional live-stream URL (e.g. a motion-daemon MJPEG stream).

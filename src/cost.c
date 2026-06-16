@@ -276,7 +276,7 @@ static int save_json(const char *path, cJSON *data)
 }
 
 /* Stamp the top-level last_updated_ts to the current epoch second.
- * Consumers (smolswarm alert.c) treat a missing or stale value as
+ * External consumers treat a missing or stale value as
  * "cost data is not fresh; do not fire cost_high alarms on it." */
 static void stamp_updated(cJSON *data)
 {
@@ -453,7 +453,7 @@ void sc_cost_tracker_record_actual(sc_cost_tracker_t *ct, const char *model,
     stamp_updated(ct->data);
 
     /* Recompute totals across all models. Also surface actual_cost_usd at
-     * the top level so smolswarm can compare cost_source="provider"/"mixed"
+     * the top level so an external collector can compare cost_source="provider"/"mixed"
      * data against estimates without walking the per-model dict. */
     double total_estimate = 0;
     double total_actual = 0;
@@ -651,7 +651,7 @@ int sc_cost_tracker_recompute(sc_cost_tracker_t *ct)
     }
 
     /* Refresh the top-level estimated_cost_usd (sum of per-model costs).
-     * smolswarm probes this single field via $.tokens.estimated_cost_usd;
+     * an external collector probes this single field via $.tokens.estimated_cost_usd;
      * leaving it stale was what kept the supervisor's frozen-cost alarm
      * firing after the rate-table fix. */
     double total_cost = 0;

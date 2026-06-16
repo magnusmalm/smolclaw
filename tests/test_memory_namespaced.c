@@ -173,7 +173,7 @@ static void test_namespaced_read_does_not_leak_shared(void)
     /* Pre-populate the shared today.md as if a prior non-isolated turn
      * had consolidated content into it. */
     char *shared_path = shared_today_path(ws);
-    write_text(shared_path, "# Shared\n\nSensitive smolchat retention details\n");
+    write_text(shared_path, "# Shared\n\nSensitive other-tenant retention details\n");
 
     sc_memory_t *iso = sc_memory_new_namespaced(ws, "fresh01");
     ASSERT_NOT_NULL(iso);

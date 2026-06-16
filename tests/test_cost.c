@@ -152,8 +152,8 @@ static void test_zero_tokens_no_op(void)
 }
 
 /* Recompute updates the top-level estimated_cost_usd to the sum of
- * per-model costs. Smolswarm probes this single field; per-model alone
- * isn't enough. */
+ * per-model costs. An external collector probes this single field;
+ * per-model alone isn't enough. */
 static void test_recompute_updates_top_level(void)
 {
     char *ws = make_tmp_workspace();

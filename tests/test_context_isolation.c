@@ -83,7 +83,7 @@ static void test_isolated_skips_memory_block(void)
     sc_strbuf_appendf(&sb, "%s/memory/MEMORY.md", ws);
     char *long_term_path = sc_strbuf_finish(&sb);
     write_text(long_term_path,
-               "POISON-LONG-TERM-MARKER smolchat retention notes");
+               "POISON-LONG-TERM-MARKER other-tenant retention notes");
 
     /* Build an isolated context and confirm the system prompt has no
      * "# Memory" header and none of the poison markers. */

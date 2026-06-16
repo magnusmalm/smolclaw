@@ -2,8 +2,8 @@
  * tools/notify.c - Notification tool
  *
  * Sends notifications to external services (Discord, Telegram, generic
- * webhook) via HTTP POST. Uses the same Apprise-compatible URL schemes
- * as smolswarm's notification dispatcher for config consistency.
+ * webhook) via HTTP POST. Uses Apprise-compatible URL schemes for
+ * consistency with common notification dispatchers.
  */
 
 #include <curl/curl.h>
@@ -26,7 +26,7 @@
 /* HTTP timeout */
 #define NOTIFY_TIMEOUT_SEC 10
 
-/* ---------- URL parsing (shared logic with smolswarm/notify.c) ---------- */
+/* ---------- URL parsing (Apprise-compatible scheme handling) ---------- */
 
 typedef enum {
     SCHEME_DISCORD,

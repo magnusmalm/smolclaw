@@ -840,7 +840,7 @@ static void handle_message(struct evhttp_request *req, void *arg)
         SC_LOG_DEBUG("web", "isolated session='%s' ns='%s'",
                      sess_name ? sess_name : "(null)", ns_id);
 
-    /* Per-turn tool-workspace override (Phase 5). Smolswarm's workflow.c
+    /* Per-turn tool-workspace override (Phase 5). An orchestration layer
      * sends this when materialize succeeded for a run, so delegate tools
      * (read_file, list_dir, exec, git) get scoped to the run-specific
      * repo checkout for the duration of this turn. Gateway validates the

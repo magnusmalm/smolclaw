@@ -27,7 +27,7 @@ typedef struct {
      * then restores it. Used to keep delegate tools (read_file, list_dir,
      * exec, git) scoped to the current run's repo checkout so the model
      * can't browse stale workspace state (e.g. workspace/runs/<other>/,
-     * workspace/smolchat/). NULL = no override, tools see full workspace. */
+     * other cloned repos). NULL = no override, tools see full workspace. */
     char *run_repo_dir;
 } sc_inbound_msg_t;
 

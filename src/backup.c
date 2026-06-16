@@ -1,6 +1,6 @@
 /*
  * Backup/restore for smolclaw state directory.
- * Designed for CLI use and remote invocation from smolswarm.
+ * Designed for CLI use and remote invocation from an orchestration layer.
  */
 
 #include "backup.h"

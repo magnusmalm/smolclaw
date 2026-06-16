@@ -141,7 +141,7 @@ static void test_bus_preserves_shared_message(void)
 
 static void test_run_repo_dir_safe_accepts_normal_paths(void)
 {
-    ASSERT_INT_EQ(sc_gateway_run_repo_dir_safe("runs/abc/smolswarm"), 1);
+    ASSERT_INT_EQ(sc_gateway_run_repo_dir_safe("runs/abc/repo"), 1);
     ASSERT_INT_EQ(sc_gateway_run_repo_dir_safe("a"), 1);
     /* Segment-aware: ".." inside a name is fine, only a bare ".." segment
      * is path traversal. */
@@ -191,17 +191,17 @@ static void test_bus_preserves_run_repo_dir(void)
         "wf-researcher-abc", NULL,
         /* isolated */ 1,
         /* namespace_id */ "ns1234567890abcd",
-        /* run_repo_dir */ "runs/15a2b3c4d5/smolswarm");
+        /* run_repo_dir */ "runs/15a2b3c4d5/repo");
     ASSERT_NOT_NULL(out);
 
     sc_bus_publish_inbound(bus, out);
 
     sc_inbound_msg_t *in = sc_bus_try_consume_inbound(bus);
     ASSERT_NOT_NULL(in);
-    ASSERT_STR_EQ(in->run_repo_dir, "runs/15a2b3c4d5/smolswarm");
+    ASSERT_STR_EQ(in->run_repo_dir, "runs/15a2b3c4d5/repo");
     ASSERT_INT_EQ(sc_gateway_run_repo_dir_safe(in->run_repo_dir), 1);
     /* Isolation + per-turn workspace narrowing are orthogonal but commonly
-     * coexist (smolswarm sends both for delegate calls). */
+     * coexist (an orchestrator sends both for delegate calls). */
     ASSERT_INT_EQ(sc_gateway_should_isolate(in), 1);
 
     sc_inbound_msg_free(in);

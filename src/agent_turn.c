@@ -1448,23 +1448,25 @@ static int execute_tool_calls(sc_agent_t *agent, sc_llm_response_t *resp,
     return ret;
 }
 
-/* ---------- Smolchat cost reporting ---------- */
+/* ---------- External cost reporting ---------- */
 
-/* Fire-and-forget POST to smolchat /api/cost. Non-critical — errors are
- * silently ignored so they never block the agent loop.
+/* Fire-and-forget POST of per-turn cost to an external collector's
+ * /api/cost endpoint (configured via SC_COST_REPORT_URL /
+ * SC_COST_REPORT_TOKEN). Non-critical — errors are silently ignored so
+ * they never block the agent loop.
  *
  * Cost truth: the posted cost_usd is the provider-reported ACTUAL when
  * available, else cost.c's estimate (config overrides + built-in table;
  * local models are $0). A previous private rate table here had a paid
  * fallback for unknown models, which billed phantom dollars for every
- * local-ollama turn into the fleet ledger. */
-static void report_cost_to_smolchat(sc_agent_t *agent, const char *model,
-                                      int prompt_tokens,
-                                      int completion_tokens,
-                                      double actual_cost_usd)
+ * local-ollama turn into the external ledger. */
+static void report_cost_external(sc_agent_t *agent, const char *model,
+                                  int prompt_tokens,
+                                  int completion_tokens,
+                                  double actual_cost_usd)
 {
-    const char *url = getenv("SMOLCHAT_URL");
-    const char *token = getenv("SMOLCHAT_TOKEN");
+    const char *url = getenv("SC_COST_REPORT_URL");
+    const char *token = getenv("SC_COST_REPORT_TOKEN");
     if (!url || !token || !url[0] || !token[0]) return;
 
     /* Derive agent name from SMOLCLAW_HOME (last path component) */
@@ -1538,9 +1540,9 @@ static void log_turn_summary(sc_agent_t *agent, const char *model,
                                        tc->prompt_tokens, tc->completion_tokens,
                                        tc->actual_cost_usd);
 
-    /* Report cost to smolchat for fleet-wide tracking */
-    report_cost_to_smolchat(agent, model, tc->prompt_tokens,
-                            tc->completion_tokens, tc->actual_cost_usd);
+    /* Report cost to an external collector for fleet-wide tracking */
+    report_cost_external(agent, model, tc->prompt_tokens,
+                         tc->completion_tokens, tc->actual_cost_usd);
 
     /* Record tokens in hourly budget tracker */
     if (agent->max_tokens_per_hour > 0)

@@ -773,7 +773,7 @@ sc_config_t *sc_config_default(void)
     cfg->web.bind_addr = sc_strdup("127.0.0.1");
     cfg->web.port = SC_DEFAULT_WEB_PORT;
     cfg->web.dm_policy = sc_strdup(default_dm);
-    /* Session isolation: opt-in to smolswarm delegate convention by default.
+    /* Session isolation: opt-in to the common delegate convention by default.
      * Set to "" or NULL in config to disable. */
     cfg->web.isolation_pattern = sc_strdup("wf-*");
 
