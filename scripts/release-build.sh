@@ -14,8 +14,8 @@ fi
 
 OUTDIR="${RELEASE_OUTDIR:-$ROOT/dist/release}"
 QEMU_AARCH64="${QEMU_AARCH64:-qemu-aarch64-static}"
-# Landlock/seccomp need real kernel support; skip under qemu-user-static.
-QEMU_SKIP_TESTS="${QEMU_SKIP_TESTS:-test_sandbox}"
+# test_e2e hardcodes ./build/smolclaw; test_sandbox needs Landlock/seccomp.
+QEMU_SKIP_TESTS="${QEMU_SKIP_TESTS:-test_sandbox,test_e2e}"
 JOBS="$(nproc)"
 ARCHES=(x86_64 aarch64)
 
