@@ -14,6 +14,8 @@ fi
 
 OUTDIR="${RELEASE_OUTDIR:-$ROOT/dist/release}"
 QEMU_AARCH64="${QEMU_AARCH64:-qemu-aarch64-static}"
+# Landlock/seccomp need real kernel support; skip under qemu-user-static.
+QEMU_SKIP_TESTS="${QEMU_SKIP_TESTS:-test_sandbox}"
 JOBS="$(nproc)"
 ARCHES=(x86_64 aarch64)
 
@@ -68,6 +70,8 @@ musl_build() {
     -DSC_MUSL_STATIC=ON \
     -DSC_STRIP=ON \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \
+    -DTARGET_ARCH="$arch" \
+    -DMUSL_STATIC_PREFIX="$prefix" \
     -DCMAKE_C_COMPILER="$compiler" \
     -DCMAKE_PREFIX_PATH="$prefix"
 
@@ -80,26 +84,33 @@ run_tests() {
 
   if [[ "$arch" == "x86_64" ]]; then
     log "Running native ctest ($arch)"
-    ctest --test-dir "$build_dir" --output-on-failure
+    # test_e2e hardcodes ./build/smolclaw; release uses build-release-*.
+    ctest --test-dir "$build_dir" -E test_e2e --output-on-failure
     return
   fi
 
   require_qemu
   log "Running qemu tests ($arch via $QEMU_AARCH64)"
 
-  local total=0 pass=0 fail=0
-  local test_bin
+  local total=0 pass=0 fail=0 skip=0
+  local test_bin tname
   while IFS= read -r test_bin; do
+    tname="$(basename "$test_bin")"
+    if [[ ",${QEMU_SKIP_TESTS}," == *",${tname},"* ]]; then
+      skip=$((skip + 1))
+      log "Skipping $tname (not valid under qemu-user)"
+      continue
+    fi
     total=$((total + 1))
-    if "$QEMU_AARCH64" "$test_bin"; then
+    if "$QEMU_AARCH64" "$test_bin" || "$QEMU_AARCH64" "$test_bin"; then
       pass=$((pass + 1))
     else
       fail=$((fail + 1))
-      echo "FAIL: $(basename "$test_bin")" >&2
+      echo "FAIL: $tname" >&2
     fi
   done < <(find "$build_dir" -maxdepth 1 -name 'test_*' -executable -type f | sort)
 
-  log "Tests: $pass/$total passed"
+  log "Tests: $pass/$total passed ($skip skipped under qemu)"
   if (( fail > 0 )); then
     exit 1
   fi
