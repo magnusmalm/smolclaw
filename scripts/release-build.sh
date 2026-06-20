@@ -38,7 +38,7 @@ musl_build() {
     exit 1
   fi
 
-  triple="$(ls "$toolchain/bin/" | head -1 | sed 's/-gcc$//')"
+  triple="$(basename "$(ls "$toolchain/bin/"*-gcc | head -1)" | sed 's/-gcc$//')"
 
   cmake -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release \
