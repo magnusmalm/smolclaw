@@ -200,7 +200,7 @@ startup latency and AV false-positive risks of packed binaries.
 - Wire into release.yml so release binaries use the size-optimized path
 - Measure before/after on x86_64 and aarch64 (target: 10-25% reduction)
 
-**Files:** `CMakeLists.txt`, `.github/workflows/release.yml`
+**Files:** `CMakeLists.txt`, `.gitea/workflows/release.yml`
 
 **Effort:** 1-2 days (mostly CMake + CI validation).
 

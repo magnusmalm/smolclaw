@@ -1,10 +1,14 @@
 # Releasing smolclaw
 
+Releases are published to the private Gitea instance (`192.168.1.118:3000`).
+The starbase host runner builds and attaches artifacts automatically.
+
 ## Prerequisites
 
-- `gh` CLI authenticated (`gh auth status`)
 - Clean working tree (`git status`)
-- All tests passing (`ctest --test-dir build`)
+- Push/PR CI green on `master` (`.gitea/workflows/ci.yml`)
+- `qemu-user-static` on starbase for aarch64 release tests:
+  `sudo apt-get install -y qemu-user-static`
 
 ## Steps
 
@@ -21,49 +25,64 @@ Rebuild to verify:
 ```bash
 cmake -B build && cmake --build build -j$(nproc)
 ctest --test-dir build --output-on-failure
-./build/smolclaw --version
+./build/smolclaw version
 ```
 
-### 2. Commit and tag
+### 2. Update release notes (optional)
+
+Edit `RELEASE_NOTES.md` at the repo root. The release workflow uses this file
+when creating the Gitea release.
+
+### 3. Commit and tag
 
 ```bash
-git add CMakeLists.txt
+git add CMakeLists.txt RELEASE_NOTES.md
 git commit -m "Release vX.Y.Z"
 git tag -a vX.Y.Z -m "vX.Y.Z — short summary"
 ```
 
-### 3. Push
+### 4. Push to Gitea
 
 ```bash
 git push origin master vX.Y.Z
 ```
 
-The `v*` tag triggers `.github/workflows/release.yml`, which:
-- Builds musl-static binaries for x86_64 and aarch64
-- Creates a GitHub Release with auto-generated notes
-- Attaches `smolclaw-vX.Y.Z-linux-{arch}.tar.gz` + SHA-256 checksums
+The `v*` tag triggers `.gitea/workflows/release.yml`, which:
 
-### 4. Edit release notes (optional)
-
-The workflow auto-generates notes from commits. To replace with custom notes:
-
-```bash
-gh release edit vX.Y.Z --notes-file RELEASE_NOTES.md
-```
-
-Or write them directly:
-
-```bash
-gh release edit vX.Y.Z --notes "$(cat RELEASE_NOTES.md)"
-```
+- Builds musl-static binaries for **x86_64** (native ctest) and **aarch64**
+  (cross-compile + `qemu-aarch64-static` tests)
+- Packages `smolclaw-vX.Y.Z-linux-{arch}.tar.gz` + SHA-256 checksums
+- Creates a Gitea release and uploads the assets
 
 ### 5. Verify
 
+Open:
+
+`http://192.168.1.118:3000/magnus/smolclaw/releases/tag/vX.Y.Z`
+
+Or use the API:
+
 ```bash
-gh release view vX.Y.Z
+curl -sS -H "Authorization: token $TOKEN" \
+  "http://192.168.1.118:3000/api/v1/repos/magnus/smolclaw/releases/tags/vX.Y.Z" \
+  | python3 -m json.tool
 ```
 
-Check that binaries are attached and notes look correct.
+## Local dry-run (optional)
+
+Build artifacts without publishing:
+
+```bash
+RELEASE_TAG=vX.Y.Z ./scripts/release-build.sh
+ls -la dist/release/
+```
+
+Publish manually after a local build:
+
+```bash
+export GITEA_TOKEN=...   # Gitea API token with repo write access
+RELEASE_TAG=vX.Y.Z ./scripts/gitea-release-publish.sh
+```
 
 ## Version scheme
 

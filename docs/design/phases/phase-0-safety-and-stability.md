@@ -68,7 +68,7 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 
 ### 0.4 Size-optimized release build
 
-**Files:** `CMakeLists.txt`, `.github/workflows/release.yml`
+**Files:** `CMakeLists.txt`, `.gitea/workflows/release.yml`
 
 - [ ] `MinSizeRel` or explicit `-Os`/`-Oz` release profile
 - [ ] `-flto=thin`, `-ffunction-sections`, `-fdata-sections`, `-Wl,--gc-sections`
