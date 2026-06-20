@@ -30,8 +30,10 @@ require_qemu() {
 musl_build() {
   local arch="$1"
   local build_dir="$2"
-  local toolchain="deps/musl-toolchain-${arch}"
+  local toolchain="$ROOT/deps/musl-toolchain-${arch}"
+  local prefix="$ROOT/deps/musl-static-${arch}"
   local triple
+  local compiler
 
   if [[ ! -d "$toolchain/bin" ]]; then
     echo "Missing toolchain dir: $toolchain" >&2
@@ -39,13 +41,15 @@ musl_build() {
   fi
 
   triple="$(basename "$(ls "$toolchain/bin/"*-gcc | head -1)" | sed 's/-gcc$//')"
+  compiler="$toolchain/bin/${triple}-gcc"
 
   cmake -B "$build_dir" \
     -DCMAKE_BUILD_TYPE=Release \
     -DSC_MUSL_STATIC=ON \
     -DSC_STRIP=ON \
-    -DCMAKE_C_COMPILER="$toolchain/bin/${triple}-gcc" \
-    -DCMAKE_PREFIX_PATH="$ROOT/deps/musl-static-${arch}"
+    -DCMAKE_VERBOSE_MAKEFILE=OFF \
+    -DCMAKE_C_COMPILER="$compiler" \
+    -DCMAKE_PREFIX_PATH="$prefix"
 
   cmake --build "$build_dir" -j"$JOBS"
 }
@@ -104,7 +108,7 @@ mkdir -p "$OUTDIR"
 
 for arch in "${ARCHES[@]}"; do
   log "Building musl deps ($arch)"
-  ./scripts/build_musl_deps.sh "$arch"
+  MUSL_DEPS_QUIET=1 ./scripts/build_musl_deps.sh "$arch"
 
   build_dir="build-release-${arch}"
   rm -rf "$build_dir"

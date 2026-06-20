@@ -119,6 +119,22 @@ download() {
     echo "${expected}  ${dest}" | "${algo}sum" -c -
 }
 
+# musl-cross-make emits megabytes of make output; keep CI logs small.
+run_quiet() {
+    local logfile="$1"
+    shift
+    if [ "${MUSL_DEPS_QUIET:-}" = "1" ]; then
+        if ! "$@" >"${logfile}" 2>&1; then
+            echo "Command failed: $*" >&2
+            echo "Last 80 lines of ${logfile}:" >&2
+            tail -80 "${logfile}" >&2
+            exit 1
+        fi
+    else
+        "$@"
+    fi
+}
+
 # =============================================================================
 # Step 1: Build musl cross-compiler toolchain via musl-cross-make
 # =============================================================================
@@ -171,11 +187,16 @@ ARMEOF
     fi
 
     echo "  Building toolchain (output: ${TOOLCHAIN_DIR})..."
-    make -C "${MCM_DIR}" -j"${NPROC}"
-    make -C "${MCM_DIR}" install
+    local build_log="${BUILD_DIR}/musl-cross-make-${ARCH}.log"
+    mkdir -p "${BUILD_DIR}"
+    if [ "${MUSL_DEPS_QUIET:-}" = "1" ]; then
+        echo "  (verbose build log: ${build_log})"
+    fi
+    run_quiet "${build_log}" make -C "${MCM_DIR}" -j"${NPROC}"
+    run_quiet "${build_log}" make -C "${MCM_DIR}" install
 
     # Clean build artifacts to save disk space (keeps installed toolchain)
-    make -C "${MCM_DIR}" clean
+    run_quiet "${build_log}" make -C "${MCM_DIR}" clean
 
     # Verify the compiler works
     if [ ! -x "$cc" ]; then
