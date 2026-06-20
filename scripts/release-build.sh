@@ -19,6 +19,26 @@ ARCHES=(x86_64 aarch64)
 
 log() { printf '==> %s\n' "$*"; }
 
+# Reuse pre-built musl trees on the host runner (symlink, no copy).
+# Set MUSL_HOST_DEPS in act_runner config (e.g. ~/devel/smolclaw/deps).
+seed_host_musl_deps() {
+  local host="${MUSL_HOST_DEPS:-}"
+  local name
+
+  [[ -n "$host" && -d "$host" ]] || return 0
+
+  mkdir -p "$ROOT/deps"
+  for name in musl-cross-make \
+      musl-build-x86_64 musl-build-aarch64 \
+      musl-toolchain-x86_64 musl-toolchain-aarch64 \
+      musl-static-x86_64 musl-static-aarch64; do
+    if [[ -d "$host/$name" && ! -e "$ROOT/deps/$name" ]]; then
+      log "Linking deps/$name from host musl cache"
+      ln -s "$host/$name" "$ROOT/deps/$name"
+    fi
+  done
+}
+
 require_qemu() {
   if ! command -v "$QEMU_AARCH64" >/dev/null; then
     echo "Missing $QEMU_AARCH64 (needed for aarch64 release tests)" >&2
@@ -105,6 +125,8 @@ package_arch() {
 
 rm -rf "$OUTDIR"
 mkdir -p "$OUTDIR"
+
+seed_host_musl_deps
 
 for arch in "${ARCHES[@]}"; do
   log "Building musl deps ($arch)"
