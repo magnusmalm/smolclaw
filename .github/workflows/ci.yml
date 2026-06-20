@@ -19,17 +19,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake build-essential python3-pip \
-            libcurl4-openssl-dev libevent-dev libssl-dev \
-            libreadline-dev libsqlite3-dev
-          pip3 install kconfiglib
-
-      - name: Install clang
-        if: matrix.compiler == 'clang'
-        run: sudo apt-get install -y clang
+        run: ./scripts/ci-ensure-host-deps.sh ${{ matrix.compiler }}
 
       - name: Configure (minimal)
         if: matrix.profile == 'minimal'
@@ -67,13 +57,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake build-essential python3-pip \
-            libcurl4-openssl-dev libevent-dev libssl-dev \
-            libreadline-dev libsqlite3-dev
-          pip3 install kconfiglib
+        run: ./scripts/ci-ensure-host-deps.sh base
 
       - name: Build minimal (MinSizeRel + gc-sections)
         run: |

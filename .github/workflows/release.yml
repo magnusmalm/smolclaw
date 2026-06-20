@@ -21,13 +21,7 @@ jobs:
           submodules: recursive
 
       - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake build-essential python3-pip \
-            libcurl4-openssl-dev libevent-dev libssl-dev \
-            libreadline-dev libsqlite3-dev
-          pip3 install kconfiglib
+        run: ./scripts/ci-ensure-host-deps.sh base
 
       - name: Install QEMU for cross-arch testing
         if: matrix.arch != 'x86_64'
