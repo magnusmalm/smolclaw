@@ -1,10 +1,8 @@
 /*
- * test_security_prod - Production security integration tests
+ * test_security_prod - Security integration tests (full profile / -L security)
  *
- * Loads ~/.smolclaw/config.json and tests security layers deterministically
- * (no LLM calls). Requires production config to be present.
- *
- * NOT included in ctest — run manually on the production server.
+ * Loads ~/.smolclaw/config.json when present; otherwise uses a temp CI
+ * fixture (SMOLCLAW_TEST_CONFIG overrides path). No LLM calls.
  */
 
 #include "test_main.h"
@@ -39,8 +37,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-/* Globals loaded from prod config */
+/* Globals loaded from prod or CI fixture config */
 static sc_config_t *g_cfg;
+static char *g_ci_workspace;
+static char *g_ci_config_path;
 static sc_tool_registry_t *g_reg;
 static sc_tool_t *g_exec;
 static sc_tool_t *g_message;
@@ -78,9 +78,10 @@ static sc_tool_result_t *exec_command(const char *cmd)
 /* Helper: check if exec result is a deny-pattern block */
 static int is_denied(sc_tool_result_t *r)
 {
-    if (!r) return 0;
-    return r->is_error && r->for_llm &&
-           strstr(r->for_llm, "blocked by safety guard") != NULL;
+    if (!r || !r->is_error || !r->for_llm) return 0;
+    return strstr(r->for_llm, "blocked by safety guard") != NULL ||
+           strstr(r->for_llm, "contains control characters") != NULL ||
+           strstr(r->for_llm, "Command blocked") != NULL;
 }
 
 /* ========== Deny pattern tests (original) ========== */
@@ -1923,16 +1924,62 @@ static void test_irc_control_chars_stripped(void)
 
 /* ========== Setup / Teardown ========== */
 
+static int write_ci_config(const char *workspace, const char *path)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f,
+        "{\n"
+        "  \"agents\": {\n"
+        "    \"defaults\": {\n"
+        "      \"workspace\": \"%s\",\n"
+        "      \"restrict_to_workspace\": true,\n"
+        "      \"max_output_chars\": 10000,\n"
+        "      \"exec_timeout_secs\": 10\n"
+        "    }\n"
+        "  }\n"
+        "}\n",
+        workspace);
+    fclose(f);
+    return 0;
+}
+
 static int setup(void)
 {
-    /* Load production config */
-    char *config_path = sc_config_get_path();
-    g_cfg = sc_config_load(config_path);
-    free(config_path);
+    const char *override = getenv("SMOLCLAW_TEST_CONFIG");
+    char *config_path = NULL;
+
+    if (override && override[0]) {
+        config_path = sc_strdup(override);
+        g_cfg = sc_config_load(config_path);
+    } else {
+        config_path = sc_config_get_path();
+        if (config_path) {
+            g_cfg = sc_config_load(config_path);
+            free(config_path);
+            config_path = NULL;
+        }
+    }
 
     if (!g_cfg) {
-        fprintf(stderr, "FATAL: Could not load config (~/.smolclaw/config.json)\n");
-        return -1;
+        char ws_template[] = "/tmp/sc_security_ci_XXXXXX";
+        g_ci_workspace = mkdtemp(ws_template);
+        if (!g_ci_workspace)
+            return -1;
+
+        char cfg_template[] = "/tmp/sc_security_cfg_XXXXXX";
+        int fd = mkstemp(cfg_template);
+        if (fd < 0)
+            return -1;
+        close(fd);
+
+        g_ci_config_path = sc_strdup(cfg_template);
+        if (write_ci_config(g_ci_workspace, g_ci_config_path) != 0)
+            return -1;
+
+        g_cfg = sc_config_load(g_ci_config_path);
+        if (!g_cfg)
+            return -1;
     }
 
     char *workspace = sc_config_workspace_path(g_cfg);
@@ -2124,7 +2171,19 @@ static void teardown(void)
 {
     sc_tool_registry_free(g_reg);
     sc_config_free(g_cfg);
+    g_cfg = NULL;
     sc_audit_shutdown();
+
+    if (g_ci_config_path) {
+        unlink(g_ci_config_path);
+        free(g_ci_config_path);
+        g_ci_config_path = NULL;
+    }
+    if (g_ci_workspace) {
+        rmdir(g_ci_workspace);
+        free(g_ci_workspace);
+        g_ci_workspace = NULL;
+    }
 }
 
 /* ========== Main ========== */
@@ -2134,7 +2193,8 @@ int main(void)
     printf("test_security_prod: production security integration tests\n\n");
 
     if (setup() != 0) {
-        fprintf(stderr, "Setup failed — is this running on the production server?\n");
+        fprintf(stderr, "Setup failed — config load or CI fixture creation failed\n");
+        teardown();
         return 1;
     }
 

@@ -495,6 +495,7 @@ set(TEST_SOURCES
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_exec_safety.c
+    tests/test_security.c
     tests/test_memory_tools.c
     tests/test_memory_namespaced.c
     tests/test_context_isolation.c
@@ -643,10 +644,14 @@ add_test(NAME test_e2e COMMAND test_e2e)
 set_tests_properties(test_e2e PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_dependencies(test_e2e smolclaw)
 
-# Production security test (not in ctest — requires production config)
-add_executable(test_security_prod tests/test_security_prod.c)
-target_link_libraries(test_security_prod PRIVATE smolclaw_lib)
-set_target_properties(test_security_prod PROPERTIES EXCLUDE_FROM_ALL TRUE)
+# Full security integration suite — registered in ctest for full profile only.
+# Minimal CI profile excludes via: ctest -LE security
+if(SC_ENABLE_WEB)
+    add_executable(test_security_prod tests/test_security_prod.c)
+    target_link_libraries(test_security_prod PRIVATE smolclaw_lib)
+    add_test(NAME test_security_prod COMMAND test_security_prod)
+    set_tests_properties(test_security_prod PROPERTIES LABELS "security")
+endif()
 
 # Install
 install(TARGETS smolclaw DESTINATION bin)

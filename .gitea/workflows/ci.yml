@@ -40,7 +40,12 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          if [ "${{ matrix.profile }}" = "minimal" ]; then
+            ctest --test-dir build --output-on-failure -LE security
+          else
+            ctest --test-dir build --output-on-failure
+          fi
 
       - name: Binary info
         run: |

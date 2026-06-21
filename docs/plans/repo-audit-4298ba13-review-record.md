@@ -15,7 +15,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | PR-1 | web fail-closed | f8c67c4 | ctest 32/32 | 0 | landed |
 | PR-2 | exec safety bundle | 91a04ef | ctest 33/33 | 0 | landed |
 | PR-3 | memory index mutex | 7665a37 | ctest 34/34 (mem search ON) | 0 | landed |
-| PR-4 | security tests in CI | | | | |
+| PR-4 | security tests in CI | (pending) | ctest 36/36 full, 20/20 minimal | 0 | staged |
 | PR-5 | git + worktree | | | | |
 | PR-6 | web rate limits + health | | | | |
 | PR-7 | notify sc_curl_init | | | | |
@@ -32,7 +32,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | P0-2 | PR-3 | 7665a37 | test_memory_search concurrent | closed |
 | P0-3 | PR-2 | 91a04ef | test_exec_safety deny-list init | closed |
 | P0-4 | PR-2 | 91a04ef | test_sandbox mandatory workspace | closed |
-| P0-5 | PR-4 | | | open |
+| P0-5 | PR-4 | (pending) | test_security + test_security_prod | closed |
 | P1-1 | PR-5 | | | open |
 | P1-2 | PR-8 | | | open |
 | P1-3 | PR-5 | | | open |

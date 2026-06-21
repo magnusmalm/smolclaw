@@ -79,6 +79,10 @@ cmake --build build -j$(nproc)
 ctest --test-dir build
 ```
 
+`test_security` (prompt guard, redaction, deny patterns) runs in every profile.
+The full `test_security_prod` integration suite runs only in the **full** build
+profile (`SC_ENABLE_WEB`); minimal CI uses `ctest -LE security` to skip it.
+
 ### Static (glibc)
 
 ```bash
