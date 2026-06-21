@@ -11,10 +11,13 @@ void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV]);
 /* Compiled deny pattern list */
 typedef struct {
     regex_t *patterns;
+    int *compiled;   /* 1 if regcomp succeeded for this slot */
     int count;
 } sc_deny_list_t;
 
 int  sc_deny_list_init(sc_deny_list_t *dl);
+/* Testable entry point: compile an arbitrary pattern array. */
+int  sc_deny_list_init_from(sc_deny_list_t *dl, const char **patterns, int count);
 void sc_deny_list_free(sc_deny_list_t *dl);
 int  sc_deny_list_matches(const sc_deny_list_t *dl, const char *cmd);
 

@@ -190,23 +190,27 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
 
     const char *working_dir = sc_json_get_string(args, "working_dir", NULL);
     const char *cwd = d->working_dir;
+    char *resolved_cwd = NULL;
     if (working_dir && *working_dir) {
         if (d->restrict_to_workspace) {
-            char *resolved_wd = sc_validate_path(working_dir, d->working_dir,
-                                                  d->restrict_to_workspace);
-            if (!resolved_wd)
+            resolved_cwd = sc_validate_path(working_dir, d->working_dir,
+                                            d->restrict_to_workspace);
+            if (!resolved_cwd)
                 return sc_tool_result_error("working_dir outside workspace");
-            free(resolved_wd);
+            cwd = resolved_cwd;
+        } else {
+            cwd = working_dir;
         }
-        cwd = working_dir;
     }
 
     /* Safety guard */
     const char *guard_err = sc_exec_guard_command(&d->deny, command,
         d->use_allowlist, d->allowed_commands, d->allowed_count,
         d->restrict_to_workspace);
-    if (guard_err)
+    if (guard_err) {
+        free(resolved_cwd);
         return sc_tool_result_error(guard_err);
+    }
 
     /* Block commands that have dedicated tools.
      * Extracts the base command (first word) and checks against the list. */
@@ -223,6 +227,7 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
                     "Command '%s' is blocked — use the '%s' tool instead. "
                     "The exec tool cannot run commands that have dedicated tools.",
                     blocked, blocked);
+                free(resolved_cwd);
                 return sc_tool_result_error(err);
             }
         }
@@ -230,13 +235,16 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
 
     /* Create pipe for stdout+stderr */
     int pipefd[2];
-    if (pipe(pipefd) != 0)
+    if (pipe(pipefd) != 0) {
+        free(resolved_cwd);
         return sc_tool_result_error("failed to create pipe");
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
+        free(resolved_cwd);
         return sc_tool_result_error("failed to fork");
     }
 
@@ -246,6 +254,8 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
         sc_exec_child(command, cwd, d->working_dir, d->sandbox_enabled,
                       pipefd[1]);
     }
+
+    free(resolved_cwd);
 
     /* Parent */
     close(pipefd[1]);
@@ -336,7 +346,12 @@ sc_tool_t *sc_tool_exec_new(const char *working_dir, int restrict_to_workspace,
     d->restrict_to_workspace = restrict_to_workspace;
     d->max_output_chars = max_output_chars;
     d->timeout_secs = timeout_secs;
-    sc_deny_list_init(&d->deny);
+    if (sc_deny_list_init(&d->deny) != 0) {
+        free(d->working_dir);
+        free(d);
+        free(t);
+        return NULL;
+    }
 
     t->name = "exec";
     t->description = "Execute a shell command and return its output. Use with caution.";

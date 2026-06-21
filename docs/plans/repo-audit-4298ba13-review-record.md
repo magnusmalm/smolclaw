@@ -13,7 +13,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 |----|-------|--------|-------------|---------|-------|
 | PR-0 | docs: audit + baseline + plan | 74f8a9a | — | — | landed |
 | PR-1 | web fail-closed | f8c67c4 | ctest 32/32 | 0 | landed |
-| PR-2 | exec safety bundle | | | | |
+| PR-2 | exec safety bundle | 91a04ef | ctest 33/33 | 0 | landed |
 | PR-3 | memory index mutex | | | | |
 | PR-4 | security tests in CI | | | | |
 | PR-5 | git + worktree | | | | |
@@ -30,8 +30,8 @@ Append one section per merged PR. Final Review Record section added when arc com
 |---------|----|--------|---------------|--------|
 | P0-1 | PR-1 | f8c67c4 | ctest test_web_auth + 32/32 | closed |
 | P0-2 | PR-3 | | | open |
-| P0-3 | PR-2 | | | open |
-| P0-4 | PR-2 | | | open |
+| P0-3 | PR-2 | 91a04ef | test_exec_safety deny-list init | closed |
+| P0-4 | PR-2 | 91a04ef | test_sandbox mandatory workspace | closed |
 | P0-5 | PR-4 | | | open |
 | P1-1 | PR-5 | | | open |
 | P1-2 | PR-8 | | | open |
@@ -39,8 +39,8 @@ Append one section per merged PR. Final Review Record section added when arc com
 | P1-4 | PR-6 | | | open |
 | P1-5 | PR-7 | | | open |
 | P1-6 | PR-8 | | | open |
-| P1-7 | PR-2 | | | open |
-| P1-8 | PR-2 | | | open |
+| P1-7 | PR-2 | 91a04ef | test_exec_safety resolved wd | closed |
+| P1-8 | PR-2 | 91a04ef | test_exec_safety chdir 126 | closed |
 | P1-9 | PR-3 | | | open |
 | P2-1 | PR-9 | | | open |
 | P2-3 | PR-8 | | | open |

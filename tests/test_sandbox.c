@@ -18,6 +18,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
 /* Helper: create a temp workspace dir */
 static char *make_tmp_workspace(void)
@@ -166,6 +167,26 @@ static void test_config_sandbox_default(void)
     sc_config_free(cfg);
 }
 
+static void test_sandbox_mandatory_workspace_missing(void)
+{
+    pid_t pid = fork();
+    ASSERT_INT_EQ(pid >= 0, 1);
+
+    if (pid == 0) {
+        sc_sandbox_opts_t opts = {
+            .workspace = "/nonexistent/sc_sandbox_ws_missing",
+            .tmpdir = "/tmp",
+        };
+        int rc = sc_sandbox_apply(&opts);
+        _exit(rc == -1 ? 0 : 1);
+    }
+
+    int status = 0;
+    ASSERT_INT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT(WIFEXITED(status), "sandbox child should exit normally");
+    ASSERT_INT_EQ(WEXITSTATUS(status), 0);
+}
+
 int main(void)
 {
     printf("test_sandbox\n");
@@ -179,6 +200,7 @@ int main(void)
     RUN_TEST(test_sandbox_blocks_home);
     RUN_TEST(test_sandbox_blocks_mount);
     RUN_TEST(test_sandbox_disabled);
+    RUN_TEST(test_sandbox_mandatory_workspace_missing);
     RUN_TEST(test_config_sandbox_default);
 
     sc_audit_shutdown();

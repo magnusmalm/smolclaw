@@ -46,35 +46,64 @@ void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV])
 
 /* ---------- Deny patterns ---------- */
 
-int sc_deny_list_init(sc_deny_list_t *dl)
+int sc_deny_list_init_from(sc_deny_list_t *dl, const char **patterns, int count)
 {
-    dl->count = (int)SC_DENY_PATTERN_COUNT;
-    dl->patterns = calloc((size_t)dl->count, sizeof(regex_t));
-    if (!dl->patterns) return -1;
+    dl->count = count;
+    dl->patterns = calloc((size_t)count, sizeof(regex_t));
+    dl->compiled = calloc((size_t)count, sizeof(int));
+    if (!dl->patterns || !dl->compiled) {
+        free(dl->patterns);
+        free(dl->compiled);
+        dl->patterns = NULL;
+        dl->compiled = NULL;
+        dl->count = 0;
+        return -1;
+    }
 
-    for (int i = 0; i < dl->count; i++) {
-        int rc = regcomp(&dl->patterns[i], sc_deny_patterns[i],
+    for (int i = 0; i < count; i++) {
+        int rc = regcomp(&dl->patterns[i], patterns[i],
                          REG_EXTENDED | REG_NOSUB);
         if (rc != 0) {
             SC_LOG_WARN("exec", "Failed to compile deny pattern %d", i);
+            for (int j = 0; j < i; j++)
+                regfree(&dl->patterns[j]);
+            free(dl->patterns);
+            free(dl->compiled);
+            dl->patterns = NULL;
+            dl->compiled = NULL;
+            dl->count = 0;
+            return -1;
         }
+        dl->compiled[i] = 1;
     }
     return 0;
+}
+
+int sc_deny_list_init(sc_deny_list_t *dl)
+{
+    return sc_deny_list_init_from(dl, sc_deny_patterns,
+                                  (int)SC_DENY_PATTERN_COUNT);
 }
 
 void sc_deny_list_free(sc_deny_list_t *dl)
 {
     if (!dl->patterns) return;
-    for (int i = 0; i < dl->count; i++)
-        regfree(&dl->patterns[i]);
+    for (int i = 0; i < dl->count; i++) {
+        if (dl->compiled && dl->compiled[i])
+            regfree(&dl->patterns[i]);
+    }
     free(dl->patterns);
+    free(dl->compiled);
     dl->patterns = NULL;
+    dl->compiled = NULL;
     dl->count = 0;
 }
 
 int sc_deny_list_matches(const sc_deny_list_t *dl, const char *cmd)
 {
     for (int i = 0; i < dl->count; i++) {
+        if (!dl->compiled || !dl->compiled[i])
+            continue;
         if (regexec(&dl->patterns[i], cmd, 0, NULL, 0) == 0)
             return 1;
     }
@@ -249,7 +278,13 @@ void sc_exec_child(const char *command, const char *working_dir,
      * Create per-process tmpdir to avoid sharing /tmp with other users. */
     char proc_tmp[] = "/tmp/sc_exec_XXXXXX";
     if (sandbox_enabled) {
-        const char *tmpdir = mkdtemp(proc_tmp) ? proc_tmp : "/tmp";
+        if (!mkdtemp(proc_tmp)) {
+            const char tmp_msg[] =
+                "sandbox: mkdtemp failed, refusing to execute\n";
+            (void)write(STDERR_FILENO, tmp_msg, sizeof(tmp_msg) - 1);
+            _exit(126);
+        }
+        const char *tmpdir = proc_tmp;
 
         /* Resolve ~/.local for user-installed tools (cmake, pip packages,
          * etc.).  This covers both ~/.local/bin (wrapper scripts) and
@@ -275,8 +310,13 @@ void sc_exec_child(const char *command, const char *working_dir,
         setenv("TMPDIR", tmpdir, 1);
     }
 
-    if (working_dir && *working_dir)
-        if (chdir(working_dir) != 0) { /* ignore */ }
+    if (working_dir && *working_dir) {
+        if (chdir(working_dir) != 0) {
+            const char cd_msg[] = "exec: chdir failed, refusing to execute\n";
+            (void)write(STDERR_FILENO, cd_msg, sizeof(cd_msg) - 1);
+            _exit(126);
+        }
+    }
 
     /* Strip non-ASCII from command before exec so that the shell sees
      * the same bytes the deny patterns analyzed (C-2 hardening). */

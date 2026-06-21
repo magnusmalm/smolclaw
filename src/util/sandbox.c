@@ -130,12 +130,21 @@ static int ll_restrict_self(int ruleset_fd, uint32_t flags)
 #define LL_ACCESS_DEV_RO ( \
     LANDLOCK_ACCESS_FS_READ_FILE  )
 
-/* Add a Landlock path rule. Silently skip missing paths. */
-static int ll_add_path_rule(int ruleset_fd, const char *path, uint64_t access)
+/* Add a Landlock path rule.
+ * mandatory=1: fail closed if path missing or ll_add_rule fails.
+ * mandatory=0: silently skip missing optional system paths. */
+static int ll_add_path_rule(int ruleset_fd, const char *path, uint64_t access,
+                            int mandatory)
 {
     int fd = open(path, O_PATH | O_CLOEXEC);
-    if (fd < 0)
-        return 0;  /* path doesn't exist on this system — skip */
+    if (fd < 0) {
+        if (mandatory) {
+            SC_LOG_WARN(LOG_TAG, "mandatory path unavailable: %s: %s",
+                        path, strerror(errno));
+            return -1;
+        }
+        return 0;  /* optional path doesn't exist on this system — skip */
+    }
 
     struct landlock_path_beneath_attr attr = {
         .allowed_access = access,
@@ -143,7 +152,17 @@ static int ll_add_path_rule(int ruleset_fd, const char *path, uint64_t access)
     };
     int rc = ll_add_rule(ruleset_fd, LANDLOCK_RULE_PATH_BENEATH, &attr, 0);
     close(fd);
-    return rc;
+    if (rc < 0) {
+        if (mandatory) {
+            SC_LOG_WARN(LOG_TAG, "landlock add_rule failed for %s: %s",
+                        path, strerror(errno));
+            return -1;
+        }
+        SC_LOG_WARN(LOG_TAG, "landlock add_rule skipped for %s: %s",
+                    path, strerror(errno));
+        return 0;
+    }
+    return 0;
 }
 
 static int apply_landlock(const sc_sandbox_opts_t *opts)
@@ -184,44 +203,52 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
      * instead of blanket workspace rw. Otherwise default to full workspace. */
     if (opts->cap_fs_read_count > 0 || opts->cap_fs_write_count > 0) {
         /* Capability mode: explicit paths only */
-        for (int i = 0; i < opts->cap_fs_read_count; i++)
-            ll_add_path_rule(ruleset_fd, opts->cap_fs_read[i], ro);
-        for (int i = 0; i < opts->cap_fs_write_count; i++)
-            ll_add_path_rule(ruleset_fd, opts->cap_fs_write[i], rw);
+        for (int i = 0; i < opts->cap_fs_read_count; i++) {
+            if (ll_add_path_rule(ruleset_fd, opts->cap_fs_read[i], ro, 1) != 0)
+                goto landlock_fail;
+        }
+        for (int i = 0; i < opts->cap_fs_write_count; i++) {
+            if (ll_add_path_rule(ruleset_fd, opts->cap_fs_write[i], rw, 1) != 0)
+                goto landlock_fail;
+        }
     } else if (opts->workspace) {
         /* Default: blanket workspace rw */
-        ll_add_path_rule(ruleset_fd, opts->workspace, rw);
+        if (ll_add_path_rule(ruleset_fd, opts->workspace, rw, 1) != 0)
+            goto landlock_fail;
     }
 
-    /* Temp dir: full rw */
-    const char *tmpdir = opts->tmpdir ? opts->tmpdir : "/tmp";
-    ll_add_path_rule(ruleset_fd, tmpdir, rw);
+    /* Temp dir: full rw (mandatory — created by exec child before sandbox) */
+    {
+        const char *tmpdir = opts->tmpdir ? opts->tmpdir : "/tmp";
+        if (ll_add_path_rule(ruleset_fd, tmpdir, rw, 1) != 0)
+            goto landlock_fail;
+    }
 
     /* System binary dirs: read + execute */
     static const char *rx_paths[] = {
         "/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", NULL
     };
     for (int i = 0; rx_paths[i]; i++)
-        ll_add_path_rule(ruleset_fd, rx_paths[i], rx);
+        ll_add_path_rule(ruleset_fd, rx_paths[i], rx, 0);
 
     /* Extra binary dir (e.g. ~/.local/bin for user-installed MCP servers) */
     if (opts->bin_dir)
-        ll_add_path_rule(ruleset_fd, opts->bin_dir, rx);
+        ll_add_path_rule(ruleset_fd, opts->bin_dir, rx, 0);
 
     /* Config dirs: read only */
-    ll_add_path_rule(ruleset_fd, "/etc", ro);
+    ll_add_path_rule(ruleset_fd, "/etc", ro, 0);
 
     /* Kernel/system views for read-only host introspection */
-    ll_add_path_rule(ruleset_fd, "/proc", ro);
-    ll_add_path_rule(ruleset_fd, "/sys", ro);
+    ll_add_path_rule(ruleset_fd, "/proc", ro, 0);
+    ll_add_path_rule(ruleset_fd, "/sys", ro, 0);
 
     /* Device nodes */
-    ll_add_path_rule(ruleset_fd, "/dev/null", dev_rw);
-    ll_add_path_rule(ruleset_fd, "/dev/zero", dev_ro);
-    ll_add_path_rule(ruleset_fd, "/dev/urandom", dev_ro);
-    ll_add_path_rule(ruleset_fd, "/dev/random", dev_ro);
-    ll_add_path_rule(ruleset_fd, "/dev/tty", dev_rw);
-    ll_add_path_rule(ruleset_fd, "/dev/pts", dev_rw);
+    ll_add_path_rule(ruleset_fd, "/dev/null", dev_rw, 0);
+    ll_add_path_rule(ruleset_fd, "/dev/zero", dev_ro, 0);
+    ll_add_path_rule(ruleset_fd, "/dev/urandom", dev_ro, 0);
+    ll_add_path_rule(ruleset_fd, "/dev/random", dev_ro, 0);
+    ll_add_path_rule(ruleset_fd, "/dev/tty", dev_rw, 0);
+    ll_add_path_rule(ruleset_fd, "/dev/pts", dev_rw, 0);
 
     /* Enforce */
     if (ll_restrict_self(ruleset_fd, 0) != 0) {
@@ -232,6 +259,10 @@ static int apply_landlock(const sc_sandbox_opts_t *opts)
 
     close(ruleset_fd);
     return 0;
+
+landlock_fail:
+    close(ruleset_fd);
+    return -1;
 }
 
 /* ========================================================================

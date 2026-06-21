@@ -223,7 +223,12 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
 
     d->workspace = sc_strdup(workspace);
     d->restrict_to_workspace = restrict_to_workspace;
-    sc_deny_list_init(&d->deny);
+    if (sc_deny_list_init(&d->deny) != 0) {
+        free(d->workspace);
+        free(d);
+        free(t);
+        return NULL;
+    }
 
     /* Initialize process table — refuse if active processes exist */
     pthread_mutex_lock(&bg_lock);
