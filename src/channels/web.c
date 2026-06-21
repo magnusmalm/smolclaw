@@ -303,19 +303,28 @@ static const char *CHAT_HTML =
     "inp.onkeydown=e=>{if(e.key==='Enter')send()};"
     "</script></body></html>";
 
-/* Check bearer token */
+/* Fail-closed bearer auth (audit 4298ba13 / PR-1). The web channel must not
+ * start without a configured token; this path denies anyway if misconfigured. */
+int sc_web_check_bearer_auth(const char *configured_token,
+                              const char *authorization_header)
+{
+    if (!configured_token || !configured_token[0])
+        return 0;
+
+    if (!authorization_header)
+        return 0;
+
+    if (strncmp(authorization_header, "Bearer ", 7) != 0)
+        return 0;
+
+    return sc_timing_safe_cmp(authorization_header + 7, configured_token) == 0;
+}
+
 static int check_auth(struct evhttp_request *req, const web_data_t *wd)
 {
-    if (!wd->bearer_token || !wd->bearer_token[0])
-        return 1; /* No token configured = open */
-
     const char *auth = evhttp_find_header(evhttp_request_get_input_headers(req),
                                            "Authorization");
-    if (!auth) return 0;
-
-    /* Expect "Bearer <token>" */
-    if (strncmp(auth, "Bearer ", 7) != 0) return 0;
-    return sc_timing_safe_cmp(auth + 7, wd->bearer_token) == 0;
+    return sc_web_check_bearer_auth(wd->bearer_token, auth);
 }
 
 static void send_json_error(struct evhttp_request *req, int code,
@@ -1224,8 +1233,11 @@ static int web_start(sc_channel_t *self)
 {
     web_data_t *wd = self->data;
 
-    if (!wd->bearer_token || !wd->bearer_token[0])
-        SC_LOG_WARN(WEB_TAG, "No bearer token configured — web API is unauthenticated");
+    if (!wd->bearer_token || !wd->bearer_token[0]) {
+        SC_LOG_ERROR(WEB_TAG, "bearer_token is required — refusing to start "
+                    "unauthenticated web API (audit 4298ba13)");
+        return -1;
+    }
 
     int has_tls = 0;
 #if SC_HAVE_EVENT_OPENSSL

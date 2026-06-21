@@ -21,4 +21,11 @@ int sc_web_compute_isolation(const char *pattern,
                               const char *session_key,
                               char out_ns_id[17]);
 
+/* Bearer auth helper (unit-tested). configured_token must be non-empty when
+ * the web channel is running. Returns 1 if authorized, 0 if denied.
+ * Fail-closed policy: missing/empty configured token always denies (audit
+ * 4298ba13 / PR-1). authorization_header is the raw Authorization value. */
+int sc_web_check_bearer_auth(const char *configured_token,
+                              const char *authorization_header);
+
 #endif /* SC_CHANNEL_WEB_H */

@@ -504,7 +504,7 @@ set(TEST_SOURCES
 )
 
 if(SC_ENABLE_WEB)
-    list(APPEND TEST_SOURCES tests/test_web_isolation.c)
+    list(APPEND TEST_SOURCES tests/test_web_isolation.c tests/test_web_auth.c)
 endif()
 
 if(SC_ENABLE_STREAMING)
