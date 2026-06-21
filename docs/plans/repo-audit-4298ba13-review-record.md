@@ -12,7 +12,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | PR | Title | Commit | Review tool | P0 open | Notes |
 |----|-------|--------|-------------|---------|-------|
 | PR-0 | docs: audit + baseline + plan | 74f8a9a | — | — | landed |
-| PR-1 | web fail-closed | | | | |
+| PR-1 | web fail-closed | f8c67c4 | ctest 32/32 | 0 | landed |
 | PR-2 | exec safety bundle | | | | |
 | PR-3 | memory index mutex | | | | |
 | PR-4 | security tests in CI | | | | |
@@ -28,7 +28,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 
 | Plan ID | PR | Commit | Test evidence | Status |
 |---------|----|--------|---------------|--------|
-| P0-1 | PR-1 | | | open |
+| P0-1 | PR-1 | f8c67c4 | ctest test_web_auth + 32/32 | closed |
 | P0-2 | PR-3 | | | open |
 | P0-3 | PR-2 | | | open |
 | P0-4 | PR-2 | | | open |
