@@ -11,7 +11,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 
 | PR | Title | Commit | Review tool | P0 open | Notes |
 |----|-------|--------|-------------|---------|-------|
-| PR-0 | docs: audit + baseline + plan | _pending_ | — | — | |
+| PR-0 | docs: audit + baseline + plan | 74f8a9a | — | — | landed |
 | PR-1 | web fail-closed | | | | |
 | PR-2 | exec safety bundle | | | | |
 | PR-3 | memory index mutex | | | | |
