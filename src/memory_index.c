@@ -24,8 +24,12 @@
 #include <dirent.h>
 #include <stdint.h>
 #include <sys/stat.h>
+#include <pthread.h>
 
 #define LOG_TAG "memory_index"
+
+/* Match memory.c — cap indexed file reads to avoid OOM on corrupt/huge files */
+#define MAX_MEMORY_FILE_SIZE (256 * 1024)
 
 /* Chunking constants */
 #define CHUNK_THRESHOLD_LINES 200
@@ -48,6 +52,7 @@ static const char MEMORY_MIG_V1[] =
 static const char *const MEMORY_MIGRATIONS[] = { MEMORY_MIG_V1 };
 
 struct sc_memory_index {
+    pthread_mutex_t lock;
     sqlite3 *db;
     sqlite3_stmt *stmt_put;
     sqlite3_stmt *stmt_remove;
@@ -81,7 +86,8 @@ static void hash_to_hex(uint32_t h, char *out)
     snprintf(out, 9, "%08x", h);
 }
 
-/* Read file into malloc'd string (NULL on failure) */
+/* Read file into malloc'd string (NULL on failure).
+ * Oversized files are truncated to MAX_MEMORY_FILE_SIZE with a warning. */
 static char *read_file(const char *path)
 {
     FILE *f = fopen(path, "r");
@@ -90,6 +96,11 @@ static char *read_file(const char *path)
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     if (len <= 0) { fclose(f); return NULL; }
+    if (len > MAX_MEMORY_FILE_SIZE) {
+        SC_LOG_WARN(LOG_TAG, "Truncating oversized file %s (%ld > %d bytes)",
+                    path, len, MAX_MEMORY_FILE_SIZE);
+        len = MAX_MEMORY_FILE_SIZE;
+    }
     fseek(f, 0, SEEK_SET);
 
     char *buf = malloc((size_t)len + 1);
@@ -99,6 +110,16 @@ static char *read_file(const char *path)
     buf[n] = '\0';
     fclose(f);
     return buf;
+}
+
+static int prepare_stmt(sqlite3 *db, const char *sql, sqlite3_stmt **out)
+{
+    int rc = sqlite3_prepare_v2(db, sql, -1, out, NULL);
+    if (rc != SQLITE_OK) {
+        SC_LOG_ERROR(LOG_TAG, "prepare failed: %s", sqlite3_errmsg(db));
+        return -1;
+    }
+    return 0;
 }
 
 /* Derive source key from filename: "MEMORY.md" → "long_term", "20260301.md" → "20260301" */
@@ -187,64 +208,61 @@ sc_memory_index_t *sc_memory_index_new(const char *db_path)
         return NULL;
     }
 
-    /* Prepare statements */
-    /* Put: delete old then insert (FTS5 doesn't support REPLACE) */
-    sqlite3_prepare_v2(idx->db,
-        "DELETE FROM memory_fts WHERE source = ?1",
-        -1, &idx->stmt_remove, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "INSERT INTO memory_fts(source, content) VALUES (?1, ?2)",
-        -1, &idx->stmt_put, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
-        "       rank "
-        "FROM memory_fts WHERE memory_fts MATCH ?1 "
-        "ORDER BY rank LIMIT ?2",
-        -1, &idx->stmt_search, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
-        "       rank "
-        "FROM memory_fts WHERE memory_fts MATCH ?1 "
-        "ORDER BY CASE WHEN source = 'long_term' THEN '19000101' "
-        "ELSE source END DESC LIMIT ?2",
-        -1, &idx->stmt_search_recency, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "DELETE FROM memory_fts",
-        -1, &idx->stmt_clear, NULL);
+    pthread_mutexattr_t mattr;
+    pthread_mutexattr_init(&mattr);
+    pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_RECURSIVE);
+    if (pthread_mutex_init(&idx->lock, &mattr) != 0) {
+        pthread_mutexattr_destroy(&mattr);
+        sqlite3_close(idx->db);
+        free(idx);
+        return NULL;
+    }
+    pthread_mutexattr_destroy(&mattr);
 
-    /* Hash statements */
-    sqlite3_prepare_v2(idx->db,
-        "SELECT content_hash, mtime FROM memory_hashes WHERE source = ?1",
-        -1, &idx->stmt_hash_get, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "INSERT OR REPLACE INTO memory_hashes(source, content_hash, mtime) "
-        "VALUES (?1, ?2, ?3)",
-        -1, &idx->stmt_hash_put, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "DELETE FROM memory_hashes WHERE source = ?1",
-        -1, &idx->stmt_hash_remove, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "SELECT source FROM memory_hashes",
-        -1, &idx->stmt_hash_list, NULL);
+    /* Prepare statements — fail closed on any prepare error */
+#define PREP(sql, stmt) do { \
+    if (prepare_stmt(idx->db, (sql), &(stmt)) != 0) { \
+        sc_memory_index_free(idx); \
+        return NULL; \
+    } \
+} while (0)
 
-    /* Prefix-filtered search statements */
-    sqlite3_prepare_v2(idx->db,
-        "SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
-        "       rank "
-        "FROM memory_fts WHERE memory_fts MATCH ?1 AND source LIKE ?3 "
-        "ORDER BY rank LIMIT ?2",
-        -1, &idx->stmt_search_prefix, NULL);
-    sqlite3_prepare_v2(idx->db,
-        "SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
-        "       rank "
-        "FROM memory_fts WHERE memory_fts MATCH ?1 AND source LIKE ?3 "
-        "ORDER BY source DESC LIMIT ?2",
-        -1, &idx->stmt_search_prefix_recency, NULL);
+    PREP("DELETE FROM memory_fts WHERE source = ?1", idx->stmt_remove);
+    PREP("INSERT INTO memory_fts(source, content) VALUES (?1, ?2)",
+         idx->stmt_put);
+    PREP("SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
+         "       rank "
+         "FROM memory_fts WHERE memory_fts MATCH ?1 "
+         "ORDER BY rank LIMIT ?2",
+         idx->stmt_search);
+    PREP("SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
+         "       rank "
+         "FROM memory_fts WHERE memory_fts MATCH ?1 "
+         "ORDER BY CASE WHEN source = 'long_term' THEN '19000101' "
+         "ELSE source END DESC LIMIT ?2",
+         idx->stmt_search_recency);
+    PREP("DELETE FROM memory_fts", idx->stmt_clear);
+    PREP("SELECT content_hash, mtime FROM memory_hashes WHERE source = ?1",
+         idx->stmt_hash_get);
+    PREP("INSERT OR REPLACE INTO memory_hashes(source, content_hash, mtime) "
+         "VALUES (?1, ?2, ?3)",
+         idx->stmt_hash_put);
+    PREP("DELETE FROM memory_hashes WHERE source = ?1", idx->stmt_hash_remove);
+    PREP("SELECT source FROM memory_hashes", idx->stmt_hash_list);
+    PREP("SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
+         "       rank "
+         "FROM memory_fts WHERE memory_fts MATCH ?1 AND source LIKE ?3 "
+         "ORDER BY rank LIMIT ?2",
+         idx->stmt_search_prefix);
+    PREP("SELECT source, snippet(memory_fts, 1, '»', '«', '...', 64), "
+         "       rank "
+         "FROM memory_fts WHERE memory_fts MATCH ?1 AND source LIKE ?3 "
+         "ORDER BY source DESC LIMIT ?2",
+         idx->stmt_search_prefix_recency);
+    PREP("DELETE FROM memory_fts WHERE source = ?1 OR source LIKE ?2",
+         idx->stmt_remove_chunks);
 
-    /* Chunk removal: delete source + all "source:chunk_%" entries */
-    sqlite3_prepare_v2(idx->db,
-        "DELETE FROM memory_fts WHERE source = ?1 OR source LIKE ?2",
-        -1, &idx->stmt_remove_chunks, NULL);
+#undef PREP
 
     SC_LOG_DEBUG(LOG_TAG, "Index opened at %s", db_path);
     return idx;
@@ -253,6 +271,7 @@ sc_memory_index_t *sc_memory_index_new(const char *db_path)
 void sc_memory_index_free(sc_memory_index_t *idx)
 {
     if (!idx) return;
+    pthread_mutex_lock(&idx->lock);
     sqlite3_finalize(idx->stmt_put);
     sqlite3_finalize(idx->stmt_remove);
     sqlite3_finalize(idx->stmt_search);
@@ -266,6 +285,8 @@ void sc_memory_index_free(sc_memory_index_t *idx)
     sqlite3_finalize(idx->stmt_search_prefix_recency);
     sqlite3_finalize(idx->stmt_remove_chunks);
     sqlite3_close(idx->db);
+    pthread_mutex_unlock(&idx->lock);
+    pthread_mutex_destroy(&idx->lock);
     free(idx);
 }
 
@@ -273,6 +294,8 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
                         const char *content)
 {
     if (!idx || !source || !content) return -1;
+
+    pthread_mutex_lock(&idx->lock);
 
     /* Delete existing entry */
     sqlite3_reset(idx->stmt_remove);
@@ -287,6 +310,7 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
     if (rc != SQLITE_DONE) {
         SC_LOG_WARN(LOG_TAG, "Failed to index '%s': %s",
                     source, sqlite3_errmsg(idx->db));
+        pthread_mutex_unlock(&idx->lock);
         return -1;
     }
 
@@ -300,12 +324,15 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
     sqlite3_step(idx->stmt_hash_put);
 
     SC_LOG_DEBUG(LOG_TAG, "Indexed '%s' (%d bytes)", source, (int)strlen(content));
+    pthread_mutex_unlock(&idx->lock);
     return 0;
 }
 
 int sc_memory_index_remove(sc_memory_index_t *idx, const char *source)
 {
     if (!idx || !source) return -1;
+
+    pthread_mutex_lock(&idx->lock);
 
     sqlite3_reset(idx->stmt_remove);
     sqlite3_bind_text(idx->stmt_remove, 1, source, -1, SQLITE_TRANSIENT);
@@ -316,7 +343,9 @@ int sc_memory_index_remove(sc_memory_index_t *idx, const char *source)
     sqlite3_bind_text(idx->stmt_hash_remove, 1, source, -1, SQLITE_TRANSIENT);
     sqlite3_step(idx->stmt_hash_remove);
 
-    return (rc == SQLITE_DONE) ? 0 : -1;
+    int ret = (rc == SQLITE_DONE) ? 0 : -1;
+    pthread_mutex_unlock(&idx->lock);
+    return ret;
 }
 
 /* ========== Chunking ========== */
@@ -326,9 +355,32 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
 {
     if (!idx || !source || !content) return -1;
 
+    pthread_mutex_lock(&idx->lock);
+
     int lines = count_lines(content);
     if (lines <= CHUNK_THRESHOLD_LINES) {
-        return sc_memory_index_put(idx, source, content);
+        /* Inline put body — already holding lock */
+        int rc;
+        sqlite3_reset(idx->stmt_remove);
+        sqlite3_bind_text(idx->stmt_remove, 1, source, -1, SQLITE_TRANSIENT);
+        sqlite3_step(idx->stmt_remove);
+        sqlite3_reset(idx->stmt_put);
+        sqlite3_bind_text(idx->stmt_put, 1, source, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(idx->stmt_put, 2, content, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(idx->stmt_put);
+        if (rc != SQLITE_DONE) {
+            pthread_mutex_unlock(&idx->lock);
+            return -1;
+        }
+        char hex[9];
+        hash_to_hex(fnv1a_str(content), hex);
+        sqlite3_reset(idx->stmt_hash_put);
+        sqlite3_bind_text(idx->stmt_hash_put, 1, source, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(idx->stmt_hash_put, 2, hex, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(idx->stmt_hash_put, 3, 0);
+        sqlite3_step(idx->stmt_hash_put);
+        pthread_mutex_unlock(&idx->lock);
+        return 0;
     }
 
     /* Remove base + old chunks first */
@@ -356,7 +408,11 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
         /* Extract chunk text */
         size_t chunk_len = (size_t)(p - chunk_start);
         char *chunk = malloc(chunk_len + 1);
-        if (!chunk) break;
+        if (!chunk) {
+            sc_memory_index_remove_chunked(idx, source);
+            pthread_mutex_unlock(&idx->lock);
+            return -1;
+        }
         memcpy(chunk, chunk_start, chunk_len);
         chunk[chunk_len] = '\0';
 
@@ -366,7 +422,13 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
         sc_strbuf_appendf(&sb, "%s:chunk_%d", source, chunk_num);
         char *chunk_source = sc_strbuf_finish(&sb);
 
-        sc_memory_index_put(idx, chunk_source, chunk);
+        if (sc_memory_index_put(idx, chunk_source, chunk) != 0) {
+            free(chunk_source);
+            free(chunk);
+            sc_memory_index_remove_chunked(idx, source);
+            pthread_mutex_unlock(&idx->lock);
+            return -1;
+        }
         free(chunk_source);
         free(chunk);
 
@@ -391,12 +453,15 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
 
     SC_LOG_DEBUG(LOG_TAG, "Chunked '%s': %d lines → %d chunks",
                  source, lines, chunk_num);
+    pthread_mutex_unlock(&idx->lock);
     return 0;
 }
 
 int sc_memory_index_remove_chunked(sc_memory_index_t *idx, const char *source)
 {
     if (!idx || !source) return -1;
+
+    pthread_mutex_lock(&idx->lock);
 
     /* Build LIKE pattern: "source:chunk_%" */
     sc_strbuf_t sb;
@@ -415,7 +480,9 @@ int sc_memory_index_remove_chunked(sc_memory_index_t *idx, const char *source)
     sqlite3_bind_text(idx->stmt_hash_remove, 1, source, -1, SQLITE_TRANSIENT);
     sqlite3_step(idx->stmt_hash_remove);
 
-    return (rc == SQLITE_DONE) ? 0 : -1;
+    int ret = (rc == SQLITE_DONE) ? 0 : -1;
+    pthread_mutex_unlock(&idx->lock);
+    return ret;
 }
 
 /* ========== Incremental rebuild ========== */
@@ -585,6 +652,8 @@ int sc_memory_index_rebuild_dir(sc_memory_index_t *idx, const char *dir,
 {
     if (!idx || !dir) return -1;
 
+    pthread_mutex_lock(&idx->lock);
+
     /* Collect existing sources from hash table to detect deletions */
     source_set_t known;
     source_set_init(&known);
@@ -631,6 +700,7 @@ int sc_memory_index_rebuild_dir(sc_memory_index_t *idx, const char *dir,
 
     SC_LOG_INFO(LOG_TAG, "Memory index: %d indexed, %d unchanged, %d removed (%s)",
                 indexed, unchanged, removed_count, dir);
+    pthread_mutex_unlock(&idx->lock);
     return indexed;
 }
 
@@ -835,14 +905,19 @@ sc_memory_search_result_t *sc_memory_index_search(sc_memory_index_t *idx,
                                                    int *out_count)
 {
     if (!idx) { if (out_count) *out_count = 0; return NULL; }
-    return do_search(idx, query, idx->stmt_search, idx->stmt_search_recency,
-                     NULL, max_results, out_count);
+    pthread_mutex_lock(&idx->lock);
+    sc_memory_search_result_t *results = do_search(
+        idx, query, idx->stmt_search, idx->stmt_search_recency,
+        NULL, max_results, out_count);
+    pthread_mutex_unlock(&idx->lock);
+    return results;
 }
 
 sc_memory_search_result_t *sc_memory_index_search_prefix(
     sc_memory_index_t *idx, const char *query, const char *prefix,
     int max_results, int *out_count)
 {
+    if (!idx) { if (out_count) *out_count = 0; return NULL; }
     if (!prefix || !prefix[0])
         return sc_memory_index_search(idx, query, max_results, out_count);
 
@@ -852,9 +927,11 @@ sc_memory_search_result_t *sc_memory_index_search_prefix(
     sc_strbuf_appendf(&sb, "%s%%", prefix);
     char *like = sc_strbuf_finish(&sb);
 
+    pthread_mutex_lock(&idx->lock);
     sc_memory_search_result_t *results = do_search(
         idx, query, idx->stmt_search_prefix, idx->stmt_search_prefix_recency,
         like, max_results, out_count);
+    pthread_mutex_unlock(&idx->lock);
 
     free(like);
     return results;

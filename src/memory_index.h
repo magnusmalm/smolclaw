@@ -2,7 +2,11 @@
 #define SC_MEMORY_INDEX_H
 
 /* SQLite FTS5 search index for memory files.
- * Markdown files remain source of truth — this is a search overlay. */
+ * Markdown files remain source of truth — this is a search overlay.
+ *
+ * Thread safety (audit 4298ba13 / P0-2): all sc_memory_index_* entry points
+ * serialize access through an internal mutex so parallel tool batches may
+ * safely share one index handle. */
 
 typedef struct sc_memory_index sc_memory_index_t;
 

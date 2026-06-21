@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 /* Helper: create temp workspace dir */
 static char *make_tmpdir(void)
@@ -509,6 +510,100 @@ static void test_memory_write_triggers_callback(void)
     cleanup_tmpdir(dir);
 }
 
+static void *concurrent_search_fn(void *arg)
+{
+    sc_memory_index_t *idx = arg;
+    for (int i = 0; i < 100; i++) {
+        int count = 0;
+        sc_memory_search_result_t *r = sc_memory_index_search(
+            idx, "python deployment", 5, &count);
+        if (r)
+            sc_memory_search_results_free(r, count);
+    }
+    return NULL;
+}
+
+static void *concurrent_write_fn(void *arg)
+{
+    sc_memory_index_t *idx = arg;
+    for (int i = 0; i < 100; i++) {
+        char src[32];
+        char content[96];
+        snprintf(src, sizeof(src), "thr_%d", i % 10);
+        snprintf(content, sizeof(content),
+                 "python deployment thread write iteration %d", i);
+        sc_memory_index_put(idx, src, content);
+    }
+    return NULL;
+}
+
+static void test_index_concurrent_access(void)
+{
+    char *dir = make_tmpdir();
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/test.db", dir);
+    char *db_path = sc_strbuf_finish(&sb);
+
+    sc_memory_index_t *idx = sc_memory_index_new(db_path);
+    ASSERT_NOT_NULL(idx);
+    sc_memory_index_put(idx, "seed",
+                        "python deployment baseline for concurrent test");
+
+    pthread_t t_read, t_write;
+    ASSERT_INT_EQ(pthread_create(&t_read, NULL, concurrent_search_fn, idx), 0);
+    ASSERT_INT_EQ(pthread_create(&t_write, NULL, concurrent_write_fn, idx), 0);
+    ASSERT_INT_EQ(pthread_join(t_read, NULL), 0);
+    ASSERT_INT_EQ(pthread_join(t_write, NULL), 0);
+
+    int count = 0;
+    sc_memory_search_result_t *r = sc_memory_index_search(
+        idx, "python deployment", 10, &count);
+    ASSERT(count > 0, "index should remain searchable after concurrent access");
+    sc_memory_search_results_free(r, count);
+
+    sc_memory_index_free(idx);
+    free(db_path);
+    cleanup_tmpdir(dir);
+}
+
+static void test_index_rebuild_truncates_oversized_file(void)
+{
+    char *dir = make_tmpdir();
+    char mem_dir[128];
+    snprintf(mem_dir, sizeof(mem_dir), "%s/memory", dir);
+    ASSERT_INT_EQ(mkdir(mem_dir, 0755), 0);
+
+    char big_path[192];
+    snprintf(big_path, sizeof(big_path), "%s/HUGE.md", mem_dir);
+    FILE *f = fopen(big_path, "w");
+    ASSERT_NOT_NULL(f);
+    fputs("unique_marker_xyz ", f);
+    for (int i = 0; i < 300 * 1024; i++)
+        fputc('a', f);
+    fclose(f);
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/test.db", dir);
+    char *db_path = sc_strbuf_finish(&sb);
+
+    sc_memory_index_t *idx = sc_memory_index_new(db_path);
+    ASSERT_NOT_NULL(idx);
+    int indexed = sc_memory_index_rebuild(idx, mem_dir);
+    ASSERT(indexed >= 0, "rebuild should not fail on oversized file");
+
+    int count = 0;
+    sc_memory_search_result_t *r = sc_memory_index_search(
+        idx, "unique_marker_xyz", 5, &count);
+    ASSERT(count > 0, "truncated tail of oversized file should be searchable");
+    sc_memory_search_results_free(r, count);
+
+    sc_memory_index_free(idx);
+    free(db_path);
+    cleanup_tmpdir(dir);
+}
+
 static void test_index_empty_content(void)
 {
     char *dir = make_tmpdir();
@@ -546,6 +641,8 @@ int main(void)
     RUN_TEST(test_search_tool_missing_query);
     RUN_TEST(test_search_tool_parameters);
     RUN_TEST(test_memory_write_triggers_callback);
+    RUN_TEST(test_index_concurrent_access);
+    RUN_TEST(test_index_rebuild_truncates_oversized_file);
     RUN_TEST(test_index_empty_content);
     TEST_REPORT();
 }
