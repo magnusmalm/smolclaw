@@ -81,7 +81,8 @@ ctest --test-dir build
 
 `test_security` (prompt guard, redaction, deny patterns) runs in every profile.
 The full `test_security_prod` integration suite runs only in the **full** build
-profile (`SC_ENABLE_WEB`); minimal CI uses `ctest -LE security` to skip it.
+profile (`SC_ENABLE_WEB`); minimal CI skips it by name (`ctest -E
+test_security_prod`). Run the security suite alone with `ctest -L security`.
 
 ### Static (glibc)
 

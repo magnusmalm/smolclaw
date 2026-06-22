@@ -42,7 +42,9 @@ jobs:
       - name: Test
         run: |
           if [ "${{ matrix.profile }}" = "minimal" ]; then
-            ctest --test-dir build --output-on-failure -LE security
+            # Skip the heavy web-gated integration suite by name; the core
+            # security-labelled tests (sandbox, exec_safety, security) still run.
+            ctest --test-dir build --output-on-failure -E test_security_prod
           else
             ctest --test-dir build --output-on-failure
           fi

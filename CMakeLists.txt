@@ -604,6 +604,17 @@ foreach(test_src ${TEST_SOURCES})
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
+# Label security-relevant tests so `ctest -L security` runs the full set, not
+# just test_security_prod (audit 4298ba13 review record lists these as the
+# security evidence for P0/P1 fixes). Guarded with if(TEST) because the web
+# and git suites are only registered when their features are enabled.
+foreach(sec_test test_sandbox test_exec_safety test_security
+                 test_web_auth test_git_security)
+    if(TEST ${sec_test})
+        set_tests_properties(${sec_test} PROPERTIES LABELS "security")
+    endif()
+endforeach()
+
 # Tests using mock_http.h need libevent_pthreads for thread-safe loopbreak
 if(SC_MUSL_STATIC)
     set(EVENT_PTHREADS_LIB "${MUSL_PREFIX}/lib/libevent_pthreads.a")
@@ -652,8 +663,9 @@ add_test(NAME test_e2e COMMAND test_e2e)
 set_tests_properties(test_e2e PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_dependencies(test_e2e smolclaw)
 
-# Full security integration suite — registered in ctest for full profile only.
-# Minimal CI profile excludes via: ctest -LE security
+# Full security integration suite — registered in ctest for full profile only
+# (web-gated; not built in the minimal profile). Minimal CI skips it by name
+# via: ctest -E test_security_prod (so core security-labelled tests still run).
 if(SC_ENABLE_WEB)
     add_executable(test_security_prod tests/test_security_prod.c)
     target_link_libraries(test_security_prod PRIVATE smolclaw_lib)
