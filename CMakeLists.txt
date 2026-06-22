@@ -463,7 +463,7 @@ if(SC_ENABLE_HOST_METRICS OR SC_ENABLE_MEMORY_SEARCH OR SC_ENABLE_ANALYTICS)
 endif()
 
 # Main executable
-add_executable(smolclaw src/main.c)
+add_executable(smolclaw src/main.c src/doctor.c)
 target_link_libraries(smolclaw PRIVATE smolclaw_lib)
 
 if(SC_MUSL_STATIC)
@@ -641,9 +641,13 @@ if(EVENT_PTHREADS_LIB)
 endif()
 
 # E2E test — invokes the binary, no library linking needed
+set(SMOLCLAW_BIN "${CMAKE_BINARY_DIR}/smolclaw" CACHE FILEPATH
+    "Path to smolclaw binary for e2e tests")
 add_executable(test_e2e tests/test_e2e.c)
 target_include_directories(test_e2e PRIVATE ${CMAKE_SOURCE_DIR}/tests)
-target_compile_definitions(test_e2e PRIVATE _XOPEN_SOURCE=500)
+target_compile_definitions(test_e2e PRIVATE
+    _XOPEN_SOURCE=500
+    SMOLCLAW_BIN_DEFAULT="${SMOLCLAW_BIN}")
 add_test(NAME test_e2e COMMAND test_e2e)
 set_tests_properties(test_e2e PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_dependencies(test_e2e smolclaw)

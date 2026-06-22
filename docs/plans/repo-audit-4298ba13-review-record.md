@@ -20,7 +20,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | PR-6 | web rate limits + health | 7897a2c | ctest 33/33 | 0 | landed |
 | PR-7 | notify sc_curl_init | 470ff04 | ctest 33/33 | 0 | landed |
 | PR-8 | docs threat model | 37486dc | ctest 33/33 | 0 | landed |
-| PR-9 | optional main.c / e2e | | | | |
+| PR-9 | optional main.c / e2e | 2d39318 | ctest 33/33 | 0 | landed |
 
 ---
 
@@ -42,9 +42,9 @@ Append one section per merged PR. Final Review Record section added when arc com
 | P1-7 | PR-2 | 91a04ef | test_exec_safety resolved wd | closed |
 | P1-8 | PR-2 | 91a04ef | test_exec_safety chdir 126 | closed |
 | P1-9 | PR-3 | 7665a37 | test_index_rebuild_truncates_oversized | closed |
-| P2-1 | PR-9 | | | open |
+| P2-1 | PR-9 | 2d39318 | doctor.c extract | closed |
 | P2-3 | PR-8 | 37486dc | RELEASE_NOTES | closed |
-| P2-4 | PR-9 | | | open |
+| P2-4 | PR-9 | 2d39318 | test_e2e SMOLCLAW_BIN | closed |
 | P2-5 | PR-6 | 7897a2c | test_web_auth | closed |
 | P2-2 | — | | | deferred |
 

@@ -7,10 +7,15 @@
 
 #include <ftw.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define BIN "./build/smolclaw"
+#ifndef SMOLCLAW_BIN_DEFAULT
+#define SMOLCLAW_BIN_DEFAULT "./build/smolclaw"
+#endif
 
 static char saved_home[PATH_MAX];
 static char test_home[64];
@@ -38,6 +43,21 @@ static int run_cmd(const char *cmd, char *out, size_t out_sz)
     int status = pclose(fp);
     if (status == -1) return -1;
     return WEXITSTATUS(status);
+}
+
+static const char *smolclaw_bin(void)
+{
+    const char *env = getenv("SMOLCLAW_BIN");
+    if (env && env[0])
+        return env;
+    return SMOLCLAW_BIN_DEFAULT;
+}
+
+static int run_bin(const char *args, char *out, size_t out_sz)
+{
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "%s %s", smolclaw_bin(), args);
+    return run_cmd(cmd, out, out_sz);
 }
 
 static int nftw_remove_cb(const char *path, const struct stat *sb,
@@ -79,7 +99,7 @@ static void do_onboard(void)
     mkdir(dir, 0755);
 
     char out[4096];
-    run_cmd(BIN " onboard", out, sizeof(out));
+    run_bin("onboard", out, sizeof(out));
 }
 
 /* ======================================================================
@@ -89,14 +109,14 @@ static void do_onboard(void)
 static void test_version_exit_code(void)
 {
     char out[1024];
-    int rc = run_cmd(BIN " version", out, sizeof(out));
+    int rc = run_bin("version", out, sizeof(out));
     ASSERT_INT_EQ(rc, 0);
 }
 
 static void test_version_output(void)
 {
     char out[1024];
-    run_cmd(BIN " version", out, sizeof(out));
+    run_bin("version", out, sizeof(out));
     ASSERT(strstr(out, "smolclaw") != NULL, "version output contains 'smolclaw'");
     /* Match a version-like pattern: digit.digit */
     int has_version = 0;
@@ -110,9 +130,9 @@ static void test_version_output(void)
 static void test_version_aliases(void)
 {
     char out_v[1024], out_flag[1024], out_long[1024];
-    run_cmd(BIN " version", out_v, sizeof(out_v));
-    run_cmd(BIN " -v", out_flag, sizeof(out_flag));
-    run_cmd(BIN " --version", out_long, sizeof(out_long));
+    run_bin("version", out_v, sizeof(out_v));
+    run_bin("-v", out_flag, sizeof(out_flag));
+    run_bin("--version", out_long, sizeof(out_long));
     ASSERT_STR_EQ(out_v, out_flag);
     ASSERT_STR_EQ(out_v, out_long);
 }
@@ -131,7 +151,7 @@ static void test_onboard_fresh(void)
     mkdir(dir, 0755);
 
     char out[4096];
-    int rc = run_cmd(BIN " onboard", out, sizeof(out));
+    int rc = run_bin("onboard", out, sizeof(out));
     ASSERT_INT_EQ(rc, 0);
     ASSERT(strstr(out, "is ready") != NULL, "onboard says 'is ready'");
 
@@ -169,7 +189,9 @@ static void test_onboard_overwrite_decline(void)
 
     /* Run onboard again, pipe "n" to decline overwrite */
     char out[4096];
-    int rc = run_cmd("echo n | " BIN " onboard", out, sizeof(out));
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "echo n | %s onboard", smolclaw_bin());
+    int rc = run_cmd(cmd, out, sizeof(out));
     ASSERT_INT_EQ(rc, 0);
     ASSERT(strstr(out, "Aborted") != NULL, "onboard decline says Aborted");
 
@@ -185,7 +207,7 @@ static void test_doctor_no_config(void)
     setup_home();
 
     char out[4096];
-    run_cmd(BIN " doctor", out, sizeof(out));
+    run_bin("doctor", out, sizeof(out));
     ASSERT(strstr(out, "[FAIL]") != NULL || strstr(out, "FAIL") != NULL,
            "doctor without config reports failure");
 
@@ -198,7 +220,7 @@ static void test_doctor_after_onboard(void)
     do_onboard();
 
     char out[8192];
-    run_cmd(BIN " doctor", out, sizeof(out));
+    run_bin("doctor", out, sizeof(out));
 
     ASSERT(strstr(out, "PASS") != NULL, "doctor has at least one PASS");
     /* API key won't be set in default config */
@@ -219,7 +241,7 @@ static void test_cost_no_config(void)
     setup_home();
 
     char out[4096];
-    run_cmd(BIN " cost", out, sizeof(out));
+    run_bin("cost", out, sizeof(out));
     /* Config load falls through to defaults, no state file → no usage */
     ASSERT(strstr(out, "No token usage") != NULL ||
            strstr(out, "No cost data") != NULL,
@@ -234,7 +256,7 @@ static void test_cost_empty(void)
     do_onboard();
 
     char out[4096];
-    run_cmd(BIN " cost", out, sizeof(out));
+    run_bin("cost", out, sizeof(out));
     ASSERT(strstr(out, "No token usage") != NULL ||
            strstr(out, "No cost data") != NULL,
            "cost after onboard shows no data");
@@ -252,7 +274,7 @@ static void test_analytics_empty(void)
     do_onboard();
 
     char out[4096];
-    run_cmd(BIN " analytics summary", out, sizeof(out));
+    run_bin("analytics summary", out, sizeof(out));
 
     /* If built without SC_ENABLE_ANALYTICS, it returns "Unknown command" — pass */
     if (strstr(out, "Unknown command") != NULL) {
@@ -275,14 +297,14 @@ static void test_analytics_empty(void)
 static void test_help_exit_code(void)
 {
     char out[4096];
-    int rc = run_cmd(BIN " --help", out, sizeof(out));
+    int rc = run_bin("--help", out, sizeof(out));
     ASSERT_INT_EQ(rc, 0);
 }
 
 static void test_help_output(void)
 {
     char out[4096];
-    run_cmd(BIN " help", out, sizeof(out));
+    run_bin("help", out, sizeof(out));
     ASSERT(strstr(out, "Usage") != NULL, "help shows Usage");
     ASSERT(strstr(out, "onboard") != NULL, "help lists onboard command");
     ASSERT(strstr(out, "gateway") != NULL, "help lists gateway command");
@@ -291,9 +313,9 @@ static void test_help_output(void)
 static void test_help_aliases(void)
 {
     char out_h[4096], out_flag[4096], out_long[4096];
-    run_cmd(BIN " help", out_h, sizeof(out_h));
-    run_cmd(BIN " -h", out_flag, sizeof(out_flag));
-    run_cmd(BIN " --help", out_long, sizeof(out_long));
+    run_bin("help", out_h, sizeof(out_h));
+    run_bin("-h", out_flag, sizeof(out_flag));
+    run_bin("--help", out_long, sizeof(out_long));
     ASSERT_STR_EQ(out_h, out_flag);
     ASSERT_STR_EQ(out_h, out_long);
 }
