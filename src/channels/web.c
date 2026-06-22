@@ -52,6 +52,7 @@
 #include "util/uuid.h"
 #include "util/json_helpers.h"
 #include "util/sha256.h"
+#include "rate_limit.h"
 #include "audit.h"
 
 #define WEB_TAG "web"
@@ -325,6 +326,69 @@ static int check_auth(struct evhttp_request *req, const web_data_t *wd)
     const char *auth = evhttp_find_header(evhttp_request_get_input_headers(req),
                                            "Authorization");
     return sc_web_check_bearer_auth(wd->bearer_token, auth);
+}
+
+/* Per-IP rate limiting for /api/message (audit 4298ba13 / P1-4). HTTP bypasses
+ * sc_channel_handle_message, so we apply agents.defaults rate_limiter here,
+ * keyed by client IP and bearer-token hash to limit credential sharing abuse. */
+int sc_web_build_message_rate_key(const char *client_ip,
+                                   const char *authorization_header,
+                                   char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return -1;
+
+    const char *ip = (client_ip && client_ip[0]) ? client_ip : "unknown";
+    char token_hash[17] = "anon";
+
+    if (authorization_header &&
+        strncmp(authorization_header, "Bearer ", 7) == 0 &&
+        authorization_header[7]) {
+        sc_sha256_ctx_t ctx;
+        sc_sha256_init(&ctx);
+        sc_sha256_update(&ctx, (const uint8_t *)(authorization_header + 7),
+                         strlen(authorization_header + 7));
+        uint8_t hash[32];
+        sc_sha256_final(&ctx, hash);
+        for (int i = 0; i < 8; i++)
+            snprintf(token_hash + i * 2, 3, "%02x", hash[i]);
+    }
+
+    snprintf(out, out_len, "web:msg:%s:%s", ip, token_hash);
+    return 0;
+}
+
+int sc_web_check_message_rate_limit(sc_rate_limiter_t *rl,
+                                     const char *client_ip,
+                                     const char *authorization_header)
+{
+    if (!rl) return 1;
+
+    char key[128];
+    if (sc_web_build_message_rate_key(client_ip, authorization_header,
+                                      key, sizeof(key)) != 0)
+        return 1;
+
+    return sc_rate_limiter_check(rl, key);
+}
+
+static void web_client_ip(struct evhttp_request *req, char *buf, size_t buflen)
+{
+    if (!buf || buflen == 0) return;
+    buf[0] = '\0';
+
+    struct evhttp_connection *con = evhttp_request_get_connection(req);
+    if (!con) {
+        snprintf(buf, buflen, "unknown");
+        return;
+    }
+
+    char *addr = NULL;
+    ev_uint16_t port = 0;
+    evhttp_connection_get_peer(con, &addr, &port);
+    if (addr && addr[0])
+        snprintf(buf, buflen, "%s", addr);
+    else
+        snprintf(buf, buflen, "unknown");
 }
 
 static void send_json_error(struct evhttp_request *req, int code,
@@ -755,6 +819,21 @@ static void handle_message(struct evhttp_request *req, void *arg)
         return;
     }
 
+    pthread_mutex_lock(&ch->security_mutex);
+    sc_rate_limiter_t *rl = ch->rate_limiter;
+    pthread_mutex_unlock(&ch->security_mutex);
+    if (rl) {
+        char ip[64];
+        web_client_ip(req, ip, sizeof(ip));
+        const char *auth = evhttp_find_header(
+            evhttp_request_get_input_headers(req), "Authorization");
+        if (!sc_web_check_message_rate_limit(rl, ip, auth)) {
+            SC_LOG_WARN(WEB_TAG, "Rate limited /api/message from %s", ip);
+            send_json_error(req, 429, "Rate limit exceeded");
+            return;
+        }
+    }
+
     /* Parse body */
     struct evbuffer *input = evhttp_request_get_input_buffer(req);
     size_t len = evbuffer_get_length(input);
@@ -916,6 +995,13 @@ static void handle_health(struct evhttp_request *req, void *arg)
 {
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
+
+    /* Require bearer auth (audit 4298ba13 / P2-5): health exposed version,
+     * uptime, and pending count — same sensitivity as other API routes. */
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
 
     time_t now = time(NULL);
     long uptime_secs = (long)(now - wd->start_time);

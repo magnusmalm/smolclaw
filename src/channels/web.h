@@ -28,4 +28,17 @@ int sc_web_compute_isolation(const char *pattern,
 int sc_web_check_bearer_auth(const char *configured_token,
                               const char *authorization_header);
 
+/* Build rate-limit key for POST /api/message: web:msg:<ip>:<token-hash>.
+ * authorization_header may be NULL (uses "anon" token suffix). Exposed for
+ * unit tests (audit 4298ba13 / PR-6 / P1-4). */
+int sc_web_build_message_rate_key(const char *client_ip,
+                                   const char *authorization_header,
+                                   char *out, size_t out_len);
+
+/* Check /api/message rate limit for client_ip + Authorization header.
+ * Returns 1 if allowed, 0 if rate-limited. rl NULL or disabled → allowed. */
+int sc_web_check_message_rate_limit(sc_rate_limiter_t *rl,
+                                     const char *client_ip,
+                                     const char *authorization_header);
+
 #endif /* SC_CHANNEL_WEB_H */
