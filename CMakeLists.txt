@@ -593,6 +593,10 @@ if(SC_ENABLE_CAMERA)
     list(APPEND TEST_SOURCES tests/test_camera.c)
 endif()
 
+if(SC_ENABLE_GIT)
+    list(APPEND TEST_SOURCES tests/test_git_security.c)
+endif()
+
 foreach(test_src ${TEST_SOURCES})
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} ${test_src})

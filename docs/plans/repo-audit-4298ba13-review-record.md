@@ -16,7 +16,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | PR-2 | exec safety bundle | 91a04ef | ctest 33/33 | 0 | landed |
 | PR-3 | memory index mutex | 7665a37 | ctest 34/34 (mem search ON) | 0 | landed |
 | PR-4 | security tests in CI | d2b288f | ctest 36/36 full, 20/20 minimal | 0 | landed |
-| PR-5 | git + worktree | | | | |
+| PR-5 | git + worktree | b279e0c | ctest 33/33 | 0 | landed |
 | PR-6 | web rate limits + health | | | | |
 | PR-7 | notify sc_curl_init | | | | |
 | PR-8 | docs threat model | | | | |
@@ -33,9 +33,9 @@ Append one section per merged PR. Final Review Record section added when arc com
 | P0-3 | PR-2 | 91a04ef | test_exec_safety deny-list init | closed |
 | P0-4 | PR-2 | 91a04ef | test_sandbox mandatory workspace | closed |
 | P0-5 | PR-4 | d2b288f | test_security + test_security_prod | closed |
-| P1-1 | PR-5 | | | open |
+| P1-1 | PR-5 | b279e0c | test_git_security | closed |
 | P1-2 | PR-8 | | | open |
-| P1-3 | PR-5 | | | open |
+| P1-3 | PR-5 | b279e0c | test_git_security | closed |
 | P1-4 | PR-6 | | | open |
 | P1-5 | PR-7 | | | open |
 | P1-6 | PR-8 | | | open |

@@ -18,4 +18,7 @@ typedef struct sc_agent sc_agent_t;
 sc_tool_t *sc_tool_worktree_enter_new(sc_agent_t *agent);
 sc_tool_t *sc_tool_worktree_exit_new(sc_agent_t *agent);
 
+/* Clear module-global worktree session state (tests only). */
+void sc_worktree_reset_state(void);
+
 #endif /* SC_TOOL_WORKTREE_H */

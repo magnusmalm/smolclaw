@@ -5,12 +5,14 @@
  * Only allows a curated set of subcommands.
  */
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -289,9 +291,155 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
     return sc_strbuf_finish(&output);
 }
 
+typedef struct {
+    int is_local;
+    char host[256];
+    char path[512];
+} git_remote_norm_t;
+
+static void git_copy_lower(char *dst, size_t dsz, const char *src, size_t slen)
+{
+    if (slen >= dsz) slen = dsz - 1;
+    for (size_t i = 0; i < slen; i++)
+        dst[i] = (char)tolower((unsigned char)src[i]);
+    dst[slen] = '\0';
+}
+
+/* Normalize git remote URL to host + path (no query/fragment). */
+static int git_parse_remote_url(const char *url, git_remote_norm_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (!url || !url[0]) return -1;
+
+    if (url[0] == '/') {
+        out->is_local = 1;
+        snprintf(out->path, sizeof(out->path), "%s", url);
+        return 0;
+    }
+    if (strncmp(url, "file://", 7) == 0) {
+        out->is_local = 1;
+        snprintf(out->path, sizeof(out->path), "%s", url + 7);
+        return 0;
+    }
+
+    if (strncmp(url, "https://", 8) == 0 || strncmp(url, "http://", 7) == 0) {
+        const char *p = strstr(url, "://");
+        p += 3;
+        const char *slash = strchr(p, '/');
+        const char *q = strchr(p, '?');
+        const char *hash = strchr(p, '#');
+        const char *end = url + strlen(url);
+        if (q && q < end) end = q;
+        if (hash && hash < end) end = hash;
+
+        size_t hostlen = slash ? (size_t)(slash - p)
+                               : (size_t)(end - p);
+        git_copy_lower(out->host, sizeof(out->host), p, hostlen);
+        if (slash) {
+            size_t plen = (size_t)(end - slash);
+            if (plen >= sizeof(out->path)) plen = sizeof(out->path) - 1;
+            memcpy(out->path, slash, plen);
+            out->path[plen] = '\0';
+        } else {
+            out->path[0] = '/';
+            out->path[1] = '\0';
+        }
+        return 0;
+    }
+
+    if (strncmp(url, "ssh://", 6) == 0) {
+        const char *p = url + 6;
+        const char *at = strchr(p, '@');
+        if (at) p = at + 1;
+        const char *slash = strchr(p, '/');
+        size_t hostlen = slash ? (size_t)(slash - p) : strlen(p);
+        git_copy_lower(out->host, sizeof(out->host), p, hostlen);
+        if (slash) {
+            snprintf(out->path, sizeof(out->path), "%s", slash);
+        } else {
+            out->path[0] = '/';
+            out->path[1] = '\0';
+        }
+        return 0;
+    }
+
+    const char *at = strchr(url, '@');
+    const char *colon = strrchr(url, ':');
+    if (at && colon && colon > at) {
+        git_copy_lower(out->host, sizeof(out->host), at + 1,
+                       (size_t)(colon - at - 1));
+        snprintf(out->path, sizeof(out->path), "/%s", colon + 1);
+        return 0;
+    }
+
+    out->is_local = 1;
+    snprintf(out->path, sizeof(out->path), "%s", url);
+    return 0;
+}
+
+static int git_parse_allow_entry(const char *entry, git_remote_norm_t *out)
+{
+    if (!entry || !entry[0]) return -1;
+    if (entry[0] == '/' || entry[0] == '.')
+        return git_parse_remote_url(entry, out);
+    if (strstr(entry, "://"))
+        return git_parse_remote_url(entry, out);
+
+    const char *slash = strchr(entry, '/');
+    if (slash) {
+        memset(out, 0, sizeof(*out));
+        git_copy_lower(out->host, sizeof(out->host), entry,
+                       (size_t)(slash - entry));
+        snprintf(out->path, sizeof(out->path), "%s", slash);
+        return 0;
+    }
+
+    memset(out, 0, sizeof(*out));
+    git_copy_lower(out->host, sizeof(out->host), entry, strlen(entry));
+    return 0;
+}
+
+static int git_path_prefix_match(const char *path, const char *prefix)
+{
+    size_t plen = strlen(prefix);
+    if (strncmp(path, prefix, plen) != 0) return 0;
+    return path[plen] == '\0' || path[plen] == '/';
+}
+
+static int git_remote_matches_allow(const git_remote_norm_t *remote,
+                                    const git_remote_norm_t *allow)
+{
+    if (allow->is_local || remote->is_local)
+        return git_path_prefix_match(remote->path, allow->path);
+
+    if (strcasecmp(remote->host, allow->host) != 0)
+        return 0;
+    if (!allow->path[0])
+        return 1;
+    return git_path_prefix_match(remote->path, allow->path);
+}
+
+static int is_blocked_remote_mutation(const char *args_str)
+{
+    if (!args_str || !args_str[0]) return 0;
+
+    char *parsed[GIT_MAX_ARGS];
+    int n = split_args(args_str, parsed, GIT_MAX_ARGS);
+    if (n <= 0)
+        return 0;
+
+    const char *sub = parsed[0];
+    int blocked = (strcmp(sub, "set-url") == 0 ||
+                   strcmp(sub, "add") == 0 ||
+                   strcmp(sub, "remove") == 0 ||
+                   strcmp(sub, "rename") == 0);
+    for (int i = 0; i < n; i++) free(parsed[i]);
+    return blocked;
+}
+
 /* Check if a push remote URL is allowed.
  * Resolves the remote name to a URL via `git remote get-url`, then checks
- * if the URL contains any of the allowed substrings. */
+ * normalized host/path against the allowlist (not substring matching). */
 static int is_push_remote_allowed(git_data_t *gd, const char *dir,
                                    const char *args_str)
 {
@@ -327,9 +475,8 @@ static int is_push_remote_allowed(git_data_t *gd, const char *dir,
     int status = 0, timed_out = 0;
     char *url = git_run_subprocess(argv, &status, &timed_out);
 
-    for (int i = 0; i < nargs; i++) free(parsed_args[i]);
-
     if (!url || timed_out || (WIFEXITED(status) && WEXITSTATUS(status) != 0)) {
+        for (int i = 0; i < nargs; i++) free(parsed_args[i]);
         free(url);
         return 0;  /* can't resolve remote — deny */
     }
@@ -339,10 +486,20 @@ static int is_push_remote_allowed(git_data_t *gd, const char *dir,
     while (ulen > 0 && (url[ulen-1] == '\n' || url[ulen-1] == '\r'))
         url[--ulen] = '\0';
 
-    /* Check URL against allowlist */
+    git_remote_norm_t remote_norm;
+    if (git_parse_remote_url(url, &remote_norm) != 0) {
+        for (int i = 0; i < nargs; i++) free(parsed_args[i]);
+        free(url);
+        return 0;
+    }
+
     int allowed = 0;
     for (int i = 0; i < gd->push_allowed_remote_count; i++) {
-        if (strstr(url, gd->push_allowed_remotes[i])) {
+        git_remote_norm_t allow_norm;
+        if (git_parse_allow_entry(gd->push_allowed_remotes[i],
+                                  &allow_norm) != 0)
+            continue;
+        if (git_remote_matches_allow(&remote_norm, &allow_norm)) {
             allowed = 1;
             break;
         }
@@ -351,6 +508,7 @@ static int is_push_remote_allowed(git_data_t *gd, const char *dir,
     if (!allowed)
         SC_LOG_WARN(GIT_TAG, "push blocked: remote '%s' URL '%s' not in allowlist",
                     remote, url);
+    for (int i = 0; i < nargs; i++) free(parsed_args[i]);
     free(url);
     return allowed;
 }
@@ -407,12 +565,20 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
     }
 
     const char *use_dir = resolved_repo ? resolved_repo : gd->working_dir;
+    const char *args_str = sc_json_get_string(args_json, "args", NULL);
+
+    if (strcmp(subcmd, "remote") == 0 &&
+        is_blocked_remote_mutation(args_str)) {
+        free(resolved_repo);
+        return sc_tool_result_error(
+            "Remote mutation blocked: set-url/add/remove/rename are not "
+            "permitted via the git tool");
+    }
 
     /* Build argv */
     char *argv_storage[GIT_MAX_ARGS];
     char *extra_args[GIT_MAX_ARGS - 4];
     int extra_count = 0;
-    const char *args_str = sc_json_get_string(args_json, "args", NULL);
 
     int argc = git_build_argv(use_dir, subcmd, args_str,
                                argv_storage, extra_args, &extra_count);

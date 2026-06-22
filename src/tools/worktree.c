@@ -3,12 +3,19 @@
  *
  * worktree_enter: creates a git worktree for isolated work
  * worktree_exit: keeps or removes the worktree
+ *
+ * Git invocations use fork+execvp (no shell), aligned with git.c.
  */
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <time.h>
+#include <errno.h>
 #include <ctype.h>
 
 #include "tools/worktree.h"
@@ -20,19 +27,19 @@
 
 #define LOG_TAG "worktree"
 #define WORKTREE_DIR ".claude/worktrees"
+#define WT_GIT_TIMEOUT_SECS 30
+#define WT_GIT_MAX_OUTPUT (64 * 1024)
 
 typedef struct {
     sc_agent_t *agent;
-    char *original_cwd;       /* saved before entering worktree */
-    char *worktree_path;      /* absolute path to worktree */
-    char *worktree_branch;    /* branch name */
+    char *original_cwd;
+    char *worktree_path;
+    char *worktree_branch;
     int   active;
 } worktree_data_t;
 
-/* Shared state between enter and exit tools */
 static worktree_data_t s_wt;
 
-/* Validate slug: alphanumeric, dash, underscore, dot only */
 static int valid_slug(const char *s)
 {
     if (!s || !s[0] || strlen(s) > 64) return 0;
@@ -44,36 +51,178 @@ static int valid_slug(const char *s)
     return 1;
 }
 
-/* Run a git command and return output. Caller frees. */
-static char *git_exec(const char *cwd, const char *args)
+static int mkdir_p(const char *path, mode_t mode)
 {
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "cd '%s' && git %s 2>&1", cwd, args);
-    FILE *f = popen(cmd, "r");
-    if (!f) return NULL;
-    sc_strbuf_t sb;
-    sc_strbuf_init(&sb);
-    char buf[256];
-    while (fgets(buf, sizeof(buf), f))
-        sc_strbuf_append(&sb, buf);
-    int status = pclose(f);
-    char *out = sc_strbuf_finish(&sb);
-    if (status != 0) {
-        SC_LOG_WARN(LOG_TAG, "git %s failed: %s", args, out ? out : "");
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%s", path);
+    for (char *p = buf + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(buf, mode) != 0 && errno != EEXIST) return -1;
+        *p = '/';
+    }
+    if (mkdir(buf, mode) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+static int wt_git_succeeded(int status, int timed_out)
+{
+    return !timed_out && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static int wt_argv_has_worktree(char *const argv[])
+{
+    for (int i = 0; argv[i]; i++) {
+        if (strcmp(argv[i], "worktree") == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Run git with argv (NULL-terminated). Use "git -C <repo> ..." for repo scope.
+ * Most commands close inherited fds 3+ (same as git.c) so execvp succeeds when
+ * the parent has many open fds. git-worktree helper dispatch fails with exit 127
+ * if fds are stripped — skip close for worktree subcommands (audit 4298ba13). */
+static char *wt_git_run(char *const argv[], int *status_out, int *timed_out)
+{
+    int close_extra_fds = !wt_argv_has_worktree(argv);
+
+    *status_out = 0;
+    *timed_out = 0;
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) return NULL;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return NULL;
+    }
+
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        if (close_extra_fds) {
+            int max_fd = (int)sysconf(_SC_OPEN_MAX);
+            if (max_fd < 0) max_fd = 1024;
+            for (int fd = 3; fd < max_fd; fd++)
+                close(fd);
+        }
+
+        execvp("git", argv);
+        _exit(127);
+    }
+
+    close(pipefd[1]);
+
+    sc_strbuf_t output;
+    sc_strbuf_init(&output);
+    char buf[4096];
+    time_t start = time(NULL);
+    int status = 0;
+
+    while (1) {
+        if (time(NULL) - start > WT_GIT_TIMEOUT_SECS) {
+            kill(pid, SIGKILL);
+            waitpid(pid, NULL, 0);
+            *timed_out = 1;
+            sc_strbuf_append(&output, "\n[git command timed out]");
+            break;
+        }
+
+        ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
+        if (n <= 0) break;
+        buf[n] = '\0';
+
+        if (output.len + (size_t)n > WT_GIT_MAX_OUTPUT) {
+            size_t remaining = WT_GIT_MAX_OUTPUT - output.len;
+            if (remaining > 0) {
+                buf[remaining] = '\0';
+                sc_strbuf_append(&output, buf);
+            }
+            break;
+        }
+        sc_strbuf_append(&output, buf);
+    }
+    close(pipefd[0]);
+
+    waitpid(pid, &status, 0);
+    *status_out = status;
+
+    char *out = sc_strbuf_finish(&output);
+    if (!wt_git_succeeded(status, *timed_out)) {
+        int code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        SC_LOG_WARN(LOG_TAG, "git failed (exit=%d): %s", code,
+                    out && out[0] ? out : "(no output)");
     }
     return out;
 }
 
-/* Check if worktree has uncommitted changes or new commits */
+static char *wt_git_rev_parse_root(const char *cwd)
+{
+    char *argv[] = {"git", "-C", (char *)cwd, "rev-parse", "--show-toplevel",
+                    NULL};
+    int status = 0, timed_out = 0;
+    char *out = wt_git_run(argv, &status, &timed_out);
+    if (!wt_git_succeeded(status, timed_out)) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+static char *wt_git_status_porcelain(const char *cwd)
+{
+    char *argv[] = {"git", "-C", (char *)cwd, "status", "--porcelain", NULL};
+    int status = 0, timed_out = 0;
+    char *out = wt_git_run(argv, &status, &timed_out);
+    if (!wt_git_succeeded(status, timed_out)) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+static char *wt_git_worktree_add(const char *root, const char *branch,
+                                 const char *path, int *status_out,
+                                 int *timed_out)
+{
+    char *argv[] = {"git", "-C", (char *)root, "worktree", "add", "-B",
+                    (char *)branch, (char *)path, NULL};
+    return wt_git_run(argv, status_out, timed_out);
+}
+
+static char *wt_git_worktree_remove(const char *cwd, const char *path)
+{
+    char *argv[] = {"git", "-C", (char *)cwd, "worktree", "remove", "--force",
+                    (char *)path, NULL};
+    int status = 0, timed_out = 0;
+    char *out = wt_git_run(argv, &status, &timed_out);
+    free(out);
+    return NULL;
+}
+
+static char *wt_git_branch_delete(const char *cwd, const char *branch)
+{
+    char *argv[] = {"git", "-C", (char *)cwd, "branch", "-D", (char *)branch,
+                    NULL};
+    int status = 0, timed_out = 0;
+    char *out = wt_git_run(argv, &status, &timed_out);
+    free(out);
+    return NULL;
+}
+
 static int worktree_has_changes(const char *path)
 {
-    char *status = git_exec(path, "status --porcelain");
+    char *status = wt_git_status_porcelain(path);
     int dirty = (status && status[0] != '\0');
     free(status);
     return dirty;
 }
-
-/* --- worktree_enter --- */
 
 static void enter_destroy(sc_tool_t *self)
 {
@@ -112,44 +261,44 @@ static sc_tool_result_t *enter_execute(sc_tool_t *self, cJSON *args, void *ctx)
     if (!name || !valid_slug(name))
         return sc_tool_result_error("Invalid name. Use alphanumeric, dash, underscore, dot. Max 64 chars.");
 
-    /* Find git root */
-    char *root = git_exec(s_wt.agent->workspace, "rev-parse --show-toplevel");
+    char *root = wt_git_rev_parse_root(s_wt.agent->workspace);
     if (!root || root[0] == '\0') {
         free(root);
         return sc_tool_result_error("Not in a git repository.");
     }
-    /* Trim trailing newline */
     size_t rlen = strlen(root);
     while (rlen > 0 && (root[rlen-1] == '\n' || root[rlen-1] == '\r'))
         root[--rlen] = '\0';
 
-    /* Build worktree path */
     char wt_path[1024];
     snprintf(wt_path, sizeof(wt_path), "%s/%s/%s", root, WORKTREE_DIR, name);
 
-    /* Build branch name */
+    char wt_rel[256];
+    snprintf(wt_rel, sizeof(wt_rel), "%s/%s", WORKTREE_DIR, name);
+
     char branch[128];
     snprintf(branch, sizeof(branch), "worktree-%s", name);
 
-    /* Create worktree dir */
-    char mkdir_cmd[1024];
-    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p '%s/%s'", root, WORKTREE_DIR);
-    system(mkdir_cmd);
-
-    /* Create worktree */
-    char add_cmd[512];
-    snprintf(add_cmd, sizeof(add_cmd), "worktree add -B '%s' '%s'",
-             branch, wt_path);
-    char *out = git_exec(root, add_cmd);
-
-    /* Check if worktree was created */
-    struct stat st;
-    if (stat(wt_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    char wt_parent[1024];
+    snprintf(wt_parent, sizeof(wt_parent), "%s/%s", root, WORKTREE_DIR);
+    if (mkdir_p(wt_parent, 0755) != 0) {
         free(root);
+        return sc_tool_result_error("Failed to create worktree parent directory");
+    }
+
+    int wt_status = 0, wt_timed_out = 0;
+    char *out = wt_git_worktree_add(root, branch, wt_rel, &wt_status,
+                                    &wt_timed_out);
+
+    struct stat st;
+    if (!wt_git_succeeded(wt_status, wt_timed_out) ||
+        stat(wt_path, &st) != 0 || !S_ISDIR(st.st_mode)) {
         sc_strbuf_t err;
         sc_strbuf_init(&err);
-        sc_strbuf_appendf(&err, "Failed to create worktree: %s", out ? out : "unknown error");
+        sc_strbuf_appendf(&err, "Failed to create worktree: %s",
+                          out ? out : "unknown error");
         free(out);
+        free(root);
         char *msg = sc_strbuf_finish(&err);
         sc_tool_result_t *r = sc_tool_result_error(msg);
         free(msg);
@@ -157,13 +306,11 @@ static sc_tool_result_t *enter_execute(sc_tool_t *self, cJSON *args, void *ctx)
     }
     free(out);
 
-    /* Save state */
     s_wt.original_cwd = sc_strdup(s_wt.agent->workspace);
     s_wt.worktree_path = sc_strdup(wt_path);
     s_wt.worktree_branch = sc_strdup(branch);
     s_wt.active = 1;
 
-    /* Switch agent workspace to worktree */
     free(s_wt.agent->workspace);
     s_wt.agent->workspace = sc_strdup(wt_path);
     sc_tool_registry_set_workspace(s_wt.agent->tools, wt_path);
@@ -184,8 +331,6 @@ static sc_tool_result_t *enter_execute(sc_tool_t *self, cJSON *args, void *ctx)
     free(msg);
     return r;
 }
-
-/* --- worktree_exit --- */
 
 static void exit_destroy(sc_tool_t *self)
 {
@@ -228,7 +373,6 @@ static sc_tool_result_t *exit_execute(sc_tool_t *self, cJSON *args, void *ctx)
 
     int has_changes = worktree_has_changes(s_wt.worktree_path);
 
-    /* Restore original workspace */
     free(s_wt.agent->workspace);
     s_wt.agent->workspace = sc_strdup(s_wt.original_cwd);
     sc_tool_registry_set_workspace(s_wt.agent->tools, s_wt.original_cwd);
@@ -244,19 +388,8 @@ static sc_tool_result_t *exit_execute(sc_tool_t *self, cJSON *args, void *ctx)
                 "Worktree left at: %s (branch: %s)",
                 s_wt.worktree_path, s_wt.worktree_branch);
         } else {
-            /* Remove worktree */
-            char rm_cmd[512];
-            snprintf(rm_cmd, sizeof(rm_cmd), "worktree remove --force '%s'",
-                     s_wt.worktree_path);
-            char *out = git_exec(s_wt.original_cwd, rm_cmd);
-            free(out);
-
-            /* Delete branch */
-            char br_cmd[256];
-            snprintf(br_cmd, sizeof(br_cmd), "branch -D '%s'",
-                     s_wt.worktree_branch);
-            out = git_exec(s_wt.original_cwd, br_cmd);
-            free(out);
+            wt_git_worktree_remove(s_wt.original_cwd, s_wt.worktree_path);
+            wt_git_branch_delete(s_wt.original_cwd, s_wt.worktree_branch);
 
             sc_strbuf_appendf(&result,
                 "Worktree removed and branch '%s' deleted.",
@@ -264,7 +397,6 @@ static sc_tool_result_t *exit_execute(sc_tool_t *self, cJSON *args, void *ctx)
             SC_LOG_INFO(LOG_TAG, "Removed worktree: %s", s_wt.worktree_path);
         }
     } else {
-        /* Keep */
         sc_strbuf_appendf(&result,
             "Worktree kept at: %s (branch: %s)%s",
             s_wt.worktree_path, s_wt.worktree_branch,
@@ -272,7 +404,6 @@ static sc_tool_result_t *exit_execute(sc_tool_t *self, cJSON *args, void *ctx)
         SC_LOG_INFO(LOG_TAG, "Kept worktree: %s", s_wt.worktree_path);
     }
 
-    /* Clean up state */
     free(s_wt.original_cwd);
     free(s_wt.worktree_path);
     free(s_wt.worktree_branch);
@@ -284,7 +415,13 @@ static sc_tool_result_t *exit_execute(sc_tool_t *self, cJSON *args, void *ctx)
     return r;
 }
 
-/* --- Public API --- */
+void sc_worktree_reset_state(void)
+{
+    free(s_wt.original_cwd);
+    free(s_wt.worktree_path);
+    free(s_wt.worktree_branch);
+    memset(&s_wt, 0, sizeof(s_wt));
+}
 
 sc_tool_t *sc_tool_worktree_enter_new(sc_agent_t *agent)
 {
