@@ -21,8 +21,8 @@ ctest --test-dir build -R test_curl_common --output-on-failure
 
 echo "== full ctest =="
 ctest --test-dir build --output-on-failure -j"$(nproc)"
-PASS=$(ctest --test-dir build -N | grep -c '^  Test #' || true)
-PASS=$((PASS))  # total registered
+PASS=$(ctest --test-dir build -N 2>&1 | awk '/^Total Tests:/ {print $3; exit}')
+PASS=${PASS:-0}
 
 git add \
   src/tools/notify.c \

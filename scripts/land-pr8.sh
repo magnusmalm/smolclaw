@@ -14,8 +14,8 @@ echo "OK"
 
 echo "== full ctest (regression) =="
 ctest --test-dir build --output-on-failure -j"$(nproc)"
-PASS=$(ctest --test-dir build -N | grep -c '^  Test #' || true)
-PASS=$((PASS))
+PASS=$(ctest --test-dir build -N 2>&1 | awk '/^Total Tests:/ {print $3; exit}')
+PASS=${PASS:-0}
 
 git add \
   docs/operations/gateway-threat-model.md \

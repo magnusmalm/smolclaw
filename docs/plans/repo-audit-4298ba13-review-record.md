@@ -54,7 +54,7 @@
 ## Final Review Record
 
 **Final Reviewed Commit (code):** `64cb401463976f52e2c3f1c09d2c88bb588bb531`  
-**Close-out documentation commit:** `ecd7948` (this review record + land scripts)  
+**Close-out documentation commit:** `012ef83` (this review record + land scripts)  
 **Review Baseline Commit (PR-0):** `74f8a9a`  
 **Date:** 2026-06-22
 

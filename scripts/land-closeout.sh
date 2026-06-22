@@ -5,7 +5,8 @@ cd "$(dirname "$0")/.."
 
 echo "== verify ctest =="
 ctest --test-dir build --output-on-failure -j"$(nproc)"
-PASS=$(ctest --test-dir build -N 2>&1 | grep -cE '^  Test #' || true)
+PASS=$(ctest --test-dir build -N 2>&1 | awk '/^Total Tests:/ {print $3; exit}')
+PASS=${PASS:-0}
 
 echo "== ctest result: ${PASS}/${PASS} =="
 FINAL=$(git rev-parse --short HEAD)
