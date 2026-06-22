@@ -107,7 +107,7 @@ A C11 lightweight AI agent framework.
 
 | Build               | Size   |
 |---------------------|--------|
-| Dynamic minimal     | 280 KB |
+| Dynamic minimal     | 256 KB |
 | Dynamic full        | 1.9 MB |
 | Musl static minimal | 4.6 MB |
 | Musl static full    | 6.2 MB |

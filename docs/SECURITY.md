@@ -10,6 +10,8 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 `src/tools/registry.c`: Tools with `needs_confirm = 1` (exec, exec_background, git, write_file, edit_file, append_file, memory_write) require user approval before execution. In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
 
+**Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and `auto_confirm` implications (audit `4298ba13`).
+
 ## Tool Allowlist
 
 `src/tools/registry.c`, `src/config.c`: Config `agents.defaults.allowed_tools` (JSON array) or env `SMOLCLAW_AGENTS_DEFAULTS_ALLOWED_TOOLS` (comma-separated) restricts which tools the LLM can see and call. When set, disallowed tools are filtered from tool definitions sent to the LLM and blocked at execution with an audit log entry. When NULL/empty, all tools are available (backward compatible).

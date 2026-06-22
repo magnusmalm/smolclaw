@@ -313,7 +313,7 @@ When scheduled via the cron tool, the agent can compact its MEMORY.md using AI-d
 Schedule it with a cron job using the `#compact-memory` message prefix:
 
 ```json
-{"name": "cronjob", "arguments": {
+{"name": "cron", "arguments": {
   "name": "memory-compact",
   "every": "24h",
   "message": "#compact-memory"
@@ -472,7 +472,7 @@ smolclaw vault        Manage encrypted secrets
 smolclaw update       Check for and apply updates
 smolclaw backup       Backup and restore state (create/verify/list/restore)
 smolclaw cost         View token usage and costs
-smolclaw analytics    Usage analytics (summary, today, week, month, model, channel)
+smolclaw analytics    Usage analytics (summary, today, week, month, model, channel; requires SC_ENABLE_ANALYTICS)
 smolclaw host-refresh Refresh host inventory and retained metrics
 smolclaw doctor       Validate configuration and dependencies
                       --config <path>  Validate a specific config file
@@ -495,6 +495,9 @@ smolclaw implements defense in depth:
 - **Resource limits**: Per-turn tool call cap (50), wall-clock timeout (300s), output cap (500KB)
 
 See [docs/SECURITY.md](docs/SECURITY.md) for full security documentation.
+Operators running `smolclaw gateway` on a network should read
+[docs/operations/gateway-threat-model.md](docs/operations/gateway-threat-model.md)
+(web bearer token, `auto_confirm`, rate limits).
 
 ## Docker
 
