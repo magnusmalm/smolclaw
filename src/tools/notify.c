@@ -13,6 +13,7 @@
 
 #include "tools/notify.h"
 #include "tools/types.h"
+#include "util/curl_common.h"
 #include "util/str.h"
 #include "util/json_helpers.h"
 #include "logger.h"
@@ -120,7 +121,7 @@ json_escape_str(const char *s)
 static int
 http_post_json(const char *url, const char *json_body)
 {
-    CURL *curl = curl_easy_init();
+    CURL *curl = sc_curl_init();
     if (!curl) return -1;
 
     struct curl_slist *hdrs = NULL;

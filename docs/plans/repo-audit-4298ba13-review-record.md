@@ -18,7 +18,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | PR-4 | security tests in CI | d2b288f | ctest 36/36 full, 20/20 minimal | 0 | landed |
 | PR-5 | git + worktree | b279e0c | ctest 33/33 | 0 | landed |
 | PR-6 | web rate limits + health | 7897a2c | ctest 33/33 | 0 | landed |
-| PR-7 | notify sc_curl_init | | | | |
+| PR-7 | notify sc_curl_init | 470ff04 | ctest 33/33 | 0 | landed |
 | PR-8 | docs threat model | | | | |
 | PR-9 | optional main.c / e2e | | | | |
 
@@ -37,7 +37,7 @@ Append one section per merged PR. Final Review Record section added when arc com
 | P1-2 | PR-8 | | | open |
 | P1-3 | PR-5 | b279e0c | test_git_security | closed |
 | P1-4 | PR-6 | 7897a2c | test_web_auth | closed |
-| P1-5 | PR-7 | | | open |
+| P1-5 | PR-7 | 470ff04 | test_curl_common | closed |
 | P1-6 | PR-8 | | | open |
 | P1-7 | PR-2 | 91a04ef | test_exec_safety resolved wd | closed |
 | P1-8 | PR-2 | 91a04ef | test_exec_safety chdir 126 | closed |

@@ -11,6 +11,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -121,6 +122,38 @@ static void test_curl_init_returns_handle(void)
     curl_global_cleanup();
 }
 
+static const char *find_src_root(void)
+{
+    if (access("src/util/curl_common.c", R_OK) == 0) return "src";
+    if (access("../src/util/curl_common.c", R_OK) == 0) return "../src";
+    return NULL;
+}
+
+/* Audit 4298ba13 / PR-7: curl_easy_init must live only in curl_common.c */
+static void test_no_raw_curl_easy_init_outside_common(void)
+{
+    const char *root = find_src_root();
+    ASSERT_NOT_NULL(root);
+
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+        "grep -rn 'curl_easy_init' %s/ --include='*.c' "
+        "| grep -v 'util/curl_common.c' || true",
+        root);
+
+    FILE *fp = popen(cmd, "r");
+    ASSERT_NOT_NULL(fp);
+
+    char line[512];
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strcspn(line, "\n") > 0)
+            found = 1;
+    }
+    pclose(fp);
+    ASSERT_INT_EQ(found, 0);
+}
+
 static void test_curl_apply_defaults_after_reset(void)
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -152,6 +185,7 @@ int main(void)
 
     /* Curl handle tests run in-process */
     RUN_TEST(test_curl_init_returns_handle);
+    RUN_TEST(test_no_raw_curl_easy_init_outside_common);
     RUN_TEST(test_curl_apply_defaults_after_reset);
 
     TEST_REPORT();
