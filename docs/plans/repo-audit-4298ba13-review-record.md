@@ -1,5 +1,6 @@
 # Review Record — Repo Audit 4298ba13 Remediation
 
+**Start here (reviewers):** `docs/plans/repo-audit-4298ba13-REVIEW-START-HERE.md`  
 **Plan:** `docs/plans/repo-audit-4298ba13-remediation.md`  
 **Baseline:** `docs/plans/repo-audit-4298ba13-baseline.md`  
 **Pre-remediation commit:** `bd0f829f2685ec57c17c44c250d995ac52b53494`
