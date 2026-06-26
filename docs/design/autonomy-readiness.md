@@ -131,7 +131,8 @@ run must **skip** Phase 5.
 All seven are **resolved**. Decisions apply the smol contract (Kconfig
 `default n` above ~50 KB, no new deps, reuse infra) and the mantra
 (work > right > fast). The owner may override any — update here *and* the
-cited phase task. Two are flagged **[owner-veto candidate]**.
+cited phase task. Q3 and Q6 were reviewed and **confirmed by the owner
+on 2026-06-26**.
 
 - [x] **Q1 — adaptive tools gating (1.5): RUNTIME CONFIG ONLY; no Kconfig flag; default `fixed`.**
   150–250 LOC / ~+5 KB is far below the +50 KB gating threshold and defaults to
@@ -149,7 +150,7 @@ cited phase task. Two are flagged **[owner-veto candidate]**.
   change size — **no raw diff**) routed through the existing tool-confirm reply
   flow. Full unified diff only on interactive CLI + Web. If a channel offers no
   confirm path and `auto_confirm` is off, **deny** dangerous ops (fail-closed) —
-  never silently allow. **[owner-veto candidate — security-flavored UX call]**
+  never silently allow. **[owner-confirmed 2026-06-26 — fail-closed stands]**
 
 - [x] **Q4 — updater split (4.10): DO NOT SPLIT; rely on LTO + `--gc-sections` (task 0.4).**
   curl/cJSON are linked unconditionally and OpenSSL is already conditional, so a
@@ -171,7 +172,7 @@ cited phase task. Two are flagged **[owner-veto candidate]**.
   builds lean; only offered when the xai provider is compiled. **This overrides
   the spec's tentative `default y`** — the spec itself invokes the smol contract,
   and the ≤320 KB minimal budget wins. `~/.grok/auth.json` interop stays **out of
-  MVP** (Phase 2, read-only fallback). **[owner-veto candidate — contradicts spec default]**
+  MVP** (Phase 2, read-only fallback). **[owner-confirmed 2026-06-26 — default n stands]**
 
 - [x] **Q7 — repo_search ↔ code_graph (4.5): v1 DUPLICATES extraction; share in v2.**
   Don't couple two subsystems before repo_search's ranking needs are known (work
