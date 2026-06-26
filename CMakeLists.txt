@@ -205,14 +205,17 @@ add_custom_command(
 add_library(cjson STATIC deps/cJSON/cJSON.c)
 target_include_directories(cjson PUBLIC deps/cJSON)
 
-# Vendored SQLite (core host metrics/inventory, plus FTS5 when enabled)
+# Vendored SQLite (host metrics/analytics; FTS5 only for memory search)
 add_library(sqlite3 STATIC deps/sqlite3/sqlite3.c)
 target_include_directories(sqlite3 PUBLIC deps/sqlite3)
-target_compile_definitions(sqlite3 PRIVATE
-    SQLITE_ENABLE_FTS5
+set(_sqlite_defs
     SQLITE_THREADSAFE=1
     SQLITE_OMIT_LOAD_EXTENSION
     SQLITE_OMIT_DEPRECATED)
+if(SC_ENABLE_MEMORY_SEARCH)
+    list(APPEND _sqlite_defs SQLITE_ENABLE_FTS5)
+endif()
+target_compile_definitions(sqlite3 PRIVATE ${_sqlite_defs})
 target_compile_options(sqlite3 PRIVATE -w)
 target_link_libraries(sqlite3 PUBLIC m)
 
@@ -699,6 +702,11 @@ message(STATUS "  MCP client ......... ${SC_ENABLE_MCP}")
 message(STATUS "  MCP server ......... ${SC_ENABLE_MCP_SERVER}")
 message(STATUS "  Code graph ......... ${SC_ENABLE_CODE_GRAPH} (symbols + import graph)")
 message(STATUS "  Memory search ...... ${SC_ENABLE_MEMORY_SEARCH}")
+if(SC_ENABLE_MEMORY_SEARCH)
+    message(STATUS "  SQLite FTS5 ........ ON")
+else()
+    message(STATUS "  SQLite FTS5 ........ OFF")
+endif()
 message(STATUS "  Vault encryption ... ${SC_ENABLE_VAULT}")
 message(STATUS "  Git tool ........... ${SC_ENABLE_GIT}")
 message(STATUS "  Gitea tool ......... ${SC_ENABLE_GITEA}")

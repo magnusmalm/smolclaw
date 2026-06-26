@@ -206,6 +206,8 @@ config SC_ENABLE_MEMORY_SEARCH
 	  Enable full-text search across memory files via SQLite FTS5.
 	  Adds the memory_search tool for keyword-based retrieval.
 	  Uses a vendored SQLite amalgamation (no external dependency).
+	  When disabled, the amalgamation is built without SQLITE_ENABLE_FTS5
+	  (smaller sqlite3 when host metrics or analytics still link SQLite).
 
 endmenu
 

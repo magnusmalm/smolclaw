@@ -142,9 +142,17 @@ KC-2 clean (0 `implicit` in build log). `check_size_budget.sh build-size/smolcla
 
 **Files:** `CMakeLists.txt`, `Kconfig`, `configs/defconfig.minimal`
 
-- [ ] `SQLITE_ENABLE_FTS5` only when `SC_ENABLE_MEMORY_SEARCH=y`
-- [ ] Minimal build verifies no FTS5 symbols
-- [ ] Full build + `test_memory_tools` pass
+> **Status (2026-06-26):** `SQLITE_ENABLE_FTS5` is set only when
+> `SC_ENABLE_MEMORY_SEARCH=y`. Minimal and analytics-only (memory search off)
+> builds have zero `fts5` symbols in `smolclaw` and `libsqlite3.a`.
+
+- [x] `SQLITE_ENABLE_FTS5` only when `SC_ENABLE_MEMORY_SEARCH=y`
+- [x] Minimal build verifies no FTS5 symbols (`nm build-minimal/smolclaw`: 0)
+- [x] Full build + `test_memory_tools` / `test_memory_search` pass
+
+**Verification gates (2026-06-26):** `ctest --test-dir build-full` **43/43** passed.
+Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary and
+`libsqlite3.a`. KC-2 clean; size budget unchanged (minimal has no SQLite link).
 
 ### 0.6 Checkpoint & rewind — ALREADY SHIPPED (verify-only)
 
