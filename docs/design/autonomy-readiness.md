@@ -1,0 +1,202 @@
+# Autonomy Readiness — Handoff Matrix for master-plan.md
+
+**Status**: Living handoff doc  
+**Purpose**: Assess whether each task in [`master-plan.md`](master-plan.md) and the
+phase plans can be implemented by an autonomous Opus-4.8-class agent, and what
+must be resolved or provisioned *before* handing the plan off.  
+**Last verified against code**: 2026-06-26 (commit at time of writing)  
+**Related**: [`master-plan.md`](master-plan.md), `docs/design/phases/phase-*.md`
+
+---
+
+## 1. Verdict
+
+The plan is **not** a fire-and-forget "implement all phases" button — but it is a
+strong substrate for **supervised, slice-by-slice autonomous execution**: one
+task → one branch/PR → gated by `ctest` + `scripts/check_size_budget.sh`.
+
+Two structural caveats:
+
+- **Phase 5 is an explicit do-not-build parking lot.** "Implement all phases"
+  excludes Phase 5 by design.
+- **Several acceptance criteria require a live external system or a human**
+  (real OAuth consent, a Signal daemon, a KVM host, a running Ollama). The agent
+  can write the code + mock tests, but cannot *accept* those tasks alone.
+
+With the open questions decided (§3) and the external prerequisites provisioned
+or scoped to mock-acceptance (§4), roughly **70–80% of concrete tasks are
+autonomous-ready today**; the remainder are autonomous-to-implement but
+human-to-accept.
+
+---
+
+## 2. Readiness matrix
+
+**Legend**
+
+| Tag | Meaning |
+|-----|---------|
+| ✅ **READY** | Autonomously implementable *and* verifiable via `ctest` / mocks / build checks. No human, no unresolved decision. |
+| 🟡 **GATED-DEC** | Logic implementable, but blocked on an unresolved **design decision** (resolve in §3 first). |
+| 🟠 **GATED-EXT** | Code + mock tests autonomous, but **final acceptance needs a live external system or human**. |
+| 🔵 **SHIPPED** | Already implemented in HEAD — **verify-only** (add/confirm a regression test). |
+| ⛔ **DO-NOT-BUILD** | Parking lot; build only after promotion criteria met. |
+
+### Phase 0 — Safety & stability
+
+| Task | Tag | Note / acceptance gate |
+|------|-----|------------------------|
+| 0.1 size & test baseline | ✅ READY | Record numbers only |
+| 0.2 audit highs H-1–H-11 | 🔵 SHIPPED | H-1–H-10 fixed; verify H-11 + ensure regression tests |
+| 0.3 audit mediums (subset) | 🔵/✅ | M-1 fixed; verify M-3 under `security_mutex` |
+| 0.4 size build profile | ✅ READY | Verifiable: ≥10% x86_64 reduction |
+| 0.5 FTS5 gate | ✅ READY | Verifiable: minimal build has no FTS5 symbols |
+| 0.6 checkpoint & rewind | 🔵 SHIPPED | Verify-only; add repeated-error → rewind test |
+| 0.7 `sc_task_t` | 🔵 SHIPPED | Lib exists (`src/util/task.{c,h}`); verify summarization uses it + shutdown join (M-8) |
+| 0.8 deferred init | ✅ READY | Exact (refreshed) anchors; validate via `strace`/`getrusage`, `ctest` |
+
+### Phase 1 — Context efficiency
+
+| Task | Tag | Note / acceptance gate |
+|------|-----|------------------------|
+| 1.1 tool-result spill-to-disk | ✅ READY | Mock-testable |
+| 1.2 per-turn aggregate cap | ✅ READY | |
+| 1.3 token-aware compaction | ✅ READY | Uses provider usage; mockable |
+| 1.4 reactive compaction on ctx error | ✅ READY | |
+| 1.5 adaptive tool selection (`auto`) | 🟡 GATED-DEC | Open Q1 (Kconfig vs runtime). Logic READY; acceptance benchmark wants live Ollama (🟠) |
+| 1.6 streaming inline tool-call buffer | ✅ READY | Port SmallHarness `agent.rs` tests |
+| 1.7 JSON-aware compaction | ✅ READY | |
+| 1.8 prompt-prefix warmup | 🟠 GATED-EXT | Logic READY; TTFT benchmark needs live Ollama/vLLM |
+
+### Phase 2 — Operator & provider UX
+
+| Task | Tag | Note / acceptance gate |
+|------|-----|------------------------|
+| 2.1 xAI Grok OAuth | 🟠 GATED-EXT | Code + mock_http READY; **real login needs SuperGrok sub + current client_id/endpoints** |
+| 2.2 `auth` subcommand | 🟠 GATED-EXT | Part of 2.1 |
+| 2.3 `session compact` | ✅ READY | Tree-format tests |
+| 2.4 `session prune` | ✅ READY | |
+| 2.5 incremental reload | 🟡 GATED-DEC | Implement only "if measured bottleneck" — needs a measurement decision |
+| 2.6 provider health | 🔵 SHIPPED | Tracker exists in `agent_turn.c`; verify fallback consults it + surface in analytics |
+| 2.7 port conflict logging | ✅ READY | |
+| 2.8 backoff verification | ✅ READY | Audit + add tests if gaps |
+| 2.9 cron expression parser | ✅ READY | Premise verified (`"cron"` kind disabled); unit tests |
+| 2.10 gateway slash MVP | ✅ READY | Mock-channel tests cover acceptance |
+| 2.11 skills format docs | ✅ READY | Docs only |
+| 2.12 MCP cookbook | 🟠 GATED-EXT | Needs ≥1 real MCP server for the smoke-test recipe |
+
+### Phase 3 — Optional surface area
+
+| Task | Tag | Note / acceptance gate |
+|------|-----|------------------------|
+| 3.1 Signal channel MVP | 🟠 GATED-EXT | Code + mock_http READY; **real `signal-cli` daemon + test number** for smoke test |
+| 3.2 operator mode presets | ✅ READY | |
+| 3.3 enhanced tool confirmation | 🟡 GATED-DEC | Open Q3 (async confirm UX). Core READY; async behavior needs a decision |
+| 3.4 X `note_tweet` | ✅ READY | Premise verified (`format_tweet` already handles it) |
+| 3.5 notify Slack/ntfy | ✅ READY | "Ship only if trivial" |
+| 3.6 subagent deny matrices | ✅ READY | |
+| 3.7 session reset policies | ✅ READY | |
+| 3.8 busy-input queue mode | ✅ READY | `steer` mode is Phase 5 |
+| 3.9 silent delivery tokens | ✅ READY | |
+
+### Phase 4 — Larger investments
+
+| Task | Tag | Note / acceptance gate |
+|------|-----|------------------------|
+| 4.1 arena allocator | 🔵/✅ | Allocator shipped + per-turn wired; finish provider-parse adoption |
+| 4.2 MCP capability sandbox | ✅ READY | Landlock/seccomp tests on Linux |
+| 4.3 Anthropic prompt caching | 🟠 GATED-EXT | Logic READY; real verification needs an Anthropic key |
+| 4.4 old result compression | ✅ READY | Uses existing transform hook |
+| 4.5 project memory + repo_search | 🟡 GATED-DEC | Open Q2 (index path). Large (800–1,200 LOC); logic READY |
+| 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |
+| 4.7 prompt budget CLI | ✅ READY | |
+| 4.8 remaining audit mediums | ✅ READY | M-2,4,5,6,7,9,10 |
+| 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |
+| 4.10 updater split spike | 🟡 GATED-DEC | Open Q4 (research decision, implement only if >50 KB proven) |
+| 4.11 global `session_search` | ✅ READY | Kconfig default n |
+| 4.12 agent-initiated compact tool | ✅ READY | After 2.10 slash `/compress` |
+| 4.13 post-turn memory review | ✅ READY | Opt-in; acceptance mockable (aux provider optional) |
+| 4.14 staged memory writes | ✅ READY | Pairs with 4.13 |
+
+### Phase 5 — Defer / reject
+
+⛔ **DO-NOT-BUILD.** Every item is a parking-lot entry. Build only after its
+written promotion criteria are met (`phase-5-defer-reject.md` §5). An autonomous
+run must **skip** Phase 5.
+
+---
+
+## 3. Open-question checklist (resolve BEFORE handoff)
+
+The mantra forbids baseless assumptions. Decide and bake these into the docs so
+the agent never guesses:
+
+- [ ] **Q1 — adaptive tools gating** (blocks 1.5): Kconfig-gated, runtime-only,
+  or both? *(spec recommendation: runtime config.)*
+- [ ] **Q2 — project-memory index path** (blocks 4.5):
+  `{workspace}/.smolclaw/project-index.json` vs hashed under `SMOLCLAW_HOME`?
+- [ ] **Q3 — async confirm UX** (blocks 3.3 / shapes 3.1, 2.10): on Telegram/
+  Discord — block write tools, summary-only confirm, or Web-UI link?
+- [ ] **Q4 — updater split** (blocks 4.10): separate `smolclaw-updater` binary
+  vs rely on LTO + `--gc-sections` only?
+- [ ] **Q5 — Phase 5 promotion metrics**: what session-size / MCP-count / demand
+  thresholds pull an item out of the parking lot?
+- [ ] **Q6 — xAI OAuth Kconfig default** (shapes 2.1): `SC_ENABLE_XAI_OAUTH`
+  default `y`, or `select`ed by the xai provider? `~/.grok/auth.json` interop in
+  or out of MVP?
+- [ ] **Q7 — repo_search ↔ code_graph** (shapes 4.5): share a symbol helper now
+  or duplicate extraction in v1?
+
+---
+
+## 4. External prerequisites checklist (provision OR scope to mock-acceptance)
+
+Tasks tagged 🟠 GATED-EXT cannot be *accepted* without these. Either stand them
+up before the run, or instruct the agent to deliver "code + mock tests only" and
+hold final acceptance for a human:
+
+- [ ] **Ollama / vLLM** reachable — for 1.5, 1.8, 4.6 acceptance benchmarks
+- [ ] **`signal-cli` daemon + dedicated test phone number** — for 3.1 smoke test
+- [ ] **SuperGrok subscription + verified-current xAI client_id/endpoints** — for
+  2.1 real login
+- [ ] **Anthropic API key** — for 4.3 cache-hit verification
+- [ ] **KVM host + `microsandbox-server` on :5555** — for 4.9
+- [ ] **≥1 real MCP server** (e.g. Playwright, Home Assistant) — for 2.12 recipe
+- [ ] **Note**: `code-analysis-report.md` is **gitignored** (absent on fresh
+  clone). Phase 0 is self-sufficient because the H-table is inlined in
+  `phase-0-safety-and-stability.md`, but do not rely on the external report.
+
+---
+
+## 5. Recommended execution protocol
+
+1. **Decision pass** — resolve §3; write answers back into the relevant phase
+   docs. *(Human, one sitting.)*
+2. **Provision pass** — satisfy §4, or mark each GATED-EXT task "mock-acceptance,
+   human final". *(Human/ops.)*
+3. **Per-task loop** (agent): pick next task in phase order (0→1→2→3→4, skip 5) →
+   branch → implement against the **authoritative spec** named in the phase doc →
+   `cmake --build build` clean (grep for `implicit` per KC-2) →
+   `ctest --test-dir build` green → `scripts/check_size_budget.sh` pass →
+   new Kconfig flags added to `FEATURE_SYMS` (KC-1) → open PR.
+4. **Human gates**: each §3 decision, each 🟠 GATED-EXT acceptance, and any task
+   that would breach the LOC or ≤320 KB size budget.
+
+---
+
+## 6. Verification gates the agent can self-serve
+
+- `ctest --test-dir build` (33 tests in the full build; per-module)
+- `scripts/check_size_budget.sh` (CI-enforced minimal ≤ 320 KB stripped)
+- `scripts/check_claude_md.sh` (CLAUDE.md fact drift)
+- Build hygiene: KC-1 (new flags → `FEATURE_SYMS`), KC-2 (grep build output for
+  `implicit`)
+- Mock infrastructure: `tests/mock_http.h` (channels, providers, OAuth callback)
+
+---
+
+## 7. Maintenance
+
+Update the §2 tags as tasks land. When a task moves to 🔵 SHIPPED, record the
+commit. Re-run the code spot-checks (the ones behind the 2026-06-26 column)
+before trusting a tag older than a release.

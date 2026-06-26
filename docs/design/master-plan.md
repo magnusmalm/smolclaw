@@ -4,7 +4,8 @@
 **Author**: Consolidated from cross-repo analyses (2026-03 through 2026-05)  
 **Last Updated**: 2026-06-26  
 **Related**: Individual phase plans in `docs/design/phases/`, source design docs listed below  
-**Hermes gap analysis**: Tier map in §4.3 (2026-06 comparative roadmap)
+**Hermes gap analysis**: Tier map in §4.3 (2026-06 comparative roadmap)  
+**Autonomy handoff**: per-task ready/gated matrix + open-question checklist in [`autonomy-readiness.md`](autonomy-readiness.md)
 
 ---
 
