@@ -63,13 +63,10 @@ jobs:
       - name: Install dependencies
         run: ./scripts/ci-ensure-host-deps.sh base
 
-      - name: Build minimal (MinSizeRel + gc-sections)
+      - name: Build minimal (MinSizeRel + LTO + gc-sections)
         run: |
           cp configs/defconfig.minimal .config
-          cmake -B build-size \
-            -DCMAKE_BUILD_TYPE=MinSizeRel \
-            -DCMAKE_C_FLAGS="-ffunction-sections -fdata-sections" \
-            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections"
+          cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel
           cmake --build build-size -j$(nproc) --target smolclaw
 
       - name: Check size budget

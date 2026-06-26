@@ -49,7 +49,7 @@ Recorded **2026-06-26** at git `45b74441df0b0be437655ce283f4b4981ba836db`.
 |---------|---------|--------|----------|
 | Release (full) | `cp configs/defconfig .config && cmake -B build -DCMAKE_BUILD_TYPE=Release` | `build/smolclaw` | **2,180,864 B** (2,320,824 unstripped) |
 | Minimal (master-plan §7) | `cp configs/defconfig.minimal .config && cmake -B build-minimal` | `build-minimal/smolclaw` | **415,328 B** (925,176 unstripped) |
-| CI minimal-dynamic | `cp configs/defconfig.minimal .config && cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_C_FLAGS="-ffunction-sections -fdata-sections" -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections"` | `build-size/smolclaw` | **262,640 B** → **257 KB** per `check_size_budget.sh` |
+| CI minimal-dynamic | `cp configs/defconfig.minimal .config && cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel` (LTO + gc-sections via `cmake/size_optimize.cmake`) | `build-size/smolclaw` | **262,640 B** (§0.1 pre-LTO) → **250,880 B** / **245 KB** post-0.4 |
 
 - [x] Record `build/smolclaw` and `build-minimal/smolclaw` byte sizes (see table)
 - [x] Record `ctest` pass count
@@ -112,14 +112,31 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 
 ### 0.4 Size-optimized release build
 
-**Files:** `CMakeLists.txt`, `.gitea/workflows/release.yml`
+**Files:** `cmake/size_optimize.cmake`, `CMakeLists.txt`, `.gitea/workflows/ci.yml`,
+`scripts/release-build.sh`, `README.md`
 
-- [ ] `MinSizeRel` or explicit `-Os`/`-Oz` release profile
-- [ ] `-flto=thin`, `-ffunction-sections`, `-fdata-sections`, `-Wl,--gc-sections`
-- [ ] CI release job uses size profile
-- [ ] Document in README building section
+> **Status (2026-06-26):** `cmake/size_optimize.cmake` applies thin LTO +
+> section GC whenever `CMAKE_BUILD_TYPE=MinSizeRel`. Release tags build with
+> `MinSizeRel` via `scripts/release-build.sh`; CI `size-budget` job uses the same
+> profile (flags no longer duplicated on the cmake command line).
+
+- [x] `MinSizeRel` release profile (`cmake/size_optimize.cmake`)
+- [x] `-flto=thin`, `-ffunction-sections`, `-fdata-sections`, `-Wl,--gc-sections`
+- [x] CI release job uses size profile (`release-build.sh` → `MinSizeRel`)
+- [x] Document in README building section
 
 **Acceptance:** ≥10% size reduction on x86_64 release vs pre-change baseline.
+
+| Profile | Stripped (B) | vs §0.1 Release baseline (2,180,864 B) |
+|---------|--------------|----------------------------------------|
+| Release (pre-0.4, §0.1) | 2,180,864 | — |
+| MinSizeRel + LTO + gc (full defconfig, post-0.4) | **1,251,696** | **−42.6%** |
+| CI minimal-dynamic (post-0.4 LTO) | **250,880** → **245 KB** | was 262,640 B (§0.1) |
+
+**Verification gates (2026-06-26):** `ctest --test-dir build-verify` **43/43** passed.
+KC-2 clean (0 `implicit` in build log). `check_size_budget.sh build-size/smolclaw
+1024` → OK (245 KB). Toolchain used full `-flto` (Debian gcc 12.2 lacks `-flto=thin`;
+`cmake/size_optimize.cmake` prefers thin when supported).
 
 ### 0.5 Gate SQLite FTS5
 

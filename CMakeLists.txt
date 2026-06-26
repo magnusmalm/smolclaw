@@ -5,6 +5,8 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+include(${CMAKE_SOURCE_DIR}/cmake/size_optimize.cmake)
+
 # Need POSIX APIs (localtime_r, usleep, popen, etc.)
 add_compile_definitions(_POSIX_C_SOURCE=200112L _DEFAULT_SOURCE)
 

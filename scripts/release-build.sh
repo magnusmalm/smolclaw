@@ -66,7 +66,7 @@ musl_build() {
   compiler="$toolchain/bin/${triple}-gcc"
 
   cmake -B "$build_dir" \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=MinSizeRel \
     -DSC_MUSL_STATIC=ON \
     -DSC_STRIP=ON \
     -DCMAKE_VERBOSE_MAKEFILE=OFF \

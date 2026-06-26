@@ -79,6 +79,20 @@ cmake --build build -j$(nproc)
 ctest --test-dir build
 ```
 
+### Size-optimized release (MinSizeRel + LTO + gc-sections)
+
+Use this profile for smaller binaries (release tags and the CI size-budget
+job). `MinSizeRel` enables LTO (thin when the toolchain supports it),
+`-ffunction-sections`/`-fdata-sections`, and `-Wl,--gc-sections` automatically
+via `cmake/size_optimize.cmake`.
+
+```bash
+cp configs/defconfig .config          # or defconfig.minimal for a lean build
+cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel
+cmake --build build-size -j$(nproc) --target smolclaw
+./scripts/check_size_budget.sh build-size/smolclaw 1024
+```
+
 `test_security` (prompt guard, redaction, deny patterns) runs in every profile.
 The full `test_security_prod` integration suite runs only in the **full** build
 profile (`SC_ENABLE_WEB`); minimal CI skips it by name (`ctest -E
