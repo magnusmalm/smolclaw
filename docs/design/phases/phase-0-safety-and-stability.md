@@ -53,8 +53,8 @@ Recorded **2026-06-26** at git `45b74441df0b0be437655ce283f4b4981ba836db`.
 
 - [x] Record `build/smolclaw` and `build-minimal/smolclaw` byte sizes (see table)
 - [x] Record `ctest` pass count
-  - `ctest --test-dir build` (full/defconfig): **42/42 passed** (two consecutive
-    runs, 0 failures)
+  - `ctest --test-dir build` (full/defconfig): **43/43 passed** (two consecutive
+    runs, 0 failures; 2026-06-27 re-verify)
 - [x] Note git SHA in this doc
   - `45b74441df0b0be437655ce283f4b4981ba836db`
 
@@ -133,7 +133,7 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 | MinSizeRel + LTO + gc (full defconfig, post-0.4) | **1,251,696** | **−42.6%** |
 | CI minimal-dynamic (post-0.4 LTO) | **250,880** → **245 KB** | was 262,640 B (§0.1) |
 
-**Verification gates (2026-06-26):** `ctest --test-dir build-verify` **43/43** passed.
+**Verification gates (2026-06-27):** `ctest --test-dir build-verify` **39/39** passed.
 KC-2 clean (0 `implicit` in build log). `check_size_budget.sh build-size/smolclaw
 1024` → OK (245 KB). Toolchain used full `-flto` (Debian gcc 12.2 lacks `-flto=thin`;
 `cmake/size_optimize.cmake` prefers thin when supported).
@@ -150,7 +150,7 @@ KC-2 clean (0 `implicit` in build log). `check_size_budget.sh build-size/smolcla
 - [x] Minimal build verifies no FTS5 symbols (`nm build-minimal/smolclaw`: 0)
 - [x] Full build + `test_memory_tools` / `test_memory_search` pass
 
-**Verification gates (2026-06-26):** `ctest --test-dir build-full` **43/43** passed.
+**Verification gates (2026-06-27):** `ctest --test-dir build` **43/43** passed.
 Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary and
 `libsqlite3.a`. KC-2 clean; size budget unchanged (minimal has no SQLite link).
 
@@ -194,8 +194,8 @@ Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary a
 
 **Acceptance:** Rapid shutdown during summarization does not leak threads (M-8).
 
-**Verification gates (2026-06-26):** `test_summarize_shutdown_cancels_task` and
-`test_session_summarization` pass; `ctest --test-dir build-full` **39/39** green.
+**Verification gates (2026-06-27):** `test_summarize_shutdown_cancels_task` and
+`test_session_summarization` pass; `ctest --test-dir build` **43/43** green.
 
 ### 0.8 Deferred runtime initialization
 
@@ -232,15 +232,16 @@ memoization bloat.
   full musl-static RSS benchmark deferred to release profiling)
 - [x] ctest green; `test_memory_search`, `test_exec_safety`, `test_memory_tools`, `test_security` pass
 
-**Verification gates (2026-06-26):** `test_deferred_rebuild_on_first_search`,
-`test_deny_list_lazy_init`; `ctest --test-dir build-full` **39/39** green; size budget OK.
+**Verification gates (2026-06-27):** `test_deferred_rebuild_on_first_search`,
+`test_deferred_rebuild_survives_inventory_put`, `test_deny_list_lazy_init`;
+`ctest --test-dir build` **43/43** green; size budget OK.
 
 ---
 
 ## 3. Exit Criteria
 
 - [x] All Phase 0 checkboxes complete (0.1–0.8)
-- [x] `ctest --test-dir build` passes (39/39 on full defconfig, 2026-06-26)
+- [x] `ctest --test-dir build` passes (43/43 defconfig, 2026-06-27); `build-verify` 39/39 (MinSizeRel)
 - [x] Binary size ≤ baseline or documented reduction from 0.4/0.5 (§0.4: −42.6% release)
 - [x] RSS/startup improvement from 0.8 recorded (deferred rebuild + lazy deny; see §0.8)
 - [x] No open HIGH audit items in provider/channel/tool hot paths (§0.2, §0.3)

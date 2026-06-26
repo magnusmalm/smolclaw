@@ -287,6 +287,23 @@ static int cmd_host_refresh(void)
         if (db_path) {
             midx = sc_memory_index_new(db_path);
             free(db_path);
+            if (midx) {
+                sc_strbuf_t mem_sb;
+                sc_strbuf_init(&mem_sb);
+                sc_strbuf_appendf(&mem_sb, "%s/memory", workspace);
+                char *mem_dir = sc_strbuf_finish(&mem_sb);
+                sc_memory_index_defer_rebuild(midx, mem_dir);
+                free(mem_dir);
+
+                sc_strbuf_t ctx_sb;
+                sc_strbuf_init(&ctx_sb);
+                sc_strbuf_appendf(&ctx_sb, "%s/context", workspace);
+                char *ctx_dir = sc_strbuf_finish(&ctx_sb);
+                struct stat ctx_st;
+                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode))
+                    sc_memory_index_defer_ctx_rebuild(midx, ctx_dir);
+                free(ctx_dir);
+            }
         }
     }
 #endif

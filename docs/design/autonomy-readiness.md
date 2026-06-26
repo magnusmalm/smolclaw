@@ -44,16 +44,19 @@ autonomous-to-implement but human-to-accept.
 
 ### Phase 0 — Safety & stability
 
+**Status (2026-06-27):** Complete on branch `task/0.8-deferred-init` — see
+[`phase-0-safety-and-stability.md`](phases/phase-0-safety-and-stability.md).
+
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 0.1 size & test baseline | ✅ READY | Record numbers only |
-| 0.2 audit highs H-1–H-11 | 🔵 SHIPPED | H-1–H-10 fixed; verify H-11 + ensure regression tests |
-| 0.3 audit mediums (subset) | 🔵/✅ | M-1 fixed; verify M-3 under `security_mutex` |
-| 0.4 size build profile | ✅ READY | Verifiable: ≥10% x86_64 reduction |
-| 0.5 FTS5 gate | ✅ READY | Verifiable: minimal build has no FTS5 symbols |
-| 0.6 checkpoint & rewind | 🔵 SHIPPED | Verify-only; add repeated-error → rewind test |
-| 0.7 `sc_task_t` | 🔵 SHIPPED | Lib exists (`src/util/task.{c,h}`); verify summarization uses it + shutdown join (M-8) |
-| 0.8 deferred init | ✅ READY | Exact (refreshed) anchors; validate via `strace`/`getrusage`, `ctest` |
+| 0.1 size & test baseline | 🔵 SHIPPED | Baseline recorded; KC-2 fix + 1 MB budget (owner) |
+| 0.2 audit highs H-1–H-11 | 🔵 SHIPPED | H-11 guards + provider regression tests |
+| 0.3 audit mediums (subset) | 🔵 SHIPPED | M-1/M-3 verified under `security_mutex` |
+| 0.4 size build profile | 🔵 SHIPPED | MinSizeRel + LTO + gc-sections (−42.6% release) |
+| 0.5 FTS5 gate | 🔵 SHIPPED | FTS5 only when `SC_ENABLE_MEMORY_SEARCH=y` |
+| 0.6 checkpoint & rewind | 🔵 SHIPPED | Verify-only; `test_checkpoint_rewind_*` |
+| 0.7 `sc_task_t` | 🔵 SHIPPED | Summarization cancel on shutdown (M-8) |
+| 0.8 deferred init | 🔵 SHIPPED | Deferred rebuild + lazy deny-regex; web/main defer |
 
 ### Phase 1 — Context efficiency
 

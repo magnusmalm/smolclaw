@@ -116,6 +116,53 @@ static void test_deferred_rebuild_on_first_search(void)
     cleanup_tmpdir(dir);
 }
 
+/* Mirrors agent init: defer rebuild, then inventory put_chunked before search. */
+static void test_deferred_rebuild_survives_inventory_put(void)
+{
+    char *dir = make_tmpdir();
+    char memdir[128];
+    snprintf(memdir, sizeof(memdir), "%s/memory", dir);
+    ASSERT_INT_EQ(mkdir(memdir, 0755), 0);
+
+    char memfile[160];
+    snprintf(memfile, sizeof(memfile), "%s/MEMORY.md", memdir);
+    write_file(memfile,
+        "Inventory put during init must not cancel deferred memory walk.");
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/test.db", dir);
+    char *db_path = sc_strbuf_finish(&sb);
+
+    sc_memory_index_t *idx = sc_memory_index_new(db_path);
+    ASSERT_NOT_NULL(idx);
+    sc_memory_index_defer_rebuild(idx, memdir);
+    ASSERT(sc_memory_index_rebuild_is_pending(idx),
+           "Rebuild pending after defer");
+
+    const char *inv_json = "{\"artifact_dir\":\"context/host\"}";
+    const char *inv_md = "# Host inventory\n";
+    ASSERT_INT_EQ(sc_memory_index_put_chunked(idx, "ctx:host_inventory.json",
+                                              inv_json), 0);
+    ASSERT_INT_EQ(sc_memory_index_put_chunked(idx, "ctx:host_inventory.md",
+                                              inv_md), 0);
+    ASSERT(sc_memory_index_rebuild_is_pending(idx),
+           "Inventory put must not cancel deferred memory rebuild");
+
+    int count = 0;
+    sc_memory_search_result_t *results = sc_memory_index_search(
+        idx, "inventory put", 5, &count);
+    ASSERT(!sc_memory_index_rebuild_is_pending(idx),
+           "First search should complete deferred rebuild");
+    ASSERT(count > 0,
+           "Search should find memory files after inventory put at init");
+    sc_memory_search_results_free(results, count);
+
+    sc_memory_index_free(idx);
+    free(db_path);
+    cleanup_tmpdir(dir);
+}
+
 static void test_index_put_and_search(void)
 {
     char *dir = make_tmpdir();
@@ -664,6 +711,7 @@ int main(void)
 {
     RUN_TEST(test_index_create_and_free);
     RUN_TEST(test_deferred_rebuild_on_first_search);
+    RUN_TEST(test_deferred_rebuild_survives_inventory_put);
     RUN_TEST(test_index_put_and_search);
     RUN_TEST(test_index_search_no_results);
     RUN_TEST(test_index_put_replaces);

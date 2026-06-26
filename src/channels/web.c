@@ -1181,6 +1181,24 @@ static void handle_memory_search(struct evhttp_request *req, void *arg)
         return;
     }
 
+    {
+        sc_strbuf_t mem_sb;
+        sc_strbuf_init(&mem_sb);
+        sc_strbuf_appendf(&mem_sb, "%s/memory", wd->workspace);
+        char *mem_dir = sc_strbuf_finish(&mem_sb);
+        sc_memory_index_defer_rebuild(idx, mem_dir);
+        free(mem_dir);
+
+        sc_strbuf_t ctx_sb;
+        sc_strbuf_init(&ctx_sb);
+        sc_strbuf_appendf(&ctx_sb, "%s/context", wd->workspace);
+        char *ctx_dir = sc_strbuf_finish(&ctx_sb);
+        struct stat ctx_st;
+        if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode))
+            sc_memory_index_defer_ctx_rebuild(idx, ctx_dir);
+        free(ctx_dir);
+    }
+
     int count = 0;
     sc_memory_search_result_t *results =
         sc_memory_index_search(idx, query, max_results, &count);

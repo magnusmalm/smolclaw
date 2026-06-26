@@ -316,16 +316,6 @@ int sc_memory_index_rebuild_is_pending(const sc_memory_index_t *idx)
            (idx->pending_mem_dir != NULL || idx->pending_ctx_dir != NULL);
 }
 
-static void memory_index_skip_deferred(sc_memory_index_t *idx)
-{
-    if (!idx || idx->rebuild_done) return;
-    free(idx->pending_mem_dir);
-    free(idx->pending_ctx_dir);
-    idx->pending_mem_dir = NULL;
-    idx->pending_ctx_dir = NULL;
-    idx->rebuild_done = 1;
-}
-
 static void memory_index_ensure_rebuilt(sc_memory_index_t *idx)
 {
     if (!idx || idx->rebuild_done) return;
@@ -382,7 +372,6 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
     sqlite3_step(idx->stmt_hash_put);
 
     SC_LOG_DEBUG(LOG_TAG, "Indexed '%s' (%d bytes)", source, (int)strlen(content));
-    memory_index_skip_deferred(idx);
     pthread_mutex_unlock(&idx->lock);
     return 0;
 }
@@ -438,7 +427,6 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
         sqlite3_bind_text(idx->stmt_hash_put, 2, hex, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(idx->stmt_hash_put, 3, 0);
         sqlite3_step(idx->stmt_hash_put);
-        memory_index_skip_deferred(idx);
         pthread_mutex_unlock(&idx->lock);
         return 0;
     }
@@ -513,7 +501,6 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
 
     SC_LOG_DEBUG(LOG_TAG, "Chunked '%s': %d lines → %d chunks",
                  source, lines, chunk_num);
-    memory_index_skip_deferred(idx);
     pthread_mutex_unlock(&idx->lock);
     return 0;
 }
