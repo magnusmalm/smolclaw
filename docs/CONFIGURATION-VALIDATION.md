@@ -28,8 +28,12 @@ For the authoritative key reference, see [CONFIGURATION.md](CONFIGURATION.md).
 | 4 | `channels.x.api_base` documented but unwired | ✅ Fixed | marked "(unwired) Not read from config today" (L258) |
 | 5 | env-override "any field" overstated | ✅ Fixed | softened to "names mostly follow…" (L11) |
 
-The "Minor / clarifying issues" section below was **not** re-verified in this
-pass and may still be actionable.
+The "Minor / clarifying issues" section was **also re-verified 2026-06-26 and
+is effectively resolved**: the three genuine gaps (`config_version`, `file:///`
+/ `@/path` secret refs, `SMOLCLAW_VAULT_PASSWORD`) are now documented in
+`CONFIGURATION.md`; the remaining rows are clarifying notes, not defects. The
+only optional polish left is enumerating per-provider `api_base` defaults
+(from `provider_table[]`) instead of "(provider default)" — cosmetic.
 
 ---
 
