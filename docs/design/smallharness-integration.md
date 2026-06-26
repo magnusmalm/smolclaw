@@ -254,7 +254,8 @@ Tasks are grouped by priority. Each item cites the SmallHarness source pattern a
 
 #### 7. Project memory index + `repo_search` tool
 
-**Pattern:** SmallHarness `project_memory.rs` — workspace walk with `.gitignore`, per-file metadata (path, language, size, mtime, SHA-256, symbols, headings, imports, terms), stored at `{workspace}/.smolclaw/project-index.json` (path TBD). Powers:
+**Pattern:** SmallHarness `project_memory.rs` — workspace walk with `.gitignore`, per-file metadata (path, language, size, mtime, SHA-256, symbols, headings, imports, terms), stored at `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json` (resolved 2026-06-26, Q2 — was
+`{workspace}/.smolclaw/project-index.json`; see `autonomy-readiness.md` §3). Powers:
 
 - `repo_search` tool (ranked hits)
 - Optional compact repo map injection into system prompt for code-related user messages
@@ -419,17 +420,25 @@ All new code: C11, zero warnings, `ctest` coverage for pure logic.
 
 ---
 
-## 10. Open Questions
+## 10. Open Questions — RESOLVED 2026-06-26
 
-1. **Kconfig vs runtime-only:** Should `tool_selection: auto` and project memory be compile-time flags, runtime config, or both? Recommendation: runtime config for selection; Kconfig gate for project memory (new code volume).
+Decided in [`autonomy-readiness.md` §3](autonomy-readiness.md); summarized here.
 
-2. **Index path:** `{workspace}/.smolclaw/project-index.json` vs `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json` for multi-workspace gateway?
+1. **Kconfig vs runtime-only (Q1):** `tool_selection: auto` is **runtime config
+   only** (no flag); project memory **is** Kconfig-gated (`SC_ENABLE_PROJECT_MEMORY`,
+   default n) for code volume.
 
-3. **Warmup in gateway:** One warmup per agent instance at first turn, or per channel session? Recommendation: per agent instance, fingerprint-keyed.
+2. **Index path (Q2):** **`{SMOLCLAW_HOME}/indexes/{workspace-hash}.json`**
+   (`workspace-hash` = first 16 hex of `sha256(realpath(workspace_root))`) — not
+   in the user's repo.
 
-4. **Confirm UX on async channels:** Telegram/Discord cannot show unified diff — block write tools, summary-only confirm, or link to Web UI?
+3. **Warmup in gateway:** per agent instance, fingerprint-keyed (spec rec adopted).
 
-5. **Merge with code_graph:** Long-term, should `repo_search` call into `code_graph` for symbol data instead of duplicating regex extraction? Recommendation: shared symbol helper in v2 of task 7.
+4. **Confirm UX on async channels (Q3):** **summary-only confirm** (no raw diff),
+   fail-closed if no confirm path; full diff on CLI/Web only.
+
+5. **Merge with code_graph (Q7):** `repo_search` **v1 duplicates** lightweight
+   extraction (`TODO(shared-symbols)`); shared `sc_symbols` helper in v2.
 
 ---
 

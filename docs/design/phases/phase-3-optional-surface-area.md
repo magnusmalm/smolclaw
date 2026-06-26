@@ -82,6 +82,12 @@ Each mode sets:
 
 **Files:** `src/tools/registry.c`, `src/channels/cli.c`, `src/tools/filesystem.c`
 
+> **Decision (Q3, 2026-06-26):** async channels (Telegram/Discord) get a capped
+> **summary-only** confirm (tool/path/size, no raw diff) via the existing
+> tool-confirm reply flow; full unified diff only on interactive CLI + Web. If a
+> channel has no confirm path and `auto_confirm` is off, **deny** dangerous ops
+> (fail-closed). See `autonomy-readiness.md` §3.
+
 - [ ] `approval_policy`: `always` | `never` | `dangerous-only`
 - [ ] Diff preview on confirm for file edit/write (cap 80 lines display)
 - [ ] Session allow cache: always-for-tool, session-allow-exact-call

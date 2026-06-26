@@ -23,10 +23,10 @@ Two structural caveats:
   (real OAuth consent, a Signal daemon, a KVM host, a running Ollama). The agent
   can write the code + mock tests, but cannot *accept* those tasks alone.
 
-With the open questions decided (§3) and the external prerequisites provisioned
-or scoped to mock-acceptance (§4), roughly **70–80% of concrete tasks are
-autonomous-ready today**; the remainder are autonomous-to-implement but
-human-to-accept.
+The open questions are **now decided** (§3, 2026-06-26). With the external
+prerequisites provisioned or scoped to mock-acceptance (§4), roughly **70–80% of
+concrete tasks are autonomous-ready today**; the remainder are
+autonomous-to-implement but human-to-accept.
 
 ---
 
@@ -63,7 +63,7 @@ human-to-accept.
 | 1.2 per-turn aggregate cap | ✅ READY | |
 | 1.3 token-aware compaction | ✅ READY | Uses provider usage; mockable |
 | 1.4 reactive compaction on ctx error | ✅ READY | |
-| 1.5 adaptive tool selection (`auto`) | 🟡 GATED-DEC | Open Q1 (Kconfig vs runtime). Logic READY; acceptance benchmark wants live Ollama (🟠) |
+| 1.5 adaptive tool selection (`auto`) | ✅/🟠 | Q1 resolved: runtime config, default `fixed`. Logic READY; acceptance benchmark wants live Ollama |
 | 1.6 streaming inline tool-call buffer | ✅ READY | Port SmallHarness `agent.rs` tests |
 | 1.7 JSON-aware compaction | ✅ READY | |
 | 1.8 prompt-prefix warmup | 🟠 GATED-EXT | Logic READY; TTFT benchmark needs live Ollama/vLLM |
@@ -91,7 +91,7 @@ human-to-accept.
 |------|-----|------------------------|
 | 3.1 Signal channel MVP | 🟠 GATED-EXT | Code + mock_http READY; **real `signal-cli` daemon + test number** for smoke test |
 | 3.2 operator mode presets | ✅ READY | |
-| 3.3 enhanced tool confirmation | 🟡 GATED-DEC | Open Q3 (async confirm UX). Core READY; async behavior needs a decision |
+| 3.3 enhanced tool confirmation | ✅ READY | Q3 resolved: summary-only async confirm, fail-closed; full diff CLI/Web only |
 | 3.4 X `note_tweet` | ✅ READY | Premise verified (`format_tweet` already handles it) |
 | 3.5 notify Slack/ntfy | ✅ READY | "Ship only if trivial" |
 | 3.6 subagent deny matrices | ✅ READY | |
@@ -107,12 +107,12 @@ human-to-accept.
 | 4.2 MCP capability sandbox | ✅ READY | Landlock/seccomp tests on Linux |
 | 4.3 Anthropic prompt caching | 🟠 GATED-EXT | Logic READY; real verification needs an Anthropic key |
 | 4.4 old result compression | ✅ READY | Uses existing transform hook |
-| 4.5 project memory + repo_search | 🟡 GATED-DEC | Open Q2 (index path). Large (800–1,200 LOC); logic READY |
+| 4.5 project memory + repo_search | ✅ READY | Q2 resolved: `{SMOLCLAW_HOME}/indexes/<hash>.json`; Q7: v1 own extraction. Large (800–1,200 LOC) |
 | 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |
 | 4.7 prompt budget CLI | ✅ READY | |
 | 4.8 remaining audit mediums | ✅ READY | M-2,4,5,6,7,9,10 |
 | 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |
-| 4.10 updater split spike | 🟡 GATED-DEC | Open Q4 (research decision, implement only if >50 KB proven) |
+| 4.10 updater split spike | ✅ READY | Q4 resolved: no split; measure under section-GC (0.4), revisit only if >50 KB proven |
 | 4.11 global `session_search` | ✅ READY | Kconfig default n |
 | 4.12 agent-initiated compact tool | ✅ READY | After 2.10 slash `/compress` |
 | 4.13 post-turn memory review | ✅ READY | Opt-in; acceptance mockable (aux provider optional) |
@@ -126,26 +126,58 @@ run must **skip** Phase 5.
 
 ---
 
-## 3. Open-question checklist (resolve BEFORE handoff)
+## 3. Open-question resolutions (decided 2026-06-26)
 
-The mantra forbids baseless assumptions. Decide and bake these into the docs so
-the agent never guesses:
+All seven are **resolved**. Decisions apply the smol contract (Kconfig
+`default n` above ~50 KB, no new deps, reuse infra) and the mantra
+(work > right > fast). The owner may override any — update here *and* the
+cited phase task. Two are flagged **[owner-veto candidate]**.
 
-- [ ] **Q1 — adaptive tools gating** (blocks 1.5): Kconfig-gated, runtime-only,
-  or both? *(spec recommendation: runtime config.)*
-- [ ] **Q2 — project-memory index path** (blocks 4.5):
-  `{workspace}/.smolclaw/project-index.json` vs hashed under `SMOLCLAW_HOME`?
-- [ ] **Q3 — async confirm UX** (blocks 3.3 / shapes 3.1, 2.10): on Telegram/
-  Discord — block write tools, summary-only confirm, or Web-UI link?
-- [ ] **Q4 — updater split** (blocks 4.10): separate `smolclaw-updater` binary
-  vs rely on LTO + `--gc-sections` only?
-- [ ] **Q5 — Phase 5 promotion metrics**: what session-size / MCP-count / demand
-  thresholds pull an item out of the parking lot?
-- [ ] **Q6 — xAI OAuth Kconfig default** (shapes 2.1): `SC_ENABLE_XAI_OAUTH`
-  default `y`, or `select`ed by the xai provider? `~/.grok/auth.json` interop in
-  or out of MVP?
-- [ ] **Q7 — repo_search ↔ code_graph** (shapes 4.5): share a symbol helper now
-  or duplicate extraction in v1?
+- [x] **Q1 — adaptive tools gating (1.5): RUNTIME CONFIG ONLY; no Kconfig flag; default `fixed`.**
+  150–250 LOC / ~+5 KB is far below the +50 KB gating threshold and defaults to
+  current behavior, so a compile-time flag is not justified. Field
+  `agents.defaults.tool_selection: "fixed" | "auto"`. (Matches spec rec.)
+
+- [x] **Q2 — project-memory index path (4.5): `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json`.**
+  Keep all smolclaw state together (sessions, memory, vault, `auth.json` already
+  live under `~/.smolclaw/`); never write an index into the user's repo (no VCS
+  noise, no per-workspace `.gitignore` burden); multi-workspace-gateway-safe.
+  `workspace-hash` = first 16 hex of `sha256(realpath(workspace_root))`.
+
+- [x] **Q3 — async confirm UX (3.3; shapes 3.1, 2.10): SUMMARY-ONLY confirm; fail-closed.**
+  Async channels (Telegram/Discord) get a capped text summary (tool, path,
+  change size — **no raw diff**) routed through the existing tool-confirm reply
+  flow. Full unified diff only on interactive CLI + Web. If a channel offers no
+  confirm path and `auto_confirm` is off, **deny** dangerous ops (fail-closed) —
+  never silently allow. **[owner-veto candidate — security-flavored UX call]**
+
+- [x] **Q4 — updater split (4.10): DO NOT SPLIT; rely on LTO + `--gc-sections` (task 0.4).**
+  curl/cJSON are linked unconditionally and OpenSSL is already conditional, so a
+  separate binary saves little while adding atomic-replace + version-sync
+  complexity. 4.10 reduces to a **measurement task**: record updater code size
+  with section-GC on/off; only revisit a split if >50 KB is proven *and* those
+  deps are not otherwise linked.
+
+- [x] **Q5 — Phase 5 promotion metrics: parked until ALL of (a) + (b) + (c).**
+  (a) **demand** — same item requested 3+ times OR blocking a deployment; AND
+  (b) **measured breach** — MCP tool count >30 (→ context pipeline / deferred
+  tool loading), sessions regularly >500 messages (→ session index), OR a
+  context-budget bug recurring ≥2× after Phase 1 (→ context pipeline); AND
+  (c) Phases 0–3 stable with no open HIGH audit item in the related path.
+  Rich TUI stays **permanently rejected** regardless.
+
+- [x] **Q6 — xAI OAuth Kconfig (2.1): `SC_ENABLE_XAI_OAUTH default n`, `depends on SC_ENABLE_XAI`.**
+  +40–60 KB sits at the smol gating threshold, so default-off keeps minimal
+  builds lean; only offered when the xai provider is compiled. **This overrides
+  the spec's tentative `default y`** — the spec itself invokes the smol contract,
+  and the ≤320 KB minimal budget wins. `~/.grok/auth.json` interop stays **out of
+  MVP** (Phase 2, read-only fallback). **[owner-veto candidate — contradicts spec default]**
+
+- [x] **Q7 — repo_search ↔ code_graph (4.5): v1 DUPLICATES extraction; share in v2.**
+  Don't couple two subsystems before repo_search's ranking needs are known (work
+  before right). v1 ships lightweight term/symbol extraction with a
+  `TODO(shared-symbols)` marker; a shared `sc_symbols` helper lands in v2 once
+  validated. (Matches spec rec.)
 
 ---
 

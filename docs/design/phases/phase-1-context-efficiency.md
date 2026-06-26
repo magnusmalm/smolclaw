@@ -65,6 +65,10 @@
 
 **Files:** new `src/tools/tool_selection.c`, `src/agent_turn.c`, `src/config.c`
 
+> **Decision (Q1, 2026-06-26):** runtime config only — **no Kconfig flag**
+> (+5 KB is below the gating threshold and the default is no-op). See
+> `autonomy-readiness.md` §3.
+
 - [ ] Config: `tool_selection`: `"fixed"` | `"auto"` (default **`fixed`**)
 - [ ] Keyword heuristics: chat → no tools; fileish → read/search; editish → write tools; shellish → exec
 - [ ] Ceiling = enabled tool pool (Kconfig + config allowlist)

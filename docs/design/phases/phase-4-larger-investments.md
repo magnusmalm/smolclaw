@@ -103,12 +103,19 @@ auxiliary model path uses same provider factory).
 
 **Files:** new `src/tools/project_memory.c`, `src/tools/repo_search.c`
 
+> **Decisions (2026-06-26):** Q2 — store the index at
+> **`{SMOLCLAW_HOME}/indexes/{workspace-hash}.json`** (`workspace-hash` = first 16
+> hex of `sha256(realpath(workspace_root))`), **not** inside the user's repo.
+> Q7 — v1 ships its **own lightweight extraction** with a `TODO(shared-symbols)`
+> marker; the shared `sc_symbols` helper with `code_graph` lands in v2. See
+> `autonomy-readiness.md` §3.
+
 - [ ] Index: path, language, size, mtime, SHA-256, symbols, imports, terms
-- [ ] Storage: `{workspace}/.smolclaw/project-index.json` (path TBD in open question)
+- [ ] Storage: `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json` (Q2 resolved)
 - [ ] `/index` equivalent via CLI or tool actions: build, refresh, status
 - [ ] `repo_search` tool for ranked hits
 - [ ] Optional system prompt injection for code questions (local providers only by default)
-- [ ] Complements `code_graph` — do not duplicate symbol extraction long-term (shared helper later)
+- [ ] v1 own extraction (`TODO(shared-symbols)`); share with `code_graph` in v2 (Q7)
 - [ ] Kconfig **default n**
 
 ### 4.6 Local provider doctor
@@ -156,8 +163,14 @@ Prioritize by production impact.
 
 **Source:** todo.md
 
-- [ ] Time-boxed evaluation: separate `smolclaw-updater` binary vs LTO dead-code elimination
-- [ ] Document recommendation; implement only if >50 KB savings proven
+> **Decision (Q4, 2026-06-26): DO NOT SPLIT.** curl/cJSON are linked
+> unconditionally and OpenSSL is already conditional, so a separate binary saves
+> little while adding atomic-replace + version-sync complexity. This task reduces
+> to **measurement only**: record updater code size with section-GC (task 0.4)
+> on/off. See `autonomy-readiness.md` §3.
+
+- [ ] Measure updater code size with/without `--gc-sections` (task 0.4)
+- [ ] Revisit a split **only** if >50 KB savings is proven *and* the deps are not otherwise linked
 
 ### 4.11 Global session search
 

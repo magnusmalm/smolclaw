@@ -57,7 +57,9 @@ Deliverables:
 - [ ] `smolclaw auth login|status|logout|refresh xai`
 - [ ] `--no-browser` for SSH/VPS
 - [ ] Provider aliases: `xai-oauth`, `grok-oauth`
-- [ ] Kconfig `SC_ENABLE_XAI_OAUTH` (default y or tied to xAI provider)
+- [ ] Kconfig `SC_ENABLE_XAI_OAUTH` — **default n, `depends on SC_ENABLE_XAI`** (Q6, 2026-06-26:
+  +40–60 KB → keep minimal builds lean; overrides spec's tentative `default y`). `~/.grok/auth.json`
+  interop stays out of MVP (Phase 2).
 - [ ] ≥90% line coverage on `xai_oauth.c`; mock HTTP tests
 
 **Smol contract:** <650 LOC, <60 KB binary, zero new deps.

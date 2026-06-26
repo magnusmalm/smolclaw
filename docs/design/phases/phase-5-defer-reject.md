@@ -147,6 +147,13 @@ Use this checklist before scheduling a deferred item:
 4. **Smol review** — Kconfig gate + LOC/binary budget approved
 5. **Phase 0–3 stable** — no open HIGH audit items in related code paths
 
+**Concrete thresholds (Q5, 2026-06-26):** promote only when (a) demand ≥3 or a
+deployment blocker, AND (b) a measured breach — **MCP tools >30** → context
+pipeline (2.1) / deferred tool loading; **sessions regularly >500 messages** →
+session index (2.2); **context-budget bug recurring ≥2× after Phase 1** →
+context pipeline — AND (c) Phases 0–3 stable. **Rich TUI stays permanently
+rejected.** See `autonomy-readiness.md` §3.
+
 ---
 
 ## 6. Review schedule

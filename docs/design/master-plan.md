@@ -296,13 +296,19 @@ Track in phase-0 doc: binary bytes, peak RSS (optional), test count.
 
 ---
 
-## 9. Open Questions (cross-phase)
+## 9. Open Questions (cross-phase) — RESOLVED 2026-06-26
 
-1. Should Phase 1 adaptive tools be runtime-only or also Kconfig-gated?
-2. Project memory index path: per-workspace vs hashed under `SMOLCLAW_HOME`?
-3. Confirm UX on async channels (Telegram/Discord) for diff previews — block, summary-only, or Web UI link?
-4. Updater split: separate binary vs rely on LTO+gc-sections only?
-5. When to promote Phase 5 items — what metrics trigger (session size, MCP tool count, user demand)?
+All cross-phase questions are decided; see
+[`autonomy-readiness.md` §3](autonomy-readiness.md) for full rationale.
+
+1. Adaptive tools gating → **runtime config only, default `fixed`** (no Kconfig flag). *(Q1)*
+2. Project memory index path → **`{SMOLCLAW_HOME}/indexes/{workspace-hash}.json`** (not in-repo). *(Q2)*
+3. Async confirm UX → **summary-only confirm, fail-closed**; full diff on CLI/Web only. *(Q3)*
+4. Updater split → **no split**; rely on LTO + `--gc-sections` (task 0.4); 4.10 becomes measure-only. *(Q4)*
+5. Phase 5 promotion → **demand (3+) AND a measured threshold breach AND P0–3 stable**. *(Q5)*
+
+Spec-level decisions: xAI OAuth `SC_ENABLE_XAI_OAUTH` **default n / `depends on SC_ENABLE_XAI`** (Q6);
+`repo_search` **v1 duplicates** extraction, shares with `code_graph` in v2 (Q7).
 
 ---
 
