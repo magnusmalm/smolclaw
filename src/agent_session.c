@@ -13,6 +13,7 @@
 #include "agent_internal.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include "util/task.h"
 #include <string.h>
@@ -171,7 +172,23 @@ static void do_consolidate(sc_summarize_args_t *args, const char *summary)
     sc_llm_message_free_fields(&msgs[1]);
 }
 
-static void do_summarize(sc_summarize_args_t *args)
+static int summarize_sleep_ms(int ms, volatile atomic_int *cancel)
+{
+    while (ms > 0) {
+        if (cancel && atomic_load(cancel))
+            return -1;
+        int step = ms > 50 ? 50 : ms;
+        struct timespec ts = {
+            .tv_sec = step / 1000,
+            .tv_nsec = (long)(step % 1000) * 1000000L
+        };
+        nanosleep(&ts, NULL);
+        ms -= step;
+    }
+    return 0;
+}
+
+static void do_summarize(sc_summarize_args_t *args, volatile atomic_int *cancel)
 {
     char *transcript_str = args->transcript;
     args->transcript = NULL;  /* take ownership */
@@ -202,13 +219,15 @@ static void do_summarize(sc_summarize_args_t *args)
     sc_llm_response_t *resp = NULL;
     double sum_elapsed = 0;
     for (int attempt = 0; attempt < 3; attempt++) {
+        if (cancel && atomic_load(cancel))
+            goto cancelled;
+
         if (attempt > 0) {
             int backoff_ms = 1000 * (1 << attempt);  /* 2s, 4s */
             SC_LOG_INFO("agent", "Summarization retry %d/%d (backoff %dms)",
                         attempt + 1, 3, backoff_ms);
-            struct timespec ts = { .tv_sec = backoff_ms / 1000,
-                                   .tv_nsec = (backoff_ms % 1000) * 1000000L };
-            nanosleep(&ts, NULL);
+            if (summarize_sleep_ms(backoff_ms, cancel) < 0)
+                goto cancelled;
         }
 
         clock_gettime(CLOCK_MONOTONIC, &sum_t0);
@@ -248,14 +267,17 @@ static void do_summarize(sc_summarize_args_t *args)
     /* Consolidate using the summary we just produced */
     if (args->result_summary)
         do_consolidate(args, args->result_summary);
+    return;
+
+cancelled:
+    SC_LOG_INFO("agent", "Summarization cancelled");
 }
 
 /* Task function for async summarization (sc_task_fn signature) */
 static void *summarize_task_fn(void *arg, volatile atomic_int *cancel)
 {
-    (void)cancel;  /* LLM call is atomic, not cancellable mid-flight */
     sc_summarize_args_t *args = arg;
-    do_summarize(args);
+    do_summarize(args, cancel);
     return args;  /* result read by main thread */
 }
 
@@ -289,7 +311,7 @@ static void summarize_sync(sc_agent_t *agent, sc_summarize_args_t *args)
 {
     /* Use agent's provider directly (safe — we're on the main thread) */
     args->provider = agent->provider;
-    do_summarize(args);
+    do_summarize(args, NULL);
 
     if (args->result_summary) {
         sc_session_set_summary(agent->sessions, args->session_key,

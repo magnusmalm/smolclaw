@@ -31,6 +31,7 @@
 #include "providers/factory.h"
 #include "memory.h"
 #include "util/str.h"
+#include "util/task.h"
 #include "util/secrets.h"
 #include "util/prompt_guard.h"
 
@@ -1067,7 +1068,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 void sc_agent_free(sc_agent_t *agent)
 {
     if (!agent) return;
-    /* Drain outstanding summarization thread before freeing resources */
+    /* Cancel and drain outstanding summarization before freeing resources */
+    if (agent->summarize_task)
+        sc_task_cancel(agent->summarize_task);
     sc_drain_summarize(agent);
     sc_arena_free(agent->arena);
     sc_skill_registry_free(agent->skills);

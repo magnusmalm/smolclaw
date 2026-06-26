@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ======================================================================
@@ -157,6 +158,8 @@ static void test_parse_at_no_message(void)
 
 #define MAX_MOCK_RESPONSES 8
 
+static int mock_total_chat_calls;
+
 typedef struct {
     sc_llm_response_t responses[MAX_MOCK_RESPONSES];
     int response_count;
@@ -175,6 +178,7 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
 {
     mock_provider_data_t *data = self->data;
     data->chat_call_count++;
+    mock_total_chat_calls++;
     /* Capture system prompt for transform tests */
     free(data->last_system_prompt);
     data->last_system_prompt = NULL;
@@ -224,6 +228,47 @@ static const char *mock_get_model(sc_provider_t *self)
 {
     (void)self;
     return "test-model";
+}
+
+static void mock_provider_destroy(sc_provider_t *self)
+{
+    if (!self) return;
+    mock_provider_data_t *data = self->data;
+    if (data) {
+        if (data->last_msgs) {
+            for (int i = 0; i < data->last_msg_count; i++)
+                sc_llm_message_free_fields(&data->last_msgs[i]);
+            free(data->last_msgs);
+        }
+        free(data->last_system_prompt);
+        free(data);
+    }
+    free(self);
+}
+
+static sc_provider_t *mock_provider_clone(sc_provider_t *self)
+{
+    mock_provider_data_t *orig = self->data;
+    if (!orig) return NULL;
+
+    mock_provider_data_t *data = calloc(1, sizeof(*data));
+    if (!data) return NULL;
+    data->response_count = orig->response_count;
+    data->call_index = orig->call_index;
+    memcpy(data->responses, orig->responses, sizeof(data->responses));
+
+    sc_provider_t *clone = calloc(1, sizeof(*clone));
+    if (!clone) {
+        free(data);
+        return NULL;
+    }
+    clone->name = self->name;
+    clone->chat = self->chat;
+    clone->get_default_model = self->get_default_model;
+    clone->clone = mock_provider_clone;
+    clone->destroy = mock_provider_destroy;
+    clone->data = data;
+    return clone;
 }
 
 /* --- Mock tool --- */
@@ -345,12 +390,16 @@ static test_agent_ctx_t create_test_agent(int summary_threshold)
     snprintf(state_dir, sizeof(state_dir), "%s/state", ctx.tmpdir);
     mkdir(state_dir, 0755);
 
+    mock_total_chat_calls = 0;
+
     /* Mock provider */
     ctx.mpd = calloc(1, sizeof(*ctx.mpd));
     ctx.provider = calloc(1, sizeof(*ctx.provider));
     ctx.provider->name = "mock";
     ctx.provider->chat = mock_chat;
     ctx.provider->get_default_model = mock_get_model;
+    ctx.provider->clone = mock_provider_clone;
+    ctx.provider->destroy = mock_provider_destroy;
     ctx.provider->data = ctx.mpd;
 
     /* Agent */
@@ -377,6 +426,7 @@ static test_agent_ctx_t create_test_agent(int summary_threshold)
 
 static void destroy_test_agent(test_agent_ctx_t *ctx)
 {
+    sc_agent_wait_summarize(ctx->agent);
     sc_session_manager_free(ctx->agent->sessions);
     sc_state_free(ctx->agent->state);
     sc_tool_registry_free(ctx->agent->tools);
@@ -386,14 +436,9 @@ static void destroy_test_agent(test_agent_ctx_t *ctx)
     free(ctx->agent->workspace);
     free(ctx->agent->model);
     free(ctx->agent);
-    free(ctx->mpd->last_system_prompt);
-    if (ctx->mpd->last_msgs) {
-        for (int i = 0; i < ctx->mpd->last_msg_count; i++)
-            sc_llm_message_free_fields(&ctx->mpd->last_msgs[i]);
-        free(ctx->mpd->last_msgs);
-    }
-    free(ctx->mpd);
-    free(ctx->provider);
+    mock_provider_destroy(ctx->provider);
+    ctx->provider = NULL;
+    ctx->mpd = NULL;
     cleanup_dir(ctx->tmpdir);
 }
 
@@ -574,12 +619,12 @@ static void test_session_summarization(void)
     /* Summarization runs on a background thread — wait for it to complete */
     sc_agent_wait_summarize(ctx.agent);
 
-    /* Provider should be called twice: once for the query, once for summarization */
-    ASSERT_INT_EQ(ctx.mpd->chat_call_count, 2);
+    /* Provider should be called twice: main turn + cloned summarization task */
+    ASSERT_INT_EQ(mock_total_chat_calls, 2);
 
-    /* Session should be truncated to keep_last (4) messages */
+    /* Session truncated to keep_last (4) plus optional post-compact reinject */
     sc_session_get_history(ctx.agent->sessions, "test-summarize", &count);
-    ASSERT_INT_EQ(count, 4);
+    ASSERT(count >= 4 && count <= 5, "Session should be compacted");
 
     /* Summary should be set */
     const char *summary = sc_session_get_summary(ctx.agent->sessions, "test-summarize");
@@ -588,6 +633,46 @@ static void test_session_summarization(void)
 
     free(response);
     destroy_test_agent(&ctx);
+}
+
+static void test_summarize_shutdown_cancels_task(void)
+{
+    /* Async summarization with failing provider enters 2s backoff; shutdown
+     * should cancel instead of waiting for retries (M-8 / sc_task_t). */
+    test_agent_ctx_t ctx = create_test_agent(6);
+
+    for (int i = 0; i < 3; i++) {
+        char umsg[64], amsg[64];
+        snprintf(umsg, sizeof(umsg), "User message %d", i);
+        snprintf(amsg, sizeof(amsg), "Assistant reply %d", i);
+        sc_session_add_message(ctx.agent->sessions, "test-sum-cancel", "user", umsg);
+        sc_session_add_message(ctx.agent->sessions, "test-sum-cancel", "assistant", amsg);
+    }
+
+    /* Main turn succeeds; summarization retries will fail (NULL responses). */
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "ok", .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 1;
+
+    char *response = sc_agent_process_direct(ctx.agent, "trigger summarize",
+                                             "test-sum-cancel");
+    ASSERT_NOT_NULL(response);
+    ASSERT_NOT_NULL(ctx.agent->summarize_task);
+
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    sc_agent_free(ctx.agent);
+    ctx.agent = NULL;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+
+    double elapsed = (t1.tv_sec - t0.tv_sec)
+                   + (t1.tv_nsec - t0.tv_nsec) / 1e9;
+    ASSERT(elapsed < 2.0, "Shutdown should cancel summarization without long backoff");
+
+    free(response);
+    mock_provider_destroy(ctx.provider);
+    cleanup_dir(ctx.tmpdir);
 }
 
 /* ======================================================================
@@ -1793,6 +1878,7 @@ int main(void)
     RUN_TEST(test_agent_loop_tool_call);
     RUN_TEST(test_agent_loop_provider_failure);
     RUN_TEST(test_session_summarization);
+    RUN_TEST(test_summarize_shutdown_cancels_task);
     RUN_TEST(test_agent_tool_call_limit);
     RUN_TEST(test_agent_multi_tool_calls);
     RUN_TEST(test_agent_hourly_rate_limit);

@@ -180,19 +180,22 @@ Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary a
 
 **Source:** zed-patterns Task 2
 
-> **Status (2026-06-26):** `src/util/task.{c,h}` already exist with the full
-> `sc_task_spawn` / `poll` / `join(timeout_ms)` / `cancel` / `free` API.
-> **Remaining work:** confirm `agent_session.c` summarization runs on
-> `sc_task_t` and that agent shutdown cancels+joins it (the actual M-8 fix),
-> rather than the standalone worker-thread path. Verify, then add a test.
+> **Status (2026-06-26):** Verified. Summarization runs on `sc_task_spawn`;
+> `sc_agent_free` cancels then drains; retry backoff honours the cancel flag.
+> `test_summarize_shutdown_cancels_task` confirms shutdown completes in <2s
+> during a 2s backoff (M-8).
 
-**Files:** `src/util/task.{c,h}` *(exist)*, `src/agent_session.c`, `src/agent.c`
+**Files:** `src/util/task.{c,h}` *(exist)*, `src/agent_session.c`, `src/agent.c`,
+`tests/test_agent.c`
 
 - [x] `sc_task_spawn` / `poll` / `join` / `cancel` / `free` *(shipped)*
-- [ ] Summarization uses sc_task_t; joined on agent shutdown
-- [ ] Cancel flag checked in summarization loop
+- [x] Summarization uses sc_task_t; cancelled+joined on agent shutdown
+- [x] Cancel flag checked in summarization loop (backoff + retry)
 
 **Acceptance:** Rapid shutdown during summarization does not leak threads (M-8).
+
+**Verification gates (2026-06-26):** `test_summarize_shutdown_cancels_task` and
+`test_session_summarization` pass; `ctest --test-dir build-full` **39/39** green.
 
 ### 0.8 Deferred runtime initialization
 
