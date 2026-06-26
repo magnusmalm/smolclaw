@@ -242,6 +242,8 @@ int sc_vault_init(sc_vault_t *v, const char *password)
     return sc_vault_save(v);
 }
 
+/* Lazy vault: only entered on explicit vault:// config refs or vault CLI
+ * subcommands — not from sc_agent_new (deferred-initialization.md item 4). */
 int sc_vault_unlock(sc_vault_t *v, const char *password)
 {
     if (!v || !password) return -1;

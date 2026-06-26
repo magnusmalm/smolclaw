@@ -3,7 +3,7 @@
  *
  * The markdown files in memory/ are the source of truth.
  * This module maintains a full-text search index that is rebuilt
- * on startup and updated incrementally on writes.
+ * lazily on first search and updated incrementally on writes.
  *
  * Features:
  * - Content hashing (FNV1a) for incremental rebuild — skip unchanged files
@@ -53,6 +53,9 @@ static const char *const MEMORY_MIGRATIONS[] = { MEMORY_MIG_V1 };
 
 struct sc_memory_index {
     pthread_mutex_t lock;
+    int rebuild_done;
+    char *pending_mem_dir;
+    char *pending_ctx_dir;
     sqlite3 *db;
     sqlite3_stmt *stmt_put;
     sqlite3_stmt *stmt_remove;
@@ -285,9 +288,64 @@ void sc_memory_index_free(sc_memory_index_t *idx)
     sqlite3_finalize(idx->stmt_search_prefix_recency);
     sqlite3_finalize(idx->stmt_remove_chunks);
     sqlite3_close(idx->db);
+    free(idx->pending_mem_dir);
+    free(idx->pending_ctx_dir);
     pthread_mutex_unlock(&idx->lock);
     pthread_mutex_destroy(&idx->lock);
     free(idx);
+}
+
+void sc_memory_index_defer_rebuild(sc_memory_index_t *idx, const char *memory_dir)
+{
+    if (!idx || !memory_dir) return;
+    free(idx->pending_mem_dir);
+    idx->pending_mem_dir = sc_strdup(memory_dir);
+}
+
+void sc_memory_index_defer_ctx_rebuild(sc_memory_index_t *idx, const char *ctx_dir)
+{
+    if (!idx || !ctx_dir) return;
+    free(idx->pending_ctx_dir);
+    idx->pending_ctx_dir = sc_strdup(ctx_dir);
+}
+
+int sc_memory_index_rebuild_is_pending(const sc_memory_index_t *idx)
+{
+    if (!idx) return 0;
+    return !idx->rebuild_done &&
+           (idx->pending_mem_dir != NULL || idx->pending_ctx_dir != NULL);
+}
+
+static void memory_index_skip_deferred(sc_memory_index_t *idx)
+{
+    if (!idx || idx->rebuild_done) return;
+    free(idx->pending_mem_dir);
+    free(idx->pending_ctx_dir);
+    idx->pending_mem_dir = NULL;
+    idx->pending_ctx_dir = NULL;
+    idx->rebuild_done = 1;
+}
+
+static void memory_index_ensure_rebuilt(sc_memory_index_t *idx)
+{
+    if (!idx || idx->rebuild_done) return;
+
+    if (idx->pending_mem_dir)
+        sc_memory_index_rebuild(idx, idx->pending_mem_dir);
+    if (idx->pending_ctx_dir) {
+        static const char *ctx_exts[] = {
+            ".md", ".txt", ".yaml", ".yml",
+            ".json", ".sql", ".toml"
+        };
+        sc_memory_index_rebuild_dir(idx, idx->pending_ctx_dir, "ctx:",
+                                  ctx_exts, 7);
+    }
+
+    free(idx->pending_mem_dir);
+    free(idx->pending_ctx_dir);
+    idx->pending_mem_dir = NULL;
+    idx->pending_ctx_dir = NULL;
+    idx->rebuild_done = 1;
 }
 
 int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
@@ -324,6 +382,7 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
     sqlite3_step(idx->stmt_hash_put);
 
     SC_LOG_DEBUG(LOG_TAG, "Indexed '%s' (%d bytes)", source, (int)strlen(content));
+    memory_index_skip_deferred(idx);
     pthread_mutex_unlock(&idx->lock);
     return 0;
 }
@@ -379,6 +438,7 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
         sqlite3_bind_text(idx->stmt_hash_put, 2, hex, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(idx->stmt_hash_put, 3, 0);
         sqlite3_step(idx->stmt_hash_put);
+        memory_index_skip_deferred(idx);
         pthread_mutex_unlock(&idx->lock);
         return 0;
     }
@@ -453,6 +513,7 @@ int sc_memory_index_put_chunked(sc_memory_index_t *idx, const char *source,
 
     SC_LOG_DEBUG(LOG_TAG, "Chunked '%s': %d lines → %d chunks",
                  source, lines, chunk_num);
+    memory_index_skip_deferred(idx);
     pthread_mutex_unlock(&idx->lock);
     return 0;
 }
@@ -905,6 +966,7 @@ sc_memory_search_result_t *sc_memory_index_search(sc_memory_index_t *idx,
                                                    int *out_count)
 {
     if (!idx) { if (out_count) *out_count = 0; return NULL; }
+    memory_index_ensure_rebuilt(idx);
     pthread_mutex_lock(&idx->lock);
     sc_memory_search_result_t *results = do_search(
         idx, query, idx->stmt_search, idx->stmt_search_recency,
@@ -918,8 +980,12 @@ sc_memory_search_result_t *sc_memory_index_search_prefix(
     int max_results, int *out_count)
 {
     if (!idx) { if (out_count) *out_count = 0; return NULL; }
-    if (!prefix || !prefix[0])
+    if (!prefix || !prefix[0]) {
+        memory_index_ensure_rebuilt(idx);
         return sc_memory_index_search(idx, query, max_results, out_count);
+    }
+
+    memory_index_ensure_rebuilt(idx);
 
     /* Build LIKE pattern: "ctx:%" */
     sc_strbuf_t sb;

@@ -15,6 +15,8 @@ typedef struct {
     int count;
 } sc_deny_list_t;
 
+const sc_deny_list_t *sc_deny_list_get(void);
+int  sc_deny_list_is_initialized(void);
 int  sc_deny_list_init(sc_deny_list_t *dl);
 /* Testable entry point: compile an arbitrary pattern array. */
 int  sc_deny_list_init_from(sc_deny_list_t *dl, const char **patterns, int count);

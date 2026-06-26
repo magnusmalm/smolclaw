@@ -80,6 +80,42 @@ static void test_index_create_and_free(void)
     cleanup_tmpdir(dir);
 }
 
+static void test_deferred_rebuild_on_first_search(void)
+{
+    char *dir = make_tmpdir();
+    char memdir[128];
+    snprintf(memdir, sizeof(memdir), "%s/memory", dir);
+    ASSERT_INT_EQ(mkdir(memdir, 0755), 0);
+
+    char memfile[160];
+    snprintf(memfile, sizeof(memfile), "%s/MEMORY.md", memdir);
+    write_file(memfile,
+        "Deferred rebuild should index this on first search.");
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/test.db", dir);
+    char *db_path = sc_strbuf_finish(&sb);
+
+    sc_memory_index_t *idx = sc_memory_index_new(db_path);
+    ASSERT_NOT_NULL(idx);
+    sc_memory_index_defer_rebuild(idx, memdir);
+    ASSERT(sc_memory_index_rebuild_is_pending(idx),
+           "Rebuild should be pending before first search");
+
+    int count = 0;
+    sc_memory_search_result_t *results = sc_memory_index_search(
+        idx, "deferred rebuild", 5, &count);
+    ASSERT(!sc_memory_index_rebuild_is_pending(idx),
+           "First search should run deferred rebuild");
+    ASSERT(count > 0, "Deferred rebuild should index memory files");
+    sc_memory_search_results_free(results, count);
+
+    sc_memory_index_free(idx);
+    free(db_path);
+    cleanup_tmpdir(dir);
+}
+
 static void test_index_put_and_search(void)
 {
     char *dir = make_tmpdir();
@@ -627,6 +663,7 @@ static void test_index_empty_content(void)
 int main(void)
 {
     RUN_TEST(test_index_create_and_free);
+    RUN_TEST(test_deferred_rebuild_on_first_search);
     RUN_TEST(test_index_put_and_search);
     RUN_TEST(test_index_search_no_results);
     RUN_TEST(test_index_put_replaces);

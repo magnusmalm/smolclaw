@@ -183,6 +183,8 @@ sc_ws_t *sc_ws_connect(const char *url)
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     /* TLS handshake */
+    /* Lazy TLS: only reached from WSS client connect, not agent init
+     * (docs/design/deferred-initialization.md item 3). */
     SSL_CTX *ssl_ctx = SSL_CTX_new(TLS_client_method());
     if (!ssl_ctx) {
         close(fd);

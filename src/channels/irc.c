@@ -473,6 +473,8 @@ static int irc_connect(irc_data_t *id)
     }
 
     if (id->use_tls) {
+        /* Lazy TLS: only reached from IRC channel connect, not agent init
+         * (docs/design/deferred-initialization.md item 3). */
         id->ssl_ctx = SSL_CTX_new(TLS_client_method());
         if (!id->ssl_ctx) {
             SC_LOG_ERROR(IRC_TAG, "SSL_CTX_new failed");

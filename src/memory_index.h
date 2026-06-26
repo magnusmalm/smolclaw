@@ -28,6 +28,15 @@ int sc_memory_index_put(sc_memory_index_t *idx, const char *source,
 /* Remove a document by source key. */
 int sc_memory_index_remove(sc_memory_index_t *idx, const char *source);
 
+/* Schedule filesystem rebuild on first search (deferred init). */
+void sc_memory_index_defer_rebuild(sc_memory_index_t *idx, const char *memory_dir);
+
+/* Schedule context-dir rebuild on first search (dir must exist). */
+void sc_memory_index_defer_ctx_rebuild(sc_memory_index_t *idx, const char *ctx_dir);
+
+/* True while a deferred rebuild has not yet run (for tests). */
+int sc_memory_index_rebuild_is_pending(const sc_memory_index_t *idx);
+
 /* Rebuild entire index from memory directory. Scans all .md files.
  * Uses content hashing to skip unchanged files (incremental). */
 int sc_memory_index_rebuild(sc_memory_index_t *idx, const char *memory_dir);

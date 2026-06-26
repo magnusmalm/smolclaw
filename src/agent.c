@@ -316,27 +316,20 @@ void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
             sc_strbuf_init(&mem_sb);
             sc_strbuf_appendf(&mem_sb, "%s/memory", workspace);
             char *mem_dir = sc_strbuf_finish(&mem_sb);
-            sc_memory_index_rebuild(midx, mem_dir);
+            sc_memory_index_defer_rebuild(midx, mem_dir);
             free(mem_dir);
 
             sc_tool_registry_register(reg,
                                        sc_tool_memory_search_new(midx));
 
-            /* Index context artifacts directory if it exists */
             {
                 sc_strbuf_t ctx_sb;
                 sc_strbuf_init(&ctx_sb);
                 sc_strbuf_appendf(&ctx_sb, "%s/context", workspace);
                 char *ctx_dir = sc_strbuf_finish(&ctx_sb);
                 struct stat ctx_st;
-                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode)) {
-                    static const char *ctx_exts[] = {
-                        ".md", ".txt", ".yaml", ".yml",
-                        ".json", ".sql", ".toml"
-                    };
-                    sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
-                        ctx_exts, 7);
-                }
+                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode))
+                    sc_memory_index_defer_ctx_rebuild(midx, ctx_dir);
                 sc_tool_registry_register(reg,
                     sc_tool_context_search_new(midx));
                 free(ctx_dir);
@@ -531,7 +524,7 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
             sc_strbuf_init(&mem_sb);
             sc_strbuf_appendf(&mem_sb, "%s/memory", workspace);
             char *mem_dir = sc_strbuf_finish(&mem_sb);
-            sc_memory_index_rebuild(midx, mem_dir);
+            sc_memory_index_defer_rebuild(midx, mem_dir);
             free(mem_dir);
 
             agent->memory_index = midx;
@@ -544,21 +537,14 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
             sc_tool_memory_set_index_cb(mem_log_tool,
                                          memory_index_cb, midx);
 
-            /* Index context artifacts directory if it exists */
             {
                 sc_strbuf_t ctx_sb;
                 sc_strbuf_init(&ctx_sb);
                 sc_strbuf_appendf(&ctx_sb, "%s/context", workspace);
                 char *ctx_dir = sc_strbuf_finish(&ctx_sb);
                 struct stat ctx_st;
-                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode)) {
-                    static const char *ctx_exts[] = {
-                        ".md", ".txt", ".yaml", ".yml",
-                        ".json", ".sql", ".toml"
-                    };
-                    sc_memory_index_rebuild_dir(midx, ctx_dir, "ctx:",
-                        ctx_exts, 7);
-                }
+                if (stat(ctx_dir, &ctx_st) == 0 && S_ISDIR(ctx_st.st_mode))
+                    sc_memory_index_defer_ctx_rebuild(midx, ctx_dir);
                 sc_tool_registry_register(agent->tools,
                     sc_tool_context_search_new(midx));
                 free(ctx_dir);

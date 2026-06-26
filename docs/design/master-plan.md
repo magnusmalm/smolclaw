@@ -333,4 +333,4 @@ docs/design/
 
 ---
 
-**Next step:** Execute [Phase 0](phases/phase-0-safety-and-stability.md) — audit fixes and binary size baseline.
+**Next step:** Phase 0 complete (2026-06-26). Begin [Phase 1](phases/phase-1-context-efficiency.md) — context efficiency.

@@ -48,6 +48,30 @@ static void test_deny_list_production_patterns_compile(void)
     sc_deny_list_free(&dl);
 }
 
+static void test_deny_list_lazy_init(void)
+{
+    ASSERT_INT_EQ(sc_deny_list_is_initialized(), 0);
+
+    char ws_template[] = "/tmp/sc_lazy_deny_XXXXXX";
+    char *ws = mkdtemp(ws_template);
+    ASSERT_NOT_NULL(ws);
+
+    sc_tool_t *t = sc_tool_exec_new(ws, 0, 10000, 10);
+    ASSERT_NOT_NULL(t);
+    ASSERT_INT_EQ(sc_deny_list_is_initialized(), 0);
+
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "command", "echo ok");
+    sc_tool_result_t *r = t->execute(t, args, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(sc_deny_list_is_initialized(), 1);
+
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    t->destroy(t);
+    rmdir(ws);
+}
+
 static void test_chdir_failure_refuses_exec(void)
 {
     char ws_template[] = "/tmp/sc_chdir_test_XXXXXX";
@@ -126,6 +150,7 @@ int main(void)
     RUN_TEST(test_deny_list_init_invalid_pattern);
     RUN_TEST(test_deny_list_init_valid_pattern);
     RUN_TEST(test_deny_list_production_patterns_compile);
+    RUN_TEST(test_deny_list_lazy_init);
     RUN_TEST(test_chdir_failure_refuses_exec);
     RUN_TEST(test_working_dir_uses_resolved_path);
 

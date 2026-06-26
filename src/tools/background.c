@@ -85,7 +85,6 @@ void sc_bg_cleanup_all(void)
 typedef struct {
     char *workspace;
     int restrict_to_workspace;
-    sc_deny_list_t deny;
     int use_allowlist;
     char **allowed_commands;
     int allowed_count;
@@ -97,7 +96,7 @@ static void exec_bg_destroy(sc_tool_t *self)
     if (!self) return;
     exec_bg_data_t *d = self->data;
     if (d) {
-        sc_exec_data_free(&d->deny, d->allowed_commands,
+        sc_exec_data_free(NULL, d->allowed_commands,
                           d->allowed_count, d->workspace);
         free(d);
     }
@@ -139,7 +138,7 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
         return sc_tool_result_error("command is required");
 
     /* Safety guard */
-    const char *guard_err = sc_exec_guard_command(&d->deny, command,
+    const char *guard_err = sc_exec_guard_command(NULL, command,
         d->use_allowlist, d->allowed_commands, d->allowed_count,
         d->restrict_to_workspace);
     if (guard_err)
@@ -223,12 +222,6 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
 
     d->workspace = sc_strdup(workspace);
     d->restrict_to_workspace = restrict_to_workspace;
-    if (sc_deny_list_init(&d->deny) != 0) {
-        free(d->workspace);
-        free(d);
-        free(t);
-        return NULL;
-    }
 
     /* Initialize process table — refuse if active processes exist */
     pthread_mutex_lock(&bg_lock);
@@ -237,7 +230,6 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
             if (bg_procs[i].pid > 0) {
                 SC_LOG_ERROR("background", "Cannot reinitialize: active processes exist");
                 pthread_mutex_unlock(&bg_lock);
-                sc_deny_list_free(&d->deny);
                 free(d->workspace);
                 free(d);
                 free(t);
@@ -250,7 +242,6 @@ sc_tool_t *sc_tool_exec_bg_new(const char *workspace, int restrict_to_workspace,
     bg_procs = calloc((size_t)bg_max_procs, sizeof(sc_bg_process_t));
     pthread_mutex_unlock(&bg_lock);
     if (!bg_procs) {
-        sc_deny_list_free(&d->deny);
         free(d->workspace);
         free(d);
         free(t);

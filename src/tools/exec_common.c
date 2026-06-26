@@ -5,6 +5,7 @@
  * logic shared between shell.c and background.c.
  */
 
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -45,6 +46,25 @@ void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV])
 }
 
 /* ---------- Deny patterns ---------- */
+
+static sc_deny_list_t g_deny;
+static pthread_once_t g_deny_once = PTHREAD_ONCE_INIT;
+
+static void deny_do_init(void)
+{
+    sc_deny_list_init(&g_deny);
+}
+
+const sc_deny_list_t *sc_deny_list_get(void)
+{
+    pthread_once(&g_deny_once, deny_do_init);
+    return &g_deny;
+}
+
+int sc_deny_list_is_initialized(void)
+{
+    return g_deny.patterns != NULL;
+}
 
 int sc_deny_list_init_from(sc_deny_list_t *dl, const char **patterns, int count)
 {
@@ -220,6 +240,7 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
                                    int allowed_count,
                                    int restrict_to_workspace)
 {
+    const sc_deny_list_t *dl = deny ? deny : sc_deny_list_get();
     /* Reject commands with control characters that could cause
      * normalization-vs-execution mismatch (C-2 hardening) */
     for (const char *p = command; *p; p++) {
@@ -241,7 +262,7 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
         }
     }
 
-    if (sc_deny_list_matches(deny, normalized)) {
+    if (sc_deny_list_matches(dl, normalized)) {
         SC_LOG_WARN("exec", "Deny pattern blocked: %.200s", command);
         free(normalized);
         return "Command blocked by safety guard (dangerous pattern detected)";
@@ -341,7 +362,8 @@ void sc_exec_child(const char *command, const char *working_dir,
 void sc_exec_data_free(sc_deny_list_t *deny, char **allowed_commands,
                        int allowed_count, char *workspace)
 {
-    sc_deny_list_free(deny);
+    if (deny)
+        sc_deny_list_free(deny);
     for (int i = 0; i < allowed_count; i++)
         free(allowed_commands[i]);
     free(allowed_commands);

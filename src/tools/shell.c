@@ -38,7 +38,6 @@ typedef struct {
     int restrict_to_workspace;
     int max_output_chars;
     int timeout_secs;
-    sc_deny_list_t deny;
     int use_allowlist;
     char **allowed_commands;
     int allowed_count;
@@ -60,7 +59,7 @@ static void shell_destroy(sc_tool_t *self)
         for (int i = 0; i < d->tool_covered_count; i++)
             free(d->tool_covered_cmds[i]);
         free(d->tool_covered_cmds);
-        sc_exec_data_free(&d->deny, d->allowed_commands,
+        sc_exec_data_free(NULL, d->allowed_commands,
                           d->allowed_count, d->working_dir);
         free(d);
     }
@@ -204,7 +203,7 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
     }
 
     /* Safety guard */
-    const char *guard_err = sc_exec_guard_command(&d->deny, command,
+    const char *guard_err = sc_exec_guard_command(NULL, command,
         d->use_allowlist, d->allowed_commands, d->allowed_count,
         d->restrict_to_workspace);
     if (guard_err) {
@@ -346,13 +345,6 @@ sc_tool_t *sc_tool_exec_new(const char *working_dir, int restrict_to_workspace,
     d->restrict_to_workspace = restrict_to_workspace;
     d->max_output_chars = max_output_chars;
     d->timeout_secs = timeout_secs;
-    if (sc_deny_list_init(&d->deny) != 0) {
-        free(d->working_dir);
-        free(d);
-        free(t);
-        return NULL;
-    }
-
     t->name = "exec";
     t->description = "Execute a shell command and return its output. Use with caution.";
     t->parameters = shell_parameters;

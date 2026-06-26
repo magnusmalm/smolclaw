@@ -179,6 +179,8 @@ static struct bufferevent *ssl_bevcb(struct event_base *base, void *arg)
 /* Initialize SSL_CTX from cert + key files. Returns NULL on failure. */
 static SSL_CTX *web_ssl_ctx_new(const char *cert_path, const char *key_path)
 {
+    /* Lazy TLS: only reached from web channel start, not agent init
+     * (docs/design/deferred-initialization.md item 3). */
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) {
         SC_LOG_ERROR(WEB_TAG, "Failed to create SSL context");
