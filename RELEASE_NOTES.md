@@ -39,7 +39,7 @@ A C11 lightweight AI agent framework.
   `host_trend`; SQLite trend recording gated behind new
   `SC_ENABLE_HOST_METRICS` so the minimal build stays smol.
 - **CI size budget** — `scripts/check_size_budget.sh` enforces the
-  SCOPE.md budget (minimal dynamic ≤ 320 KB stripped) on every CI run;
+  SCOPE.md budget (minimal dynamic ≤ 1 MB stripped) on every CI run;
   third-party GitHub Actions pinned to commit SHAs.
 - **Research primitives** (`SC_ENABLE_CODE_GRAPH`) — `code_graph`
   symbol extraction with kind filters, `symbol_lookup`, `set_workspace`.

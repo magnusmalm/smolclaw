@@ -127,7 +127,15 @@ sc_tool_t *sc_tool_scratchpad_new(const char *workspace)
     scratchpad_data_t *d = calloc(1, sizeof(*d));
     if (!d) return NULL;
 
-    if (asprintf(&d->path, "%s/" SCRATCHPAD_FILE, workspace) < 0) {
+    size_t path_len = strlen(workspace) + 1 + strlen(SCRATCHPAD_FILE) + 1;
+    d->path = malloc(path_len);
+    if (!d->path) {
+        free(d);
+        return NULL;
+    }
+    int path_n = snprintf(d->path, path_len, "%s/" SCRATCHPAD_FILE, workspace);
+    if (path_n < 0 || (size_t)path_n >= path_len) {
+        free(d->path);
         free(d);
         return NULL;
     }

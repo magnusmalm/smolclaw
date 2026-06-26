@@ -1273,10 +1273,20 @@ static void gateway_process_message(sc_agent_t *agent,
     if (sc_gateway_run_repo_dir_safe(msg->run_repo_dir)
         && agent->workspace && agent->workspace[0]
         && agent->tools) {
-        if (asprintf(&narrowed_ws, "%s/%s",
-                     agent->workspace, msg->run_repo_dir) < 0) {
-            narrowed_ws = NULL;
+        size_t narrowed_len = strlen(agent->workspace) + 1
+                            + strlen(msg->run_repo_dir) + 1;
+        narrowed_ws = malloc(narrowed_len);
+        if (!narrowed_ws) {
+            /* leave NULL */
         } else {
+            int narrowed_n = snprintf(narrowed_ws, narrowed_len, "%s/%s",
+                                      agent->workspace, msg->run_repo_dir);
+            if (narrowed_n < 0 || (size_t)narrowed_n >= narrowed_len) {
+                free(narrowed_ws);
+                narrowed_ws = NULL;
+            }
+        }
+        if (narrowed_ws) {
             struct stat st;
             if (stat(narrowed_ws, &st) == 0 && S_ISDIR(st.st_mode)) {
                 sc_tool_registry_set_workspace(agent->tools, narrowed_ws);

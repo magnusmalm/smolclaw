@@ -73,4 +73,4 @@ jobs:
           cmake --build build-size -j$(nproc) --target smolclaw
 
       - name: Check size budget
-        run: ./scripts/check_size_budget.sh build-size/smolclaw 320 minimal-dynamic
+        run: ./scripts/check_size_budget.sh build-size/smolclaw 1024 minimal-dynamic

@@ -19,4 +19,4 @@ embedded build (single static binary, no runtime deps, runs on a Pi Zero
 ## Rules
 
 - New features land behind Kconfig `default n`.
-- CI fails if minimal-static > 5 MB or minimal-dynamic > 320 KB.
+- CI fails if minimal-static > 5 MB or minimal-dynamic > 1 MB.

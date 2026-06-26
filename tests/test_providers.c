@@ -10,6 +10,8 @@
 #include "providers/http.h"
 #include "providers/claude.h"
 #include "providers/factory.h"
+#include "providers/provider_common.h"
+#include <stdint.h>
 #include "config.h"
 #include "cJSON.h"
 #include "util/str.h"
@@ -106,6 +108,64 @@ static void test_message_with_tool_calls(void)
     /* Free originals */
     sc_tool_call_free_fields(&calls[0]);
     sc_tool_call_free_fields(&calls[1]);
+}
+
+/* H-2/H-3: clone must not dereference tool_calls when calloc fails (count cleared). */
+static void test_message_clone_with_tool_calls(void)
+{
+    sc_tool_call_t calls[1];
+    calls[0].id = sc_strdup("call-clone");
+    calls[0].name = sc_strdup("exec");
+    calls[0].arguments = cJSON_CreateObject();
+    cJSON_AddStringToObject(calls[0].arguments, "command", "true");
+
+    sc_llm_message_t orig = sc_msg_assistant_with_tools("working", calls, 1);
+    ASSERT_INT_EQ(orig.tool_call_count, 1);
+    ASSERT_NOT_NULL(orig.tool_calls);
+
+    sc_llm_message_t clone = sc_llm_message_clone(&orig);
+    ASSERT_INT_EQ(clone.tool_call_count, 1);
+    ASSERT_NOT_NULL(clone.tool_calls);
+    ASSERT_STR_EQ(clone.tool_calls[0].name, "exec");
+    ASSERT(clone.tool_calls[0].arguments != orig.tool_calls[0].arguments,
+           "clone deep-copies tool argument JSON");
+
+    sc_llm_message_free_fields(&orig);
+    sc_llm_message_free_fields(&clone);
+    sc_tool_call_free_fields(&calls[0]);
+}
+
+/* H-1: sc_curl_write_cb must guard malloc failure and size overflow. */
+static void test_sc_curl_write_cb(void)
+{
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    const char *chunk = "{\"choices\":[]}";
+    size_t len = strlen(chunk);
+    size_t n = sc_curl_write_cb((char *)chunk, 1, len, &sb);
+    ASSERT_INT_EQ((int)n, (int)len);
+    char *out = sc_strbuf_finish(&sb);
+    ASSERT_STR_EQ(out, chunk);
+    free(out);
+
+    sc_strbuf_init(&sb);
+    n = sc_curl_write_cb((char *)"x", SIZE_MAX, 2, &sb);
+    ASSERT_INT_EQ((int)n, 0);
+    sc_strbuf_free(&sb);
+}
+
+static void test_sc_header_cb_overflow_guard(void)
+{
+    sc_header_ctx_t ctx = {0};
+    /* size * nitems would overflow SIZE_MAX (M-1 guard in sc_header_cb). */
+    size_t n = sc_header_cb((char *)"retry-after: 30\r\n", SIZE_MAX, 2, &ctx);
+    ASSERT_INT_EQ((int)n, 0);
+    ASSERT_INT_EQ(ctx.retry_after, 0);
+
+    ctx.retry_after = 0;
+    n = sc_header_cb((char *)"retry-after: 15\r\n", 1, 16, &ctx);
+    ASSERT_INT_EQ((int)n, 16);
+    ASSERT_INT_EQ(ctx.retry_after, 15);
 }
 
 static void test_message_array_free(void)
@@ -385,6 +445,75 @@ static void test_http_provider_tool_call(void)
     cJSON *path = cJSON_GetObjectItem(resp->tool_calls[0].arguments, "path");
     ASSERT_NOT_NULL(path);
     ASSERT_STR_EQ(path->valuestring, "/test.txt");
+
+    sc_llm_response_free(resp);
+    sc_llm_message_free_fields(&msgs[0]);
+    p->destroy(p);
+    free(base_url);
+    sc_mock_http_stop(mock);
+}
+
+static void test_http_provider_malformed_json(void)
+{
+    sc_mock_route_t routes[] = {{
+        .method = "POST",
+        .path = "/v1/chat/completions",
+        .status = 200,
+        .body = "not-json",
+    }};
+    sc_mock_http_t *mock = sc_mock_http_start(routes, 1);
+    ASSERT_NOT_NULL(mock);
+
+    sc_strbuf_t base;
+    sc_strbuf_init(&base);
+    sc_strbuf_append(&base, sc_mock_http_url(mock));
+    sc_strbuf_append(&base, "/v1");
+    char *base_url = sc_strbuf_finish(&base);
+
+    sc_provider_t *p = sc_provider_http_new("test-key", base_url, NULL);
+    ASSERT_NOT_NULL(p);
+
+    sc_llm_message_t msgs[1];
+    msgs[0] = sc_msg_user("Hi");
+
+    sc_llm_response_t *resp = p->chat(p, msgs, 1, NULL, 0, "test-model", NULL);
+    ASSERT_NULL(resp);
+
+    sc_llm_message_free_fields(&msgs[0]);
+    p->destroy(p);
+    free(base_url);
+    sc_mock_http_stop(mock);
+}
+
+static void test_http_provider_empty_choices(void)
+{
+    static const char *EMPTY_CHOICES =
+        "{\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":0}}";
+    sc_mock_route_t routes[] = {{
+        .method = "POST",
+        .path = "/v1/chat/completions",
+        .status = 200,
+        .body = EMPTY_CHOICES,
+    }};
+    sc_mock_http_t *mock = sc_mock_http_start(routes, 1);
+    ASSERT_NOT_NULL(mock);
+
+    sc_strbuf_t base;
+    sc_strbuf_init(&base);
+    sc_strbuf_append(&base, sc_mock_http_url(mock));
+    sc_strbuf_append(&base, "/v1");
+    char *base_url = sc_strbuf_finish(&base);
+
+    sc_provider_t *p = sc_provider_http_new("test-key", base_url, NULL);
+    ASSERT_NOT_NULL(p);
+
+    sc_llm_message_t msgs[1];
+    msgs[0] = sc_msg_user("Hi");
+
+    sc_llm_response_t *resp = p->chat(p, msgs, 1, NULL, 0, "test-model", NULL);
+    ASSERT_NOT_NULL(resp);
+    ASSERT_STR_EQ(resp->content, "");
+    ASSERT_STR_EQ(resp->finish_reason, "stop");
 
     sc_llm_response_free(resp);
     sc_llm_message_free_fields(&msgs[0]);
@@ -686,6 +815,9 @@ int main(void)
     RUN_TEST(test_message_constructors);
     RUN_TEST(test_message_clone);
     RUN_TEST(test_message_with_tool_calls);
+    RUN_TEST(test_message_clone_with_tool_calls);
+    RUN_TEST(test_sc_curl_write_cb);
+    RUN_TEST(test_sc_header_cb_overflow_guard);
     RUN_TEST(test_message_array_free);
     RUN_TEST(test_response_free);
     RUN_TEST(test_response_with_tool_calls);
@@ -697,6 +829,8 @@ int main(void)
     /* Integration tests (mock HTTP server) */
     RUN_TEST(test_http_provider_chat);
     RUN_TEST(test_http_provider_tool_call);
+    RUN_TEST(test_http_provider_malformed_json);
+    RUN_TEST(test_http_provider_empty_choices);
     RUN_TEST(test_http_provider_error);
     RUN_TEST(test_claude_provider_chat);
     RUN_TEST(test_claude_provider_tool_use);

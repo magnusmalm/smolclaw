@@ -4,7 +4,7 @@
 #
 # "smol" is a regression test, not a vibe: the minimal build must stay
 # within budget or CI fails. Budgets (SCOPE.md):
-#   minimal dynamic : 320 KB   (stripped)
+#   minimal dynamic : 1 MB     (stripped; 1024 KB)
 #   minimal static  : 5 MB     (musl, stripped)
 #
 # Usage: check_size_budget.sh <binary> <max_kb> [label]

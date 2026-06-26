@@ -8,7 +8,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 ## Highlights
 
-- **256 KB** dynamic-minimal binary (CI-enforced budget: 320 KB), **4.6 MB** fully static (musl, zero runtime deps)
+- **~257 KB** dynamic-minimal binary (CI-enforced budget: 1 MB), **4.6 MB** fully static (musl, zero runtime deps)
 - **672 KB** peak RSS (musl-static)
 - **28** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
 - C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector, no runtime

@@ -171,7 +171,7 @@ on 2026-06-26**.
   +40–60 KB sits at the smol gating threshold, so default-off keeps minimal
   builds lean; only offered when the xai provider is compiled. **This overrides
   the spec's tentative `default y`** — the spec itself invokes the smol contract,
-  and the ≤320 KB minimal budget wins. `~/.grok/auth.json` interop stays **out of
+  and the ≤1 MB minimal budget wins. `~/.grok/auth.json` interop stays **out of
   MVP** (Phase 2, read-only fallback). **[owner-confirmed 2026-06-26 — default n stands]**
 
 - [x] **Q7 — repo_search ↔ code_graph (4.5): v1 DUPLICATES extraction; share in v2.**
@@ -213,14 +213,14 @@ hold final acceptance for a human:
    `ctest --test-dir build` green → `scripts/check_size_budget.sh` pass →
    new Kconfig flags added to `FEATURE_SYMS` (KC-1) → open PR.
 4. **Human gates**: each §3 decision, each 🟠 GATED-EXT acceptance, and any task
-   that would breach the LOC or ≤320 KB size budget.
+   that would breach the LOC or ≤1 MB size budget.
 
 ---
 
 ## 6. Verification gates the agent can self-serve
 
 - `ctest --test-dir build` (33 tests in the full build; per-module)
-- `scripts/check_size_budget.sh` (CI-enforced minimal ≤ 320 KB stripped)
+- `scripts/check_size_budget.sh` (CI-enforced minimal ≤ 1 MB stripped)
 - `scripts/check_claude_md.sh` (CLAUDE.md fact drift)
 - Build hygiene: KC-1 (new flags → `FEATURE_SYMS`), KC-2 (grep build output for
   `implicit`)

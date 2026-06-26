@@ -338,6 +338,10 @@ static sc_llm_response_t *parse_response(const char *body)
     }
 
     sc_llm_response_t *resp = calloc(1, sizeof(sc_llm_response_t));
+    if (!resp) {
+        cJSON_Delete(root);
+        return NULL;
+    }
     resp->usage.cost_usd = -1.0;  /* sentinel: provider didn't report */
 
     cJSON *choices = sc_json_get_array(root, "choices");
@@ -379,27 +383,30 @@ static sc_llm_response_t *parse_response(const char *body)
         int tc_count = cJSON_GetArraySize(tc_arr);
         if (tc_count > 0) {
             resp->tool_calls = calloc((size_t)tc_count, sizeof(sc_tool_call_t));
-            resp->tool_call_count = tc_count;
+            if (!resp->tool_calls) {
+                resp->tool_call_count = 0;
+            } else {
+                resp->tool_call_count = tc_count;
+                for (int i = 0; i < tc_count; i++) {
+                    cJSON *tc_obj = cJSON_GetArrayItem(tc_arr, i);
+                    sc_tool_call_t *tc = &resp->tool_calls[i];
 
-            for (int i = 0; i < tc_count; i++) {
-                cJSON *tc_obj = cJSON_GetArrayItem(tc_arr, i);
-                sc_tool_call_t *tc = &resp->tool_calls[i];
+                    tc->id = sc_strdup(sc_json_get_string(tc_obj, "id", ""));
 
-                tc->id = sc_strdup(sc_json_get_string(tc_obj, "id", ""));
-
-                cJSON *fn = sc_json_get_object(tc_obj, "function");
-                if (fn) {
-                    tc->name = sc_strdup(sc_json_get_string(fn, "name", ""));
-                    const char *args_str = sc_json_get_string(fn, "arguments", "{}");
-                    tc->arguments = cJSON_Parse(args_str);
-                    if (!tc->arguments) {
-                        /* If args don't parse as JSON, wrap in {"raw": ...} */
+                    cJSON *fn = sc_json_get_object(tc_obj, "function");
+                    if (fn) {
+                        tc->name = sc_strdup(sc_json_get_string(fn, "name", ""));
+                        const char *args_str = sc_json_get_string(fn, "arguments", "{}");
+                        tc->arguments = cJSON_Parse(args_str);
+                        if (!tc->arguments) {
+                            /* If args don't parse as JSON, wrap in {"raw": ...} */
+                            tc->arguments = cJSON_CreateObject();
+                            cJSON_AddStringToObject(tc->arguments, "raw", args_str);
+                        }
+                    } else {
+                        tc->name = sc_strdup("");
                         tc->arguments = cJSON_CreateObject();
-                        cJSON_AddStringToObject(tc->arguments, "raw", args_str);
                     }
-                } else {
-                    tc->name = sc_strdup("");
-                    tc->arguments = cJSON_CreateObject();
                 }
             }
         }
@@ -799,6 +806,10 @@ static sc_llm_response_t *http_chat_stream(sc_provider_t *self,
     free(sc.tool_arg_bufs);
 
     sc_llm_response_t *resp = calloc(1, sizeof(*resp));
+    if (!resp) {
+        stream_ctx_cleanup(&sc);
+        return NULL;
+    }
     resp->usage.cost_usd = -1.0;  /* streaming path doesn't capture usage.cost yet */
     resp->content = sc_strbuf_finish(&sc.content);
     resp->tool_calls = sc.tool_calls;
@@ -844,7 +855,12 @@ sc_provider_t *sc_provider_http_new(const char *api_key, const char *api_base,
                                      const char *proxy)
 {
     sc_provider_t *p = calloc(1, sizeof(sc_provider_t));
+    if (!p) return NULL;
     http_provider_data_t *d = calloc(1, sizeof(http_provider_data_t));
+    if (!d) {
+        free(p);
+        return NULL;
+    }
 
     d->api_key = sc_strdup(api_key);
 

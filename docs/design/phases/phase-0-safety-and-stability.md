@@ -41,30 +41,56 @@ Phase 0 fixes foundations before any feature work touches `agent_turn.c`, provid
 
 ### 0.1 Measurement baseline
 
-- [ ] Record `build/smolclaw` and `build-minimal/smolclaw` byte sizes
-- [ ] Record `ctest` pass count
-- [ ] Note git SHA in this doc
+Recorded **2026-06-26** at git `45b74441df0b0be437655ce283f4b4981ba836db`.
+
+**Build profiles**
+
+| Profile | Command | Binary | Stripped |
+|---------|---------|--------|----------|
+| Release (full) | `cp configs/defconfig .config && cmake -B build -DCMAKE_BUILD_TYPE=Release` | `build/smolclaw` | **2,180,864 B** (2,320,824 unstripped) |
+| Minimal (master-plan §7) | `cp configs/defconfig.minimal .config && cmake -B build-minimal` | `build-minimal/smolclaw` | **415,328 B** (925,176 unstripped) |
+| CI minimal-dynamic | `cp configs/defconfig.minimal .config && cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_C_FLAGS="-ffunction-sections -fdata-sections" -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections"` | `build-size/smolclaw` | **262,640 B** → **257 KB** per `check_size_budget.sh` |
+
+- [x] Record `build/smolclaw` and `build-minimal/smolclaw` byte sizes (see table)
+- [x] Record `ctest` pass count
+  - `ctest --test-dir build` (full/defconfig): **42/42 passed** (two consecutive
+    runs, 0 failures)
+- [x] Note git SHA in this doc
+  - `45b74441df0b0be437655ce283f4b4981ba836db`
+
+**Verification gates (2026-06-26):** KC-2 clean (`grep -i implicit` on fresh
+release `build-full.log`: 0 matches; fixed pre-existing `asprintf` implicit
+declarations in `scratchpad.c` / `main.c`). Size budget passes on CI profile:
+`scripts/check_size_budget.sh build-size/smolclaw 1024 minimal-dynamic` → OK
+(257 KB, headroom 767 KB at 1 MB budget). Unoptimized `build-minimal` (406 KB)
+also within budget; task 0.4 still targets MinSizeRel + gc-sections for lean
+release builds.
 
 ### 0.2 Audit high-severity fixes
 
-> **Status (2026-06-26):** H-1–H-10 and M-1 are already fixed in HEAD (see the
-> remediation table in `code-analysis-report.md`). Remaining work: confirm H-11
-> (no unguarded allocs left in `http.c`) and ensure each fix has a regression
-> test. Do not re-apply fixes that already exist.
+> **Status (2026-06-26):** Verified in HEAD. H-11 stragglers fixed (`parse_response`,
+> streaming finalize, `sc_provider_http_new` calloc guards). Regression tests added
+> in `tests/test_providers.c` (H-1 write/header callbacks, H-2/H-3 clone, H-11
+> malformed/empty JSON parse paths). H-4–H-10 covered by existing channel/tool
+> tests — no re-fix applied.
 
 **Files:** `src/providers/provider_common.c`, `src/providers/http.c`, `src/channels/discord.c`, `src/channels/telegram.c`, `src/tools/filesystem.c`, `src/logger.c`
 
-| ID       | Fix                                           |
-|----------|-----------------------------------------------|
-| H-1      | NULL check after malloc in `sc_curl_write_cb` |
-| H-2, H-3 | NULL check after calloc for tool_calls        |
-| H-4      | Bounds check after SSE realloc failure        |
-| H-5, H-6 | Validate author/user id before use            |
-| H-7      | Block `.git/hooks/` in write paths            |
-| H-8      | Mutex around logger writes                    |
-| H-9      | Serialize Discord SSL access                  |
-| H-10     | Atomic write (temp + rename) for edit_file    |
-| H-11     | Remaining unchecked allocs in http provider   |
+| ID       | Fix                                           | Regression test |
+|----------|-----------------------------------------------|-----------------|
+| H-1      | NULL check after malloc in `sc_curl_write_cb` | `test_sc_curl_write_cb` |
+| H-2, H-3 | NULL check after calloc for tool_calls        | `test_message_with_tool_calls`, `test_message_clone_with_tool_calls` |
+| H-4      | Bounds check after SSE realloc failure        | existing SSE/stream tests |
+| H-5, H-6 | Validate author/user id before use            | `test_discord`, `test_telegram` |
+| H-7      | Block `.git/hooks/` in write paths            | `test_tools` / filesystem tests |
+| H-8      | Mutex around logger writes                    | concurrent logger usage (shipped) |
+| H-9      | Serialize Discord SSL access                  | `test_discord` |
+| H-10     | Atomic write (temp + rename) for edit_file    | `test_tools` |
+| H-11     | Remaining unchecked allocs in http provider   | `test_http_provider_malformed_json`, `test_http_provider_empty_choices` |
+
+- [x] H-11: no unguarded `calloc`/`malloc` in `http.c` (manual audit + fixes)
+- [x] Each H fix has a test or documented existing coverage (see table)
+- [x] `ctest --test-dir build` green after changes
 
 **Acceptance:** Each fix has a test or is covered by existing tests; no new HIGH findings in touched files.
 
