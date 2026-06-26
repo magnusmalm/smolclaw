@@ -259,6 +259,58 @@ static void mock_tool_destroy(sc_tool_t *self)
     free(self);
 }
 
+/* Flaky tool: first execution succeeds (checkpoint), then fails until rewind. */
+static sc_tool_result_t *mock_flaky_tool_exec(sc_tool_t *self, cJSON *args, void *ctx)
+{
+    (void)self; (void)args; (void)ctx;
+    mock_tool_executed++;
+    if (mock_tool_executed == 1)
+        return sc_tool_result_new("first call ok");
+    return sc_tool_result_error("simulated tool failure");
+}
+
+static int msgs_contain_substr(const sc_llm_message_t *msgs, int n, const char *needle)
+{
+    for (int i = 0; i < n; i++) {
+        if (msgs[i].content && strstr(msgs[i].content, needle))
+            return 1;
+    }
+    return 0;
+}
+
+static const char *find_source_file(const char *relpath)
+{
+    static char buf[512];
+    if (access(relpath, R_OK) == 0)
+        return relpath;
+    snprintf(buf, sizeof(buf), "../%s", relpath);
+    if (access(buf, R_OK) == 0)
+        return buf;
+    return NULL;
+}
+
+static int source_contains(const char *relpath, const char *needle)
+{
+    const char *path = find_source_file(relpath);
+    if (!path)
+        return 0;
+
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return 0;
+
+    char line[1024];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (strstr(line, needle)) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
 /* --- Helper: build a minimal agent with mock provider --- */
 
 static void cleanup_dir(const char *dir)
@@ -1644,6 +1696,88 @@ static void test_integ_transform_with_tools(void)
     destroy_test_agent(&ctx);
 }
 
+static void test_checkpoint_rewind_on_tool_errors(void)
+{
+    /* One successful tool call saves a checkpoint; three failures trigger
+     * rewind; the turn then continues and can finish successfully. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    sc_tool_t *tool = calloc(1, sizeof(*tool));
+    tool->name = "flaky_test";
+    tool->description = "Flaky test tool";
+    tool->parameters = mock_tool_params;
+    tool->execute = mock_flaky_tool_exec;
+    tool->destroy = mock_tool_destroy;
+    sc_tool_registry_register(ctx.agent->tools, tool);
+
+    mock_tool_executed = 0;
+
+    cJSON *tc_args[4];
+    sc_tool_call_t tcs[4];
+    for (int i = 0; i < 4; i++) {
+        tc_args[i] = cJSON_CreateObject();
+        char query[16];
+        snprintf(query, sizeof(query), "step%d", i);
+        cJSON_AddStringToObject(tc_args[i], "query", query);
+        char id[16];
+        snprintf(id, sizeof(id), "call_%d", i + 1);
+        tcs[i] = (sc_tool_call_t){
+            .id = id, .name = "flaky_test", .arguments = tc_args[i],
+        };
+        ctx.mpd->responses[i] = (sc_llm_response_t){
+            .tool_calls = &tcs[i], .tool_call_count = 1,
+            .finish_reason = "tool_use",
+        };
+    }
+    ctx.mpd->responses[4] = (sc_llm_response_t){
+        .content = "Recovered after checkpoint rewind.",
+        .finish_reason = "end_turn",
+    };
+    /* Iteration 5 may hit the build continuation nudge (action log activity);
+     * supply a second final response for that retry. */
+    ctx.mpd->responses[5] = (sc_llm_response_t){
+        .content = "Recovered after checkpoint rewind.",
+        .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 6;
+
+    char *response = sc_agent_process_direct(ctx.agent,
+        "Run flaky tool", "test-checkpoint");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Recovered after checkpoint rewind.");
+    ASSERT_INT_EQ(mock_tool_executed, 4);
+    ASSERT(ctx.mpd->chat_call_count >= 5,
+           "Should continue LLM loop after rewind");
+    ASSERT(msgs_contain_substr(ctx.mpd->last_msgs, ctx.mpd->last_msg_count,
+                               "rewound to the last successful"),
+           "Rewind hint should be in context after recovery");
+    ASSERT(strstr(response, "too many tool errors") == NULL,
+           "Should not hard-stop before recovery");
+
+    free(response);
+    for (int i = 0; i < 4; i++)
+        cJSON_Delete(tc_args[i]);
+    destroy_test_agent(&ctx);
+}
+
+static void test_checkpoint_rewind_structural(void)
+{
+    ASSERT(source_contains("src/agent_internal.h", "SC_MAX_CHECKPOINTS 2"),
+           "2-slot checkpoint ring buffer");
+    ASSERT(source_contains("src/agent_turn.c", "checkpoint_save"),
+           "checkpoint_save shipped");
+    ASSERT(source_contains("src/agent_turn.c", "checkpoint_rewind"),
+           "checkpoint_rewind shipped");
+    ASSERT(source_contains("src/agent_turn.c", "tc->rewind_count >= 2"),
+           "rewind cap per turn");
+    ASSERT(source_contains("src/agent_turn.c",
+                           "Your previous approach failed after 3 tool errors"),
+           "rewind hint message");
+    ASSERT(source_contains("src/agent_turn.c",
+                           "Rewound to checkpoint before model escalation"),
+           "escalation rewind path");
+}
+
 int main(void)
 {
     printf("test_agent\n");
@@ -1681,6 +1815,8 @@ int main(void)
     RUN_TEST(test_integ_post_hook_modifies);
     RUN_TEST(test_integ_session_branching);
     RUN_TEST(test_integ_transform_with_tools);
+    RUN_TEST(test_checkpoint_rewind_on_tool_errors);
+    RUN_TEST(test_checkpoint_rewind_structural);
 #if SC_ENABLE_SPAWN
     RUN_TEST(test_agent_spawn_tool);
 #endif

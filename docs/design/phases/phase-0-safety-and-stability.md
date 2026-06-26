@@ -158,21 +158,23 @@ Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary a
 
 **Source:** [`docs/plan-checkpoint-rewind.md`](../../plan-checkpoint-rewind.md)
 
-**Files:** `src/agent_internal.h`, `src/agent_turn.c`
+**Files:** `src/agent_internal.h`, `src/agent_turn.c`, `tests/test_agent.c`
 
-> **Status (2026-06-26):** Implemented. `sc_checkpoint_t`, `SC_MAX_CHECKPOINTS`
-> (2-slot ring buffer), `rewind_count` cap, and the restore path exist in
-> `src/agent_internal.h`. Remaining work is **verification only**: add an
-> integration test for repeated-tool-error → rewind → success if not present.
-> The checkboxes below describe shipped behavior to confirm, not to build.
+> **Status (2026-06-26):** Verified in HEAD. `sc_checkpoint_t`,
+> `SC_MAX_CHECKPOINTS` (2-slot ring buffer), `rewind_count` cap (max 2), and
+> restore-on-3-errors / pre-escalation rewind paths confirmed via source audit
+> and `test_checkpoint_rewind_on_tool_errors` in `tests/test_agent.c`.
 
-- [ ] Ring buffer of 2 checkpoints after successful tool execution
-- [ ] Rewind on error budget threshold / per-tool-name stuck count
-- [ ] Rewind before model escalation (clean context for fallback model)
-- [ ] Max 2 rewinds per turn (prevent infinite loop)
-- [ ] Inject rewind hint system/user message
+- [x] Ring buffer of 2 checkpoints after successful tool execution (`checkpoint_save`)
+- [x] Rewind on error budget threshold (`tool_error_count == 3` → `checkpoint_rewind`)
+- [x] Rewind before model escalation (`checkpoint_rewind` before fallback model)
+- [x] Max 2 rewinds per turn (`tc->rewind_count >= 2` guard)
+- [x] Inject rewind hint user message (post-rewind hint in `postprocess_result`)
 
 **Acceptance:** Unit or integration test simulating repeated tool errors → rewind → success path.
+
+**Verification gates (2026-06-26):** `test_checkpoint_rewind_on_tool_errors` and
+`test_checkpoint_rewind_structural` pass; full `ctest --test-dir build-full` green.
 
 ### 0.7 Structured tasks (sc_task_t)
 
