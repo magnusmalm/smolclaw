@@ -96,10 +96,16 @@ release builds.
 
 ### 0.3 Audit medium fixes (subset)
 
+> **Status (2026-06-26):** M-1 verified (`sc_header_cb` overflow guard in
+> `test_sc_header_cb_overflow_guard`). M-3 verified: `reload_allow_list()` assigns
+> `dm_policy` under `security_mutex`; `sc_channel_handle_message()` reads policy
+> under the same lock; regression tests in `tests/test_channel_manager.c`.
+
 Prioritize items on the agent/provider hot path:
 
-- [ ] M-1: Integer overflow in `sc_header_cb`
-- [ ] M-3: `dm_policy` write under `security_mutex`
+- [x] M-1: Integer overflow in `sc_header_cb` — `test_sc_header_cb_overflow_guard`
+- [x] M-3: `dm_policy` write under `security_mutex` — `test_reload_dm_policy_*`,
+  `test_reload_allow_list_assigns_dm_policy_under_lock`
 - [ ] M-8: Covered by 0.7
 
 Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.

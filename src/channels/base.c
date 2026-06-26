@@ -144,9 +144,17 @@ void sc_channel_handle_message(sc_channel_t *ch, const char *sender_id,
     }
 
     if (!sc_channel_is_allowed(ch, sender_id)) {
-        /* Pairing mode: send challenge code to unknown sender */
-        if (ch->dm_policy == SC_DM_POLICY_PAIRING && ch->pairing_store) {
-            const char *code = sc_pairing_store_challenge(ch->pairing_store, sender_id);
+        /* Pairing mode: send challenge code to unknown sender.
+         * Read dm_policy under security_mutex (M-3: consistent with reload). */
+        sc_dm_policy_t policy;
+        sc_pairing_store_t *pairing_store;
+        pthread_mutex_lock(&ch->security_mutex);
+        policy = ch->dm_policy;
+        pairing_store = ch->pairing_store;
+        pthread_mutex_unlock(&ch->security_mutex);
+
+        if (policy == SC_DM_POLICY_PAIRING && pairing_store) {
+            const char *code = sc_pairing_store_challenge(pairing_store, sender_id);
             if (code) {
                 sc_strbuf_t reply;
                 sc_strbuf_init(&reply);

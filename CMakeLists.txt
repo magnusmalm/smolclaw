@@ -492,6 +492,7 @@ set(TEST_SOURCES
     tests/test_schema_validate.c
     tests/test_providers.c
     tests/test_pairing.c
+    tests/test_channel_manager.c
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_exec_safety.c
