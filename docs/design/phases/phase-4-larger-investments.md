@@ -4,15 +4,15 @@
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Prerequisite**: [Phase 3](phase-3-optional-surface-area.md) complete (or parallel if demand-driven)  
 **Goal**: Optional subsystems and architectural improvements with higher complexity.  
-**LOC budget**: ~1,500–2,500 (each item independently shippable)  
+**LOC budget**: ~2,100–3,200 (each item independently shippable)  
 **Binary target**: Each feature Kconfig-gated; measure per flag
 
 ---
 
 ## 1. Scope
 
-- **4.1** — Task: Arena allocator per turn; Source: zed-patterns T1; LOC: 250–400; Binary: +5–15 KB;
-  Gate: always
+- **4.1** — Task: Arena allocator per turn — **allocator shipped + per-turn wired; only
+  provider-parse conversion remains**; Source: zed-patterns T1; LOC: 80–150; Binary: ~0; Gate: always
 - **4.2** — Task: MCP capability-based sandbox; Source: zed-patterns T3; LOC: 300–500; Binary:
   +10–20 KB; Gate: per-server config
 - **4.3** — Task: Anthropic prompt caching; Source: claude-code P1 #4; LOC: 60–100; Binary: ~5 KB;
@@ -31,8 +31,19 @@
   `SC_ENABLE_MICROSANDBOX` + external daemon
 - **4.10** — Task: Updater binary split evaluation; Source: todo.md; LOC: 200–400; Binary: variable;
   Gate: research spike
+- **4.11** — Task: Global `session_search` tool; Source: Hermes-gap; Tier: **T1**; LOC: 300–500;
+  Binary: +15–25 KB; Gate: `SC_ENABLE_SESSION_SEARCH` **default n**
+- **4.12** — Task: Agent-initiated compact tool; Source: progress-2026-04-06; Tier: **T1**; LOC:
+  100–150; Binary: ~5 KB; Gate: config
+- **4.13** — Task: Post-turn memory review; Source: Hermes-gap; Tier: **T4**; LOC: 200–350; Binary:
+  +10 KB; Gate: config **default off**
+- **4.14** — Task: Staged memory writes + capacity headers; Source: Hermes-gap; Tier: **T4**; LOC:
+  150–250; Binary: ~5 KB; Gate: config
 
 Each task is a **separate milestone** — do not batch into one PR.
+
+**Prerequisite for 4.13–4.14:** Phase 1 compaction stable and Phase 2 OAuth shipped (optional
+auxiliary model path uses same provider factory).
 
 ---
 
@@ -40,14 +51,22 @@ Each task is a **separate milestone** — do not batch into one PR.
 
 ### 4.1 Arena allocator
 
-**Source:** zed-patterns Task 1; closes audit H-1–H-4 class
+**Source:** zed-patterns Task 1
 
-**Files:** new `src/util/arena.c`, `src/agent_turn.c`, `src/providers/http.c`
+> **Status (2026-06-26):** `src/util/arena.c` + `arena.h` already exist
+> (`sc_arena_new/alloc/reset/free`) and the arena is already created, reset
+> per turn, and threaded into the transform/context path in `src/agent.c`
+> (see `agent->arena`, `sc_arena_reset` at turn start, `snap->arena`).
+> **Remaining work:** convert provider SSE/response parsing
+> (`src/providers/http.c`, `src/providers/provider_common.c`) to allocate from
+> the arena so the unchecked-alloc class collapses to one OOM check point.
 
-- [ ] Bump allocator with reset per turn
-- [ ] Provider SSE parsing uses arena
-- [ ] Single OOM check point per turn
-- [ ] Long-lived data stays on heap
+**Files:** `src/providers/http.c`, `src/providers/provider_common.c` (arena adoption)
+
+- [x] Bump allocator with reset per turn *(shipped)*
+- [ ] Provider SSE parsing uses arena *(remaining)*
+- [ ] Single OOM check point per turn *(remaining — depends on above)*
+- [x] Long-lived data stays on heap *(by design)*
 
 ### 4.2 MCP capability sandbox
 
@@ -140,6 +159,66 @@ Prioritize by production impact.
 - [ ] Time-boxed evaluation: separate `smolclaw-updater` binary vs LTO dead-code elimination
 - [ ] Document recommendation; implement only if >50 KB savings proven
 
+### 4.11 Global session search
+
+**Source:** Hermes `session_search` tool — FTS over all stored sessions.
+
+**Files:** new `src/tools/session_search.c`, `src/session_index.c` (or extend `memory_index.c`),
+`tests/test_session_search.c`
+
+- [ ] Kconfig `SC_ENABLE_SESSION_SEARCH` (default **n**)
+- [ ] Index session JSON files under `{SMOLCLAW_HOME}/sessions/` with FTS5 (reuse SQLite amalgamation)
+- [ ] Tool actions: `search` (query → matching turns/snippets), `list` (recent sessions)
+- [ ] On-demand indexing — defer full rebuild until first search (align with 0.8 deferred init)
+- [ ] Does not replace `memory_search` (long-term facts vs conversation recall)
+- [ ] Cap result payload size (reuse `output_filter` patterns)
+
+**Hermes parity:** "did we discuss X last week?" without loading full session into context.
+
+### 4.12 Agent-initiated compact tool
+
+**Source:** [`docs/progress-2026-04-06.md`](../../progress-2026-04-06.md) — designed, not implemented.
+
+**Files:** `src/tools/` (new `compact_tool.c` or extend session tool), `src/agent_session.c`
+
+- [ ] Register `compact` tool (or `session_compact`) callable by agent mid-workflow
+- [ ] Triggers same summarization path as `/compress` slash command (2.10)
+- [ ] Cooldown guard: min interval between compactions (config, default 5 min)
+- [ ] Budget guard: refuse if session below threshold (avoid pointless compaction)
+- [ ] Scratchpad + action log reinjection preserved (existing compaction resilience)
+
+**Complements:** Phase 1 auto-compaction (proactive) vs agent-initiated (explicit).
+
+### 4.13 Post-turn memory review (Tier 4)
+
+**Source:** Hermes background self-improvement review (subset — memory only, no `skill_manage`).
+
+**Files:** `src/agent_session.c`, `src/memory.c`, `src/sc_task_t` (from 0.7)
+
+- [ ] Config: `memory.background_review.enabled` (default **false**)
+- [ ] After successful turn: async task (reuse summarization thread pattern) with compact turn digest
+- [ ] Propose 0–2 memory entries via existing `memory_write` paths
+- [ ] Optional: run on cheaper/auxiliary provider (`memory.background_review.provider` / `model`)
+- [ ] Optional gateway notification: `memory_notifications`: `off` | `on` | `verbose` (config)
+- [ ] **Out of scope:** autonomous skill creation, `/learn`, Skills Hub, Honcho (use MCP Tier 2)
+
+**Smol contract:** opt-in; no extra runtime deps; uses existing memory + sc_task_t infrastructure.
+
+### 4.14 Staged memory writes + capacity headers (Tier 4)
+
+**Source:** Hermes `memory.write_approval` and bounded MEMORY.md capacity display.
+
+**Files:** `src/memory.c`, `src/tools/memory_tools.c`, `src/context.c`, `src/main.c`
+
+- [ ] Config: `memory.write_approval`: `false` (default) | `true`
+- [ ] When `true`: foreground and background review writes stage to `{SMOLCLAW_HOME}/pending/memory/`
+- [ ] CLI: `smolclaw memory pending|approve|reject` (mirror Hermes `/memory pending`)
+- [ ] Web API: optional `GET/POST /api/memory/pending` (if `SC_ENABLE_WEB`)
+- [ ] System prompt: show memory capacity usage % and char counts in memory block header
+- [ ] Duplicate detection on add (existing entries rejected with success/no-op message)
+
+**Explicitly not in 4.14:** `skill_manage`, skill write approval, external memory providers.
+
 ---
 
 ## 3. Exit Criteria
@@ -147,6 +226,8 @@ Prioritize by production impact.
 - [ ] Each shipped item has tests + Kconfig gate where applicable
 - [ ] Project memory and microsandbox **not** in default release profile
 - [ ] No Phase 4 item required for core agent operation
+- [ ] `session_search` and Tier 4 learning loop **default off** in config and Kconfig
+- [ ] Background review does not run when `memory.background_review.enabled` is false
 
 ---
 
@@ -160,8 +241,12 @@ Prioritize by production impact.
 6. **4.7** prompt budget CLI
 7. **4.6** doctor CLI
 8. **4.5** project memory (largest)
-9. **4.10** updater spike
-10. **4.9** microsandbox (ops-heavy)
+9. **4.12** agent compact tool (quick win after 2.10 slash `/compress`)
+10. **4.11** session search (Kconfig off by default)
+11. **4.13** post-turn memory review (Tier 4, opt-in)
+12. **4.14** staged memory writes (Tier 4, pairs with 4.13)
+13. **4.10** updater spike
+14. **4.9** microsandbox (ops-heavy)
 
 ---
 

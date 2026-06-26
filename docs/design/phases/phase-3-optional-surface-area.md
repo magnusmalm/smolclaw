@@ -3,8 +3,8 @@
 **Status**: Not started  
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Prerequisite**: [Phase 2](phase-2-operator-provider-ux.md) complete  
-**Goal**: Kconfig-gated channel and config presets; small backlog items.  
-**LOC budget**: ~1,200–1,800  
+**Goal**: Kconfig-gated channel and config presets; gateway behavior polish; small backlog items.  
+**LOC budget**: ~1,500–2,100  
 **Binary target**: +≤80 KB **per enabled flag**; default build unchanged
 
 ---
@@ -22,6 +22,12 @@
   optional
 - **3.6** — Task: Subagent tool deny matrices; Source: claude-code P1 #3; LOC: 40–60; Binary: ~0;
   Gate: always
+- **3.7** — Task: Session reset policies (daily/idle); Source: Hermes-gap; Tier: **T1**; LOC:
+  100–150; Binary: ~5 KB; Gate: config
+- **3.8** — Task: Busy-input modes (interrupt/queue); Source: Hermes-gap; Tier: **T1**; LOC:
+  150–250; Binary: ~5 KB; Gate: config
+- **3.9** — Task: Silent delivery tokens; Source: Hermes-gap; Tier: **T1**; LOC: 40–60; Binary: ~0;
+  Gate: config
 
 ---
 
@@ -74,7 +80,7 @@ Each mode sets:
 
 **Source:** smallharness-integration task 6
 
-**Files:** `src/tools/registry.c`, `src/channels/cli.c`, `src/tools/file_tools.c`
+**Files:** `src/tools/registry.c`, `src/channels/cli.c`, `src/tools/filesystem.c`
 
 - [ ] `approval_policy`: `always` | `never` | `dangerous-only`
 - [ ] Diff preview on confirm for file edit/write (cap 80 lines display)
@@ -106,6 +112,48 @@ Each mode sets:
 - [ ] Depth-based deny lists (depth≥1: no spawn/delegate/cron; depth≥2: stricter)
 - [ ] MCP standalone mode: read-only tools only
 
+### 3.7 Session reset policies
+
+**Source:** Hermes `reset_by_platform` in gateway config.
+
+**Files:** `src/config.c`, `src/session.c`, `src/channels/manager.c`
+
+- [ ] Config per channel: `reset_mode`: `none` | `daily` | `idle` | `both`
+- [ ] `daily_reset_hour` (default 4:00 local) and `idle_minutes` (default 1440)
+- [ ] On inbound message: check policy → start fresh session if triggered
+- [ ] Per-platform overrides under `channels.<name>.reset` (optional)
+- [ ] Document in `docs/CONFIGURATION.md`; no LLM call on reset
+
+**Hermes parity:** automatic session hygiene without manual `/reset`.
+
+### 3.8 Busy-input modes
+
+**Source:** Hermes `display.busy_input_mode` — interrupt (default), queue, steer.
+
+**Files:** `src/bus.c`, `src/agent_turn.c`, channel adapters
+
+**Ship in 3.8:**
+
+- [ ] `busy_input_mode`: `interrupt` (default, current behavior) | `queue`
+- [ ] **Interrupt:** new message cancels in-flight turn (existing behavior; document)
+- [ ] **Queue:** hold messages until current turn completes; combine into one follow-up prompt
+- [ ] Optional `busy_ack_enabled` — short ack line (`⏳ queued`) on async channels
+- [ ] Config under `agents.defaults` or `gateway.display`
+
+**Defer to Phase 5:** `steer` mode (inject mid-turn without new session — higher complexity).
+
+### 3.9 Silent delivery tokens
+
+**Source:** Hermes intentional silence for group chats and automations.
+
+**Files:** `src/channels/manager.c`, outbound delivery path
+
+- [ ] If agent final response is exactly one token (after trim + case fold): `[SILENT]`, `SILENT`,
+  `NO_REPLY`, `NO REPLY` — suppress outbound delivery
+- [ ] Silence turn **stored** in session transcript (alternation preserved)
+- [ ] Failed turns still surface errors (do not silence errors)
+- [ ] Config: `gateway.silent_tokens_enabled` (default true)
+
 ---
 
 ## 3. Exit Criteria
@@ -115,6 +163,9 @@ Each mode sets:
 - [ ] Operator modes documented with preset table
 - [ ] Spawn depth restrictions tested
 - [ ] README feature table updated for Signal when enabled
+- [ ] Session reset policy tested: idle timeout starts fresh session
+- [ ] Queue mode delivers combined follow-up after busy turn
+- [ ] Silent token suppresses outbound but retains transcript
 
 ---
 
@@ -134,8 +185,10 @@ Each mode sets:
 1. `feat: subagent tool deny matrices by spawn depth`
 2. `feat: operator mode presets and enhanced confirmation`
 3. `fix: request note_tweet in X thread/search APIs`
-4. `feat: Signal channel MVP (SC_ENABLE_SIGNAL, default off)` — large, isolated PR
-5. `feat: notify slack/ntfy backends` (optional)
+4. `feat: session reset policies and busy-input queue mode`
+5. `feat: silent delivery tokens for gateway`
+6. `feat: Signal channel MVP (SC_ENABLE_SIGNAL, default off)` — large, isolated PR
+7. `feat: notify slack/ntfy backends` (optional)
 
 ---
 

@@ -103,6 +103,28 @@ B-tree-like index over session tree for O(log n) branch/truncate/token queries.
 **Source:** todo.md  
 **After:** Pre/post hook chain stable; headless fleet demand
 
+### 3.8 Gateway steer busy-input mode
+
+**Source:** Hermes-gap; deferred from Phase 3.8  
+**Effort:** 3–5 days  
+**Reason:** Inject follow-up mid-turn without interrupt — needs agent-loop hooks beyond queue
+
+**Promote when:** Users report queue mode too slow for live steering on Telegram/Discord.
+
+### 3.9 Background sessions (`/background`)
+
+**Source:** Hermes-gap  
+**Effort:** 5–8 days  
+**Reason:** Separate async agent instance + result delivery — session fork model not in core today
+
+**Promote when:** Headless fleet needs fire-and-forget tasks from messaging without blocking main chat.
+
+### 3.10 Hermes learning loop extensions
+
+**Source:** Hermes-gap Tier 3/5 boundary  
+**Items:** `skill_manage`, `/learn`, Skills Hub, Honcho / external memory providers  
+**After:** Tier 4 (4.13–4.14) stable; or delegate Honcho via MCP (Tier 2)
+
 ---
 
 ## 4. Deferred — low priority polish

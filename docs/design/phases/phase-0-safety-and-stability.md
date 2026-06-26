@@ -3,8 +3,8 @@
 **Status**: Not started  
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Goal**: Close known high-severity bugs, improve shutdown/thread safety, establish binary size baseline, add checkpoint rewind.  
-**LOC budget**: ~500–900  
-**Binary target**: Net **smaller or flat** (size optimizations offset small fixes)
+**LOC budget**: ~650–1,150  
+**Binary target**: Net **smaller or flat** (size optimizations offset small fixes; RSS win from 0.8)
 
 ---
 
@@ -12,19 +12,26 @@
 
 Phase 0 fixes foundations before any feature work touches `agent_turn.c`, providers, or channels.
 
+> **Re-verified 2026-06-26:** Most audit Highs (H-1–H-10) and M-1 are **already
+> fixed in HEAD** — see the remediation status table in `code-analysis-report.md`.
+> 0.2 collapses to verifying H-11 and adding any missing regression tests, not
+> re-fixing. 0.6 (checkpoint/rewind) has **already shipped** — it is verify-only.
+
 - **0.1** — Task: Record size & test baseline; Source: master-plan §7; LOC: —; Binary: —; Smol: ✓
-- **0.2** — Task: Audit high-severity fixes (H-1–H-11); Source: code-analysis-report; LOC: 250–400;
-  Binary: +0–5 KB; Smol: ✓
-- **0.3** — Task: Audit medium fixes (priority subset); Source: code-analysis-report; LOC: 100–200;
-  Binary: ~0; Smol: ✓
+- **0.2** — Task: Audit high-severity fixes (H-1–H-11) — **mostly done; verify H-11 + tests**;
+  Source: code-analysis-report; LOC: 0–80; Binary: ~0; Smol: ✓
+- **0.3** — Task: Audit medium fixes (priority subset; M-1 done, M-3 verify); Source:
+  code-analysis-report; LOC: 50–150; Binary: ~0; Smol: ✓
 - **0.4** — Task: Binary size build profile; Source: todo.md; LOC: 50–100 CMake; Binary:
   **−10–25%**; Smol: ✓✓
 - **0.5** — Task: Optional SQLite FTS5 gate; Source: todo.md; LOC: 20–50 CMake; Binary: **−50–200
   KB** minimal; Smol: ✓✓
-- **0.6** — Task: Checkpoint & rewind; Source: plan-checkpoint-rewind; LOC: 100–150; Binary: ~0;
-  Smol: ✓
+- **0.6** — Task: Checkpoint & rewind — **already shipped; verify-only**; Source:
+  plan-checkpoint-rewind; LOC: 0 (+test); Binary: ~0; Smol: ✓
 - **0.7** — Task: sc_task_t + summarization join (M-8); Source: zed-patterns T2; LOC: 150–250;
   Binary: ~5 KB; Smol: ✓
+- **0.8** — Task: Deferred runtime init (FTS5, deny-regex); Source: deferred-initialization.md;
+  Tier: **T1**; LOC: 150–250; Binary: ~0 (RSS/startup win); Smol: ✓✓
 
 **Out of scope for Phase 0:** arena allocator (Phase 4 or early if provider fixes proliferate), new features, new channels.
 
@@ -40,7 +47,12 @@ Phase 0 fixes foundations before any feature work touches `agent_turn.c`, provid
 
 ### 0.2 Audit high-severity fixes
 
-**Files:** `src/providers/provider_common.c`, `src/providers/http.c`, `src/channels/discord.c`, `src/channels/telegram.c`, `src/tools/file_tools.c`, `src/logger.c`
+> **Status (2026-06-26):** H-1–H-10 and M-1 are already fixed in HEAD (see the
+> remediation table in `code-analysis-report.md`). Remaining work: confirm H-11
+> (no unguarded allocs left in `http.c`) and ensure each fix has a regression
+> test. Do not re-apply fixes that already exist.
+
+**Files:** `src/providers/provider_common.c`, `src/providers/http.c`, `src/channels/discord.c`, `src/channels/telegram.c`, `src/tools/filesystem.c`, `src/logger.c`
 
 | ID       | Fix                                           |
 |----------|-----------------------------------------------|
@@ -85,11 +97,17 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 - [ ] Minimal build verifies no FTS5 symbols
 - [ ] Full build + `test_memory_tools` pass
 
-### 0.6 Checkpoint & rewind
+### 0.6 Checkpoint & rewind — ALREADY SHIPPED (verify-only)
 
 **Source:** [`docs/plan-checkpoint-rewind.md`](../../plan-checkpoint-rewind.md)
 
 **Files:** `src/agent_internal.h`, `src/agent_turn.c`
+
+> **Status (2026-06-26):** Implemented. `sc_checkpoint_t`, `SC_MAX_CHECKPOINTS`
+> (2-slot ring buffer), `rewind_count` cap, and the restore path exist in
+> `src/agent_internal.h`. Remaining work is **verification only**: add an
+> integration test for repeated-tool-error → rewind → success if not present.
+> The checkboxes below describe shipped behavior to confirm, not to build.
 
 - [ ] Ring buffer of 2 checkpoints after successful tool execution
 - [ ] Rewind on error budget threshold / per-tool-name stuck count
@@ -103,13 +121,47 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 
 **Source:** zed-patterns Task 2
 
-**Files:** new `src/util/task.c`, `src/agent_session.c`, `src/agent.c`
+> **Status (2026-06-26):** `src/util/task.{c,h}` already exist with the full
+> `sc_task_spawn` / `poll` / `join(timeout_ms)` / `cancel` / `free` API.
+> **Remaining work:** confirm `agent_session.c` summarization runs on
+> `sc_task_t` and that agent shutdown cancels+joins it (the actual M-8 fix),
+> rather than the standalone worker-thread path. Verify, then add a test.
 
-- [ ] `sc_task_spawn` / `poll` / `join` / `cancel` / `free`
+**Files:** `src/util/task.{c,h}` *(exist)*, `src/agent_session.c`, `src/agent.c`
+
+- [x] `sc_task_spawn` / `poll` / `join` / `cancel` / `free` *(shipped)*
 - [ ] Summarization uses sc_task_t; joined on agent shutdown
 - [ ] Cancel flag checked in summarization loop
 
 **Acceptance:** Rapid shutdown during summarization does not leak threads (M-8).
+
+### 0.8 Deferred runtime initialization
+
+**Authoritative spec:** [`../deferred-initialization.md`](../deferred-initialization.md)  
+**Hermes gap (Tier 1):** Pattern lift from Hermes PRs #28864, #28957 — lazy init without
+memoization bloat.
+
+**Files:** `src/memory_index.c`, `src/util/sandbox.c` (or deny-pattern module), `src/agent.c`
+
+**Targets (priority order):**
+
+- [ ] **FTS5 memory index rebuild** — defer until first `memory_search` / `memory_read` that needs index
+- [ ] **Exec deny-regex table** — compile on first `exec` tool use; deduplicate if compiled twice today
+- [ ] **TLS context (IRC/Web/WSS)** — verify already lazy; document invariant in code comment
+- [ ] **Vault unlock probe** — verify already lazy; document invariant in code comment
+
+**Smol invariants (from spec):**
+
+- Subtraction beats addition — cold path should not allocate unused subsystems
+- No new globals — use sentinels in existing structs where possible
+- No memoization caches that add RSS without reducing it
+
+**Acceptance:**
+
+- [ ] `smolclaw agent -m "hi"` with memory search disabled does not rebuild FTS5 index
+- [ ] `smolclaw agent -m "hi"` with no exec does not compile deny-regex table
+- [ ] Record peak RSS before/after on minimal musl-static smoke run (note in this doc)
+- [ ] ctest green; no regression in `test_memory_tools`, `test_security`
 
 ---
 
@@ -118,6 +170,7 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 - [ ] All Phase 0 checkboxes complete
 - [ ] `ctest --test-dir build` passes
 - [ ] Binary size ≤ baseline or documented reduction from 0.4/0.5
+- [ ] RSS/startup improvement from 0.8 recorded (or N/A with justification)
 - [ ] No open HIGH audit items in provider/channel/tool hot paths
 - [ ] Update master-plan status line for Phase 0
 
@@ -138,8 +191,9 @@ Defer M-2, M-4–M-7, M-9–M-10 to Phase 4 unless blocking.
 
 1. `fix: audit high-severity NULL and concurrency issues`
 2. `build: size-optimized release profile + optional FTS5`
-3. `feat: agent turn checkpoint rewind`
-4. `feat: sc_task_t for summarization lifecycle`
+3. `perf: deferred runtime init for FTS5 and deny-regex`
+4. `feat: agent turn checkpoint rewind` (verify if already shipped)
+5. `feat: sc_task_t for summarization lifecycle`
 
 ---
 

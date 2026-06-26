@@ -68,14 +68,23 @@ analysis but do not belong in a smol-themed work item.
 
 ### Current behavior
 
-`sc_memory_index_rebuild(midx, mem_dir)` is called eagerly during agent
-construction at two sites:
+> **Line numbers below re-verified 2026-06-26; treat as indicative — grep the
+> symbol, don't trust the exact line.**
 
-- `src/agent.c:314` — full-agent path, inside the `SC_ENABLE_MEMORY_SEARCH`
-  block immediately after `sc_memory_index_new` at `src/agent.c:306`.
-  Followed by an analogous rebuild over `workspace/context/` for known
-  doc extensions.
-- `src/main.c:287` — standalone-mode path (similar shape).
+`sc_memory_index_rebuild(midx, mem_dir)` is called eagerly during agent
+construction at **three** sites (the original spec named two and missed the
+second `agent.c` path):
+
+- `src/agent.c:318` — full-agent path, inside the `SC_ENABLE_MEMORY_SEARCH`
+  block immediately after `sc_memory_index_new` at `src/agent.c:310`.
+  Followed by an analogous `sc_memory_index_rebuild_dir` over
+  `workspace/context/` at `src/agent.c:336` for known doc extensions.
+- `src/agent.c:533` — **second agent construction path** (e.g. the
+  standalone/alternate agent path), `sc_memory_index_new` at `src/agent.c:525`,
+  rebuild at `:533`, context rebuild at `:558`. Same defer treatment required
+  here — do not fix only the first site.
+- `src/main.c:288` — standalone-mode path (`sc_memory_index_new` at `:288`,
+  similar shape).
 
 The rebuild walks `~/.smolclaw/memory/`, opens every `.md` file, chunks
 it, and feeds it into the FTS5 virtual table. For a populated memory
@@ -175,11 +184,12 @@ asserts the rebuild happened.
 
 ### Current behavior
 
-`sc_deny_list_init` at `src/tools/exec_common.c:49` compiles the full
-deny-pattern table (~90 POSIX extended regexes) into a freshly
-`calloc`'d `regex_t[]`. It is called from two tool constructors:
+`sc_deny_list_init` at `src/tools/exec_common.c:82` (which delegates to
+`sc_deny_list_init_from` at `:49`) compiles the full deny-pattern table
+(~90 POSIX extended regexes) into a freshly `calloc`'d `regex_t[]`. It is
+called from two tool constructors:
 
-- `src/tools/shell.c:339`
+- `src/tools/shell.c:349`
 - `src/tools/background.c:226`
 
 This is doubly wasteful:

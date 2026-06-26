@@ -1,5 +1,12 @@
 # Plan: Checkpoint & Rewind for Agent Turn Recovery
 
+> **Status: IMPLEMENTED (verified 2026-06-26).** This design has shipped.
+> `sc_checkpoint_t`, the 2-slot ring buffer (`SC_MAX_CHECKPOINTS`), per-turn
+> `rewind_count` cap, and the restore-on-stuck path live in
+> `src/agent_internal.h` and `src/agent_turn.c`. This document is retained as
+> the design record. Phase 0 task 0.6 is therefore **verify-only** — confirm
+> coverage with a repeated-tool-error integration test; do not re-implement.
+
 ## Problem
 
 When a model digs itself into a bad conversation state (accumulated error

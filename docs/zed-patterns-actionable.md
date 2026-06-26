@@ -10,6 +10,15 @@ Extracted from an internal cross-codebase analysis of the Zed editor's agent pat
 
 Six patterns from Zed's architecture are directly applicable to smolclaw. Three address known bugs from the code-analysis-report, two improve architecture, one is a low-effort quality-of-life improvement.
 
+> **Status (re-verified 2026-06-26):**
+> - **Task 1 (arena):** allocator shipped (`src/util/arena.{c,h}`) and wired
+>   per-turn in `src/agent.c`; only provider-parse adoption remains.
+> - **Task 2 (sc_task_t):** shipped (`src/util/task.{c,h}`); verify
+>   summarization + shutdown join use it (M-8).
+> - **Task 6 (provider health):** tracker shipped in `src/agent_turn.c`; verify
+>   fallback consults it and surface in analytics.
+> - Tasks 3, 4, 5 remain unimplemented (Phase 4 / Phase 5).
+
 ---
 
 ## Task 1: Arena Allocation for Agent Turn Processing

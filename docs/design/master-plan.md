@@ -2,8 +2,9 @@
 
 **Status**: Planning — Not yet executing  
 **Author**: Consolidated from cross-repo analyses (2026-03 through 2026-05)  
-**Last Updated**: 2026-05-21  
-**Related**: Individual phase plans in `docs/design/phases/`, source design docs listed below
+**Last Updated**: 2026-06-26  
+**Related**: Individual phase plans in `docs/design/phases/`, source design docs listed below  
+**Hermes gap analysis**: Tier map in §4.3 (2026-06 comparative roadmap)
 
 ---
 
@@ -50,6 +51,10 @@ Every item in this roadmap must satisfy:
   complete; Phase(s): 1, 3, 4, 5; Notes: Local-model patterns
 - **[`docs/design/xai-grok-oauth.md`](xai-grok-oauth.md)** — Status: Design complete; Phase(s): 2;
   Notes: <650 LOC cap
+- **[`docs/design/deferred-initialization.md`](deferred-initialization.md)** — Status: Spec complete;
+  Phase(s): 0; Notes: Hermes PR pattern lift; RSS/startup
+- `docs/integrations/mcp-cookbook.md` *(not yet created — authored as the Phase 2.12 deliverable)* —
+  Status: Planned; Phase(s): 2; Notes: Tier 2 MCP delegation (browser, HA, media)
 - **[`lazyagent_borrow_tasks.md`](../../lazyagent_borrow_tasks.md)** — Status: Pattern lifts;
   Phase(s): 2; Notes: Session CLI
 - **[`docs/zed-patterns-actionable.md`](../zed-patterns-actionable.md)** — Status: Recommendations;
@@ -94,20 +99,27 @@ Every item in this roadmap must satisfy:
 - **Security depth** — Items: Microsandbox exec backend; Primary sources: todo.md
 - **Explicitly deferred** — Items: Rich TUI, Signal media/SSE, shipcheck/handoff, batch editor;
   Primary sources: grok-cli, smallharness, signal
+- **Hermes-gap (Tier 1 core)** — Items: Deferred init, cron parser, gateway slash commands, session
+  reset, busy-input, silent tokens, session_search, compact tool; Phase(s): 0–4
+- **Hermes-gap (Tier 2 MCP)** — Items: Browser, Home Assistant, media gen via MCP cookbook;
+  Phase(s): 2+ parallel
+- **Hermes-gap (Tier 4 learning loop)** — Items: Post-turn memory review, staged writes, capacity
+  headers; Phase(s): 4.13–4.14; Notes: no `skill_manage` / Skills Hub
 
 ### 4.2 Size impact summary
 
-- **Audit high/medium fixes** — LOC (rough): 300–600; Binary Δ (rough): +0–5 KB; Kconfig / config
-  gate: always
+- **Audit high/medium fixes** — **[Highs H-1–H-10 + M-1 SHIPPED; verify H-11/M-3 + tests]**; LOC
+  (rough): 50–200; Binary Δ (rough): ~0; Kconfig / config gate: always
 - **Binary size optimizations** — LOC (rough): 50–200 (CMake); Binary Δ (rough): **−10–25%**;
   Kconfig / config gate: build profile
 - **Optional FTS5** — LOC (rough): 20–50 (CMake); Binary Δ (rough): **−50–200 KB** on minimal;
   Kconfig / config gate: `SC_ENABLE_MEMORY_SEARCH`
-- **Checkpoint rewind** — LOC (rough): 100–150; Binary Δ (rough): ~0; Kconfig / config gate: always
-- **Arena allocator (Zed T1)** — LOC (rough): 250–400; Binary Δ (rough): +5–15 KB; Kconfig / config
-  gate: always
-- **sc_task_t (Zed T2)** — LOC (rough): 150–250; Binary Δ (rough): ~5 KB; Kconfig / config gate:
-  always
+- **Checkpoint rewind** — **[SHIPPED — verify-only]**; LOC (rough): 0 (+test); Binary Δ (rough): ~0;
+  Kconfig / config gate: always
+- **Arena allocator (Zed T1)** — **[PARTIAL — allocator shipped + per-turn wired; provider-parse
+  adoption remains]**; LOC (rough): 80–150; Binary Δ (rough): ~0; Kconfig / config gate: always
+- **sc_task_t (Zed T2)** — **[SHIPPED — verify M-8 join]**; LOC (rough): 0 (+test); Binary Δ (rough):
+  ~5 KB; Kconfig / config gate: always
 - **Tool spill + token compaction (P0)** — LOC (rough): 200–350; Binary Δ (rough): +10–20 KB;
   Kconfig / config gate: config
 - **SmallHarness Phase A** — LOC (rough): 400–700; Binary Δ (rough): +15–40 KB; Kconfig / config
@@ -116,8 +128,8 @@ Every item in this roadmap must satisfy:
   `SC_ENABLE_XAI_OAUTH`
 - **Session compact/prune CLI** — LOC (rough): 200–450; Binary Δ (rough): ~5–15 KB; Kconfig / config
   gate: CLI only
-- **Provider health (Zed T6)** — LOC (rough): 80–150; Binary Δ (rough): ~5 KB; Kconfig / config
-  gate: always
+- **Provider health (Zed T6)** — **[SHIPPED — verify fallback consults it + surface in analytics]**;
+  LOC (rough): 20–60; Binary Δ (rough): ~5 KB; Kconfig / config gate: always
 - **Signal channel MVP** — LOC (rough): 800–1,000; Binary Δ (rough): +40–80 KB; Kconfig / config
   gate: `SC_ENABLE_SIGNAL` default **n**
 - **SmallHarness Phase B (modes, confirm)** — LOC (rough): 300–500; Binary Δ (rough): +10–20 KB;
@@ -136,19 +148,64 @@ Every item in this roadmap must satisfy:
   `SC_ENABLE_MICROSANDBOX` + external daemon
 - **Rich TUI (grok-cli borrow)** — LOC (rough): 2,000+; Binary Δ (rough): +100 KB+; Kconfig / config
   gate: **reject**
+- **Deferred runtime init (0.8)** — LOC (rough): 150–250; Binary Δ (rough): ~0 (RSS win); Kconfig /
+  config gate: always
+- **Gateway slash + cron (2.9–2.10)** — LOC (rough): 280–500; Binary Δ (rough): +10–15 KB; Kconfig /
+  config gate: config / `SC_ENABLE_CRON`
+- **Gateway polish (3.7–3.9)** — LOC (rough): 290–460; Binary Δ (rough): +10 KB; Kconfig / config
+  gate: config
+- **Session search (4.11)** — LOC (rough): 300–500; Binary Δ (rough): +15–25 KB; Kconfig / config
+  gate: `SC_ENABLE_SESSION_SEARCH` default **n**
+- **Tier 4 memory review (4.13–4.14)** — LOC (rough): 350–600; Binary Δ (rough): +15 KB; Kconfig /
+  config gate: config **default off**
 
 Estimates are order-of-magnitude for stripped release builds on x86_64; measure after each phase.
+
+### 4.3 Hermes gap tier map
+
+Cross-reference for [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) comparative
+roadmap. **Tiers define where code lives**; **phases define execution order**.
+
+| Tier | Meaning | Where it ships | Examples in this roadmap |
+|------|---------|----------------|--------------------------|
+| **T1** | Core C binary (Kconfig-gated) | Phases 0–4 | 0.8 deferred init; 2.9–2.11 cron, slash, skills docs; 3.7–3.9 gateway polish; 4.11–4.12 session_search, compact tool |
+| **T2** | MCP subprocess delegation | Parallel from Phase 2 | 2.12 MCP cookbook — browser, HA, image/TTS; zero smolclaw binary cost |
+| **T3** | Separate orchestration layer | Never in smolclaw (`SCOPE.md`) | Fleet dashboards, relay for 15+ channels, Desktop/TUI, ACP adapter, RL/Atropos, Skills Hub |
+| **T4** | Minimal self-improvement loop | Phase 4.13–4.14 (opt-in) | Post-turn memory review, `write_approval` staging; **not** `skill_manage`, `/learn`, Honcho |
+
+**Closure principle:** selective Hermes parity at the **MCP/config boundary**, not parity at the
+Python/Playwright dependency cone.
+
+| Hermes capability | After P0–4 + T2 | Remaining gap |
+|-------------------|-----------------|---------------|
+| Grok subscription OAuth | Phase 2 | Multi-account pool → Phase 5 |
+| Context compression | Phase 1 + 4 | Three API modes — out of scope |
+| 7 core channels | Today + Signal P3 | 20+ native adapters impractical |
+| Browser / media | T2 MCP (+ optional P4 wrappers) | No in-process Playwright |
+| Self-improving loop | T4 subset (4.13–4.14) | skill_manage, Skills Hub → T3 |
+| Docker/Modal/Daytona terminals | microsandbox 4.9 + T2 | Six backends — partial by design |
+
+Task IDs: see phase plans — **0.8**, **2.9–2.12**, **3.7–3.9**, **4.11–4.14**.
 
 ---
 
 ## 5. Smol-Theme Scorecard
 
-- **Strong smol** — Audit fixes, binary size opts, optional FTS5, checkpoint rewind, sc_task_t,
-  provider health, port logging, X note_tweet, xAI OAuth (bounded), Signal MVP (Kconfig off)
+> This scorecard categorizes items by **smol-alignment**, not status. Several
+> "Strong smol" items have **already shipped** (checkpoint rewind, sc_task_t,
+> provider health, arena allocator) — see the `[SHIPPED]`/`[PARTIAL]` markers
+> in §4.2 and the phase docs for execution status.
+
+
+- **Strong smol** — Audit fixes, binary size opts, optional FTS5, deferred init, checkpoint rewind,
+  sc_task_t, provider health, port logging, X note_tweet, xAI OAuth (bounded), Signal MVP (Kconfig
+  off), silent tokens, cron parser
 - **Good if gated** — SmallHarness Phase A–B, claude-code P0/P1, MCP capabilities, session
-  compact/prune, notify extras
+  compact/prune, gateway slash/reset/queue, session_search, notify extras, Tier 4 memory review
 - **Bloat risk** — Project memory, shipcheck/handoff, Zed context pipeline, session index,
-  microsandbox ops, Signal Phase 2–3, Rich TUI
+  microsandbox ops, Signal Phase 2–3, Rich TUI, steer busy-input, `/background` sessions
+- **Tier 2 (zero binary cost)** — MCP cookbook: browser, HA, media — document and delegate
+- **Tier 3 (out of repo)** — Fleet relay, Desktop, ACP, Skills Hub, RL trajectories
 - **Skip / defer** — grok-cli TUI, OpenRouter compare, SmallHarness batch editor, lazyagent
   multi-format reading
 
@@ -169,18 +226,21 @@ Phase 5 — Defer / reject              docs/design/phases/phase-5-defer-reject.
 
 ### Phase summary
 
-- **0** — Goal: Fix known bugs; shrink binary; checkpoint rewind; LOC budget: ~500–900; Binary
-  target: Net **smaller** or flat; Exit criteria: Audit highs closed; ctest green; size baseline
-  recorded
+- **0** — Goal: Fix known bugs; shrink binary; deferred init; checkpoint rewind; LOC budget:
+  ~650–1,150; Binary target: Net **smaller** or flat (+ RSS win); Exit criteria: Audit highs closed;
+  ctest green; size baseline recorded
 - **1** — Goal: Context/token efficiency + local-model quick wins; LOC budget: ~700–1,200; Binary
   target: +≤40 KB default config; Exit criteria: Spill/compaction + SmallHarness Phase A behind
   flags
-- **2** — Goal: Auth, session CLI, provider health; LOC budget: ~900–1,400; Binary target: +≤80 KB
-  with OAuth on; Exit criteria: xAI OAuth shippable; session compact works
-- **3** — Goal: Kconfig-gated channels & modes; LOC budget: ~1,200–1,800; Binary target: +≤80 KB per
-  flag enabled; Exit criteria: Signal MVP; operator modes; no default-on bloat
-- **4** — Goal: Memory index, arena, MCP caps, caching; LOC budget: ~1,500–2,500; Binary target:
-  gated; Exit criteria: Each item independently shippable
+- **2** — Goal: Auth, session CLI, provider health, gateway slash, MCP cookbook; LOC budget:
+  ~1,200–2,000; Binary target: +≤80 KB with OAuth on; Exit criteria: xAI OAuth shippable; session
+  compact works; slash MVP + MCP doc published
+- **3** — Goal: Kconfig-gated channels, modes, gateway polish; LOC budget: ~1,500–2,100; Binary
+  target: +≤80 KB per flag enabled; Exit criteria: Signal MVP; reset/queue/silent tokens; no
+  default-on bloat
+- **4** — Goal: Memory index, arena, MCP caps, session_search, Tier 4 review; LOC budget:
+  ~2,100–3,200; Binary target: gated; Exit criteria: Each item independently shippable; Tier 4
+  default off
 - **5** — Goal: Parking lot; LOC budget: —; Binary target: —; Exit criteria: Revisit only with
   demand
 
@@ -260,6 +320,8 @@ docs/design/
   signal-channel.md                       ← authoritative for Signal
   xai-grok-oauth.md                       ← authoritative for OAuth
   smallharness-integration.md             ← authoritative for local-model lifts
+  deferred-initialization.md              ← authoritative for lazy runtime init (0.8)
+  integrations/mcp-cookbook.md          ← Tier 2 MCP delegation (NOT YET CREATED; Phase 2.12 deliverable)
 ```
 
 ---
