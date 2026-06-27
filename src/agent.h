@@ -45,6 +45,8 @@ typedef struct sc_agent {
     int session_reset_idle_min;
     /* Busy-input mode (task 3.8): 0 interrupt (default), 1 queue */
     int busy_input_mode;
+    /* Silent delivery tokens (task 3.9): 1 = suppress silence-token replies */
+    int silent_tokens_enabled;
     int max_output_chars;
     int max_fetch_chars;
     int tool_selection;         /* 0 = fixed (all tools), 1 = auto (keyword heuristic) */

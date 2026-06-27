@@ -1,6 +1,7 @@
 #ifndef SC_GATEWAY_ROUTE_H
 #define SC_GATEWAY_ROUTE_H
 
+#include <ctype.h>
 #include <string.h>
 
 #include "bus.h"
@@ -54,6 +55,57 @@ static inline int sc_gateway_run_repo_dir_safe(const char *p)
         seg = slash + 1;
     }
     return 1;
+}
+
+/* Task 3.9 — Silent delivery tokens.
+ *
+ * Returns 1 iff the agent's final response, after trimming leading/trailing
+ * ASCII whitespace and case-folding, equals exactly one of the intentional-
+ * silence tokens: "[SILENT]", "SILENT", "NO_REPLY", "NO REPLY". The gateway
+ * uses this to suppress outbound delivery (e.g. in group chats / automations
+ * where the model decides not to speak) while the turn is still stored in the
+ * session transcript by run_agent_loop, so alternation is preserved.
+ *
+ * The match is on the WHOLE trimmed response, not a substring: a real reply
+ * that merely mentions "no reply" is delivered normally. Error strings (which
+ * begin with "Error: ...") never equal a token, so failed turns still surface
+ * — silence never swallows an error.
+ *
+ * NULL or empty input returns 0 (nothing to suppress; let the caller's own
+ * empty-response handling run).
+ *
+ * Pure and header-inline so tests/test_gateway_routing.c can exercise the
+ * truth table without the gateway/agent/channel machinery.
+ */
+static inline int sc_gateway_is_silent_token(const char *response)
+{
+    if (!response) return 0;
+
+    /* Trim leading whitespace. */
+    const char *s = response;
+    while (*s && isspace((unsigned char)*s)) s++;
+
+    /* Trim trailing whitespace. */
+    const char *e = s + strlen(s);
+    while (e > s && isspace((unsigned char)*(e - 1))) e--;
+
+    size_t len = (size_t)(e - s);
+    if (len == 0) return 0;
+
+    static const char *const tokens[] = {
+        "[SILENT]", "SILENT", "NO_REPLY", "NO REPLY",
+    };
+    for (size_t i = 0; i < sizeof(tokens) / sizeof(tokens[0]); i++) {
+        const char *t = tokens[i];
+        if (strlen(t) != len) continue;
+        size_t j = 0;
+        for (; j < len; j++) {
+            if (toupper((unsigned char)s[j]) != toupper((unsigned char)t[j]))
+                break;
+        }
+        if (j == len) return 1;
+    }
+    return 0;
 }
 
 #endif /* SC_GATEWAY_ROUTE_H */

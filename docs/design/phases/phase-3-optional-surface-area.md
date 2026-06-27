@@ -193,13 +193,25 @@ agent field. Tests in `test_bus.c`.
 
 **Source:** Hermes intentional silence for group chats and automations.
 
-**Files:** `src/channels/manager.c`, outbound delivery path
+**Files:** `src/gateway_route.h`, `src/main.c` (gateway delivery), `src/config.{c,h}`, `src/agent.{c,h}`
 
-- [ ] If agent final response is exactly one token (after trim + case fold): `[SILENT]`, `SILENT`,
-  `NO_REPLY`, `NO REPLY` — suppress outbound delivery
-- [ ] Silence turn **stored** in session transcript (alternation preserved)
-- [ ] Failed turns still surface errors (do not silence errors)
-- [ ] Config: `gateway.silent_tokens_enabled` (default true)
+- [x] If agent final response is exactly one token (after trim + case fold): `[SILENT]`, `SILENT`,
+  `NO_REPLY`, `NO REPLY` — suppress outbound delivery (pure `sc_gateway_is_silent_token`)
+- [x] Silence turn **stored** in session transcript (alternation preserved) —
+  free by construction: `run_agent_loop` stores the assistant message before
+  returning; the gateway only suppresses the *delivery*
+- [x] Failed turns still surface errors (do not silence errors) — free by
+  construction: error strings begin with `Error: …` and can't equal a token
+- [x] Config: `silent_tokens_enabled` (default true). **Top-level** key (not
+  `gateway.…`) to match siblings 3.7 `session_reset` / 3.8 `busy_input_mode`,
+  which are also top-level; deviation from the spec's dotted name documented in
+  `docs/CONFIGURATION.md`.
+
+**Status (2026-06-27):** ✅ done. Pure decision `sc_gateway_is_silent_token()`
+(gateway_route.h, header-inline like `sc_gateway_should_isolate`); gateway hook
+in `main.c` suppresses delivery when enabled + matched. Config/agent field
+default-true. Tests in `test_gateway_routing.c` (exact/case/trim/substring/
+error+empty truth table).
 
 ---
 
@@ -270,6 +282,17 @@ agent field. Tests in `test_bus.c`.
   always-allow cache via CLI `y/N/a`). Config/agent/MCP wiring. Tests in
   `test_config.c` + `test_subagent_caps.c`. Diff-preview / async-summary /
   allowlist-ceiling deferred (documented).
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 5 — `task/3.9-silent-tokens` (task 3.9)** — 2026-06-27. Silent
+  delivery tokens: pure `sc_gateway_is_silent_token()` (gateway_route.h) matches
+  `[SILENT]`/`SILENT`/`NO_REPLY`/`NO REPLY` on the whole trimmed+case-folded
+  response; gateway delivery hook in `main.c` suppresses the send when
+  `silent_tokens_enabled` (top-level config, default true). Transcript storage
+  and error surfacing are free by construction (assistant message stored before
+  return; error strings can't match). New truth-table cases in
+  `test_gateway_routing.c`; CONFIGURATION.md documents the key.
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).

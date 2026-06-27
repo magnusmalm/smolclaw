@@ -814,6 +814,7 @@ sc_config_t *sc_config_default(void)
     cfg->max_tokens_per_hour = SC_DEFAULT_MAX_TOKENS_PER_HOUR;
     cfg->rate_limit_per_minute = SC_DEFAULT_RATE_LIMIT_PER_MINUTE;
     cfg->network_scope        = 2; /* SC_NET_SCOPE_PUBLIC */
+    cfg->silent_tokens_enabled = 1; /* task 3.9: suppress [SILENT]/NO_REPLY */
     cfg->sandbox_enabled      = 1;
     cfg->memory_consolidation = 1;
     cfg->tee_enabled          = 1;
@@ -1475,6 +1476,10 @@ sc_config_t *sc_config_load(const char *path)
     /* Busy-input mode (task 3.8) */
     const char *bim = sc_json_get_string(root, "busy_input_mode", "interrupt");
     cfg->busy_input_mode = (strcmp(bim, "queue") == 0) ? 1 : 0;
+
+    /* Silent delivery tokens (task 3.9): default true. */
+    cfg->silent_tokens_enabled =
+        sc_json_get_bool(root, "silent_tokens_enabled", cfg->silent_tokens_enabled);
 
     /* Apply environment variable overrides last */
     apply_env_overrides(cfg);

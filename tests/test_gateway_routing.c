@@ -221,6 +221,53 @@ static void test_empty_run_repo_dir_stored_as_null(void)
     sc_inbound_msg_free(msg);
 }
 
+/* ---- Task 3.9: silent delivery tokens ------------------------------- */
+
+static void test_silent_token_exact_matches(void)
+{
+    /* The four canonical tokens, verbatim, all suppress. */
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("[SILENT]"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("SILENT"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("NO_REPLY"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("NO REPLY"), 1);
+}
+
+static void test_silent_token_case_insensitive(void)
+{
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("silent"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("[Silent]"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("no_reply"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("No Reply"), 1);
+}
+
+static void test_silent_token_trims_surrounding_whitespace(void)
+{
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("  SILENT  "), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("\n[SILENT]\n"), 1);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("\t NO_REPLY \t"), 1);
+}
+
+static void test_silent_token_rejects_substrings_and_extra_text(void)
+{
+    /* Match is on the WHOLE trimmed response, never a substring. */
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("SILENT for now"), 0);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("I will stay silent"), 0);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("NO_REPLY needed here"), 0);
+    /* Internal-whitespace variant of "NO REPLY" is not a canonical token. */
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("NO  REPLY"), 0);
+}
+
+static void test_silent_token_rejects_errors_and_empty(void)
+{
+    /* Errors begin with "Error: ..." and must still surface (not silenced). */
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("Error: failed to build context messages."), 0);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token(""), 0);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("   "), 0);
+    ASSERT_INT_EQ(sc_gateway_is_silent_token(NULL), 0);
+    /* A normal reply is delivered. */
+    ASSERT_INT_EQ(sc_gateway_is_silent_token("Sure, here's the answer."), 0);
+}
+
 int main(void)
 {
     printf("test_gateway_routing:\n");
@@ -239,5 +286,10 @@ int main(void)
     RUN_TEST(test_run_repo_dir_safe_rejects_oversize);
     RUN_TEST(test_bus_preserves_run_repo_dir);
     RUN_TEST(test_empty_run_repo_dir_stored_as_null);
+    RUN_TEST(test_silent_token_exact_matches);
+    RUN_TEST(test_silent_token_case_insensitive);
+    RUN_TEST(test_silent_token_trims_surrounding_whitespace);
+    RUN_TEST(test_silent_token_rejects_substrings_and_extra_text);
+    RUN_TEST(test_silent_token_rejects_errors_and_empty);
     TEST_REPORT();
 }

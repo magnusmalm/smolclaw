@@ -997,6 +997,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->session_reset_daily_hour = cfg->session_reset.daily_reset_hour;
     agent->session_reset_idle_min = cfg->session_reset.idle_minutes;
     agent->busy_input_mode = cfg->busy_input_mode;
+    agent->silent_tokens_enabled = cfg->silent_tokens_enabled;
     agent->max_output_chars = cfg->max_output_chars;
     agent->tool_selection = cfg->tool_selection;
     agent_set_warmup(agent, cfg);

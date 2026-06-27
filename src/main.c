@@ -1611,6 +1611,20 @@ static void gateway_process_message(sc_agent_t *agent,
         pthread_join(typing_tid, NULL);
     }
 
+    /* Task 3.9: intentional silence. If the final response is exactly a
+     * silence token ([SILENT]/SILENT/NO_REPLY/NO REPLY), suppress outbound
+     * delivery. The turn is already in the transcript (run_agent_loop stored
+     * the assistant message before returning), so alternation is preserved.
+     * Error strings begin with "Error: ..." and never match a token, so
+     * failed turns still surface. */
+    if (response && response[0] && agent->silent_tokens_enabled &&
+        sc_gateway_is_silent_token(response)) {
+        SC_LOG_INFO("gateway", "Silent token '%s' — suppressing delivery",
+                    response);
+        free(response);
+        return;
+    }
+
     if (response && response[0]) {
         /* Check if message tool already sent */
         sc_tool_t *mt = sc_tool_registry_get(agent->tools, "message");

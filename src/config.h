@@ -275,6 +275,12 @@ typedef struct {
      * 1 = queue (coalesce a burst of same-chat messages into one turn). */
     int busy_input_mode;
 
+    /* Silent delivery tokens (task 3.9): when 1 (default), a final response
+     * that is exactly a silence token ([SILENT]/SILENT/NO_REPLY/NO REPLY,
+     * trimmed + case-folded) suppresses outbound delivery; the turn is still
+     * stored in the transcript. 0 disables (deliver the literal token). */
+    int silent_tokens_enabled;
+
     /* Security */
     char **allowed_tools;
     int allowed_tool_count;

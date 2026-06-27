@@ -479,6 +479,29 @@ Starts a fresh session for a chat when the prior one is stale, without a manual
   messages **from the same chat** are coalesced into that one follow-up turn —
   so a burst of quick messages becomes a single prompt instead of N turns.
 
+## `silent_tokens_enabled` — intentional silence (top-level)
+
+| Key                   | Type | Default | Description                          |
+|-----------------------|------|---------|--------------------------------------|
+| silent_tokens_enabled | bool | true    | Suppress delivery of silence tokens  |
+
+When enabled (the default), if the agent's final response is **exactly** a
+silence token — `[SILENT]`, `SILENT`, `NO_REPLY`, or `NO REPLY` (matched after
+trimming surrounding whitespace and case-folding) — the gateway suppresses
+outbound delivery. This lets the model intentionally stay quiet in group chats
+or automations where not every turn warrants a reply.
+
+- The silent turn is still **stored in the session transcript**, so the
+  user/assistant alternation is preserved for the next turn.
+- The match is on the **whole** trimmed response, never a substring — a real
+  reply that merely mentions "no reply" is delivered normally.
+- **Errors are never silenced**: failure messages begin with `Error: …` and
+  cannot equal a token, so failed turns always surface.
+- Set to `false` to deliver the literal token text instead.
+
+> Note: like `busy_input_mode` and `session_reset`, this is a **top-level** key
+> (not nested under a `gateway` object).
+
 ## Skills — reusable prompt templates
 
 Skills are not configured in `config.json`; they are markdown files
