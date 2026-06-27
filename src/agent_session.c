@@ -493,6 +493,23 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key,
     if (count <= agent->session_summary_threshold)
         return;
 
+    /* Audit M-4 backstop: async summarization can fail repeatedly (provider
+     * down, etc.), leaving the soft threshold permanently exceeded and history
+     * growing every turn. If we hit the hard ceiling, force-prune synchronously
+     * to keep_last so memory cannot grow without bound. This drops old context
+     * without a summary — a last resort, logged loudly. `history` is a borrowed
+     * pointer into the session's branch array; we don't touch it after the
+     * truncate. */
+    if (sc_session_force_prune_due(count, agent->session_summary_threshold)) {
+        SC_LOG_WARN("agent",
+            "Session %s reached %d messages (hard cap); force-pruning to last %d "
+            "— summarization is not keeping up", session_key, count,
+            agent->session_keep_last);
+        sc_session_truncate(agent->sessions, session_key, agent->session_keep_last);
+        sc_session_save(agent->sessions, session_key);
+        return;
+    }
+
     SC_LOG_INFO("agent", "Session %s has %d messages, scheduling async summarization",
                 session_key, count);
 

@@ -127,7 +127,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.5 project memory + repo_search | ✅ READY | Q2 resolved: `{SMOLCLAW_HOME}/indexes/<hash>.json`; Q7: v1 own extraction. Large (800–1,200 LOC) |
 | 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |
 | 4.7 prompt budget CLI | ✅ READY | |
-| 4.8 remaining audit mediums | ✅ READY | M-2,4,5,6,7,9,10 |
+| 4.8 remaining audit mediums | 🔵 SHIPPED | M-2 + M-4 fixed; M-5/6/7/10 verified already-closed (M-7 regression test); M-9 deferred (no repro). `test_session` + `test_subagent_caps` |
 | 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |
 | 4.10 updater split spike | ✅ READY | Q4 resolved: no split; measure under section-GC (0.4), revisit only if >50 KB proven |
 | 4.11 global `session_search` | ✅ READY | Kconfig default n |

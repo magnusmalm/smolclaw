@@ -757,6 +757,12 @@ int sc_session_reset_due(int mode, int daily_reset_hour, int idle_minutes,
     return 0;
 }
 
+int sc_session_force_prune_due(int count, int summary_threshold)
+{
+    if (summary_threshold <= 0) return 0;  /* summarization disabled */
+    return count >= summary_threshold * SC_SESSION_FORCE_PRUNE_MULT;
+}
+
 int sc_session_branch(sc_session_manager_t *sm, const char *key, int node_id)
 {
     if (!sm || !key) return -1;

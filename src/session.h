@@ -77,6 +77,17 @@ typedef enum {
 int sc_session_reset_due(int mode, int daily_reset_hour, int idle_minutes,
                          long last_updated, long now);
 
+/* Audit M-4: async summarization can fail repeatedly (e.g. provider down),
+ * leaving the soft summary threshold permanently exceeded and the history
+ * growing every turn without bound. This decides whether a synchronous
+ * fail-safe prune should fire: returns 1 when `count` has reached the hard
+ * ceiling `summary_threshold * SC_SESSION_FORCE_PRUNE_MULT` (the ceiling is
+ * well above the normal summarization point, so it only triggers when
+ * summarization is clearly not keeping up). Returns 0 when summarization is
+ * disabled (summary_threshold <= 0) or the count is below the ceiling. Pure. */
+#define SC_SESSION_FORCE_PRUNE_MULT 4
+int sc_session_force_prune_due(int count, int summary_threshold);
+
 /* Branch: set the active parent to the given node id.
  * The next message appended will fork from that point.
  * Returns 0 on success, -1 if node_id not found. */

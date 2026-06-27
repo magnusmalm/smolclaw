@@ -1,6 +1,6 @@
 # Phase 4: Larger Investments
 
-**Status**: Not started  
+**Status**: In progress (4.8 audit mediums landed)  
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Prerequisite**: [Phase 3](phase-3-optional-surface-area.md) complete (or parallel if demand-driven)  
 **Goal**: Optional subsystems and architectural improvements with higher complexity.  
@@ -136,14 +136,46 @@ auxiliary model path uses same provider factory).
 
 ### 4.8 Remaining audit mediums
 
-- [ ] M-2: Web pipe partial read
-- [ ] M-4: Session unbounded growth guard
-- [ ] M-5: Config reload atomicity
-- [ ] M-6: MCP client timeouts
-- [ ] M-7: Tool confirm bypass review
-- [ ] M-9, M-10: libevent thread safety, IRC reconnect
+Recon (2026-06-27) against `code-analysis-report.md` found most of these mediums
+were already closed by prior hardening; two were genuinely open.
 
-Prioritize by production impact.
+- [x] **M-2: Web pipe partial read** — **fixed.** Added
+  `_Static_assert(sizeof(web_response_t) <= PIPE_BUF)` in `web.c`. POSIX
+  guarantees a pipe write ≤ PIPE_BUF is atomic, so the reader can never see a
+  torn message and lose (leak) the `text` pointer; the assert enforces the
+  invariant at compile time.
+- [x] **M-4: Session unbounded growth guard** — **fixed.** Async summarization
+  can fail repeatedly (provider down), leaving the soft threshold permanently
+  exceeded and history growing every turn. Added pure decision
+  `sc_session_force_prune_due(count, threshold)` (hard ceiling = threshold ×
+  `SC_SESSION_FORCE_PRUNE_MULT`); `sc_maybe_summarize` force-prunes to
+  `keep_last` via the existing `sc_session_truncate` when it fires, logged
+  loudly. Test in `test_session.c`.
+- [x] **M-5: Config reload atomicity** — **verified already mitigated.**
+  `sc_config_load` parses into a *new* `sc_config_t`; the SIGHUP path applies it
+  only when non-NULL (`main.c` ~1794), so a failed parse leaves the live config
+  untouched (no partial state). No code change.
+- [x] **M-6: MCP client timeouts** — **verified already fixed.** MCP requests use
+  finite `SC_MCP_INIT_TIMEOUT_MS` / `SC_MCP_CALL_TIMEOUT_MS` and `mcp_read_line`
+  blocks on `poll()` with a deadline. No code change.
+- [x] **M-7: Tool confirm bypass review** — **verified not exploitable** +
+  regression test. The same `name` drives the allowlist check, the exact-match
+  `strcmp` lookup, and the confirm callback, so an encoded/case/whitespace
+  variant of a confirm-required tool's name fails the lookup ("tool not found")
+  rather than bypassing confirmation. Locked by `test_tool_name_no_confirm_bypass`
+  in `test_subagent_caps.c`.
+- [~] **M-9: libevent thread safety** — **deferred (no reproduction).** The
+  finding is non-specific; the web/mock event loops already call
+  `evthread_use_pthreads`, and cross-thread wakeups go through the pipe (M-2) and
+  the bus, not raw libevent calls. Revisit only with a concrete repro.
+- [x] **M-10: IRC reconnect state** — **verified ok.** The reconnect loop resets
+  `backoff`, `ping_pending`, and `last_recv`, and `irc_connect` re-runs the full
+  NICK/USER/JOIN handshake, so no stale protocol state survives a reconnect. No
+  code change.
+
+**Status (2026-06-27):** ✅ done. Two real fixes (M-2 compile-verified, M-4 with
+pure decision + test); M-5/M-6/M-7/M-10 verified already-closed (M-7 gets a
+regression test); M-9 deferred with rationale.
 
 ### 4.9 Microsandbox exec (optional)
 
@@ -271,6 +303,24 @@ Prioritize by production impact.
 | Project memory secret leakage | Skip `.env`, credentials paths (SmallHarness skip list) |
 | Arena double-free             | Arena owns turn-scoped only; document ownership         |
 | Microsandbox ops burden       | Document as advanced; default off                       |
+
+---
+
+## 6. Slice log
+
+- **Slice 1 — `task/4.8-audit-mediums` (task 4.8)** — 2026-06-27. Closed the
+  remaining audit Medium subset. Two real fixes: **M-2** web pipe partial-read
+  leak (`_Static_assert(sizeof(web_response_t) <= PIPE_BUF)` enforcing atomic
+  pipe writes) and **M-4** session unbounded-growth backstop (pure
+  `sc_session_force_prune_due` + force-prune via `sc_session_truncate` in
+  `sc_maybe_summarize`). Verified-already-closed: M-5 (atomic config load), M-6
+  (finite MCP timeouts), M-10 (IRC reconnect resets state); M-7 verified
+  not-exploitable + regression test (`test_tool_name_no_confirm_bypass`). M-9
+  deferred (no concrete repro). New tests in `test_session.c` +
+  `test_subagent_caps.c`.
+  **Verification gates:** Release `-DSC_ENABLE_WEB=ON` build clean (KC-2
+  `implicit`=0); `ctest` 49/49; `check_size_budget.sh` minimal-dynamic 273 KB ≤
+  1024 KB; `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 

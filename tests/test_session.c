@@ -541,6 +541,23 @@ static void test_session_reset_policy(void)
                                        now - 90 * min, now), 1);
 }
 
+/* Audit M-4: hard-cap force-prune decision. */
+static void test_session_force_prune_due(void)
+{
+    int thr = 20;
+    int cap = thr * SC_SESSION_FORCE_PRUNE_MULT;  /* 80 */
+
+    /* Below the hard ceiling → no force-prune (normal async summarization). */
+    ASSERT_INT_EQ(sc_session_force_prune_due(thr + 1, thr), 0);
+    ASSERT_INT_EQ(sc_session_force_prune_due(cap - 1, thr), 0);
+    /* At / above the ceiling → force-prune. */
+    ASSERT_INT_EQ(sc_session_force_prune_due(cap, thr), 1);
+    ASSERT_INT_EQ(sc_session_force_prune_due(cap + 100, thr), 1);
+    /* Summarization disabled → never force-prune regardless of count. */
+    ASSERT_INT_EQ(sc_session_force_prune_due(100000, 0), 0);
+    ASSERT_INT_EQ(sc_session_force_prune_due(100000, -1), 0);
+}
+
 static void test_session_get_updated(void)
 {
     char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
@@ -577,6 +594,7 @@ int main(void)
     RUN_TEST(test_session_branching);
     RUN_TEST(test_session_jsonl_roundtrip);
     RUN_TEST(test_session_reset_policy);
+    RUN_TEST(test_session_force_prune_due);
     RUN_TEST(test_session_get_updated);
 
     TEST_REPORT();

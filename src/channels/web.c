@@ -87,6 +87,15 @@ typedef struct {
     char *text;
 } web_response_t;
 
+/* Audit M-2: the response struct is shuttled main-thread -> web-thread as a
+ * single write()/read() of sizeof(web_response_t). POSIX guarantees a pipe
+ * write of <= PIPE_BUF bytes is atomic, so the reader never observes a partial
+ * message and can never lose (leak) the `text` pointer to a torn read. This
+ * assertion enforces that invariant at compile time — if the struct ever grows
+ * past PIPE_BUF, switch to a length-prefixed framing instead. */
+_Static_assert(sizeof(web_response_t) <= PIPE_BUF,
+               "web_response_t must fit in PIPE_BUF for atomic pipe writes (audit M-2)");
+
 typedef struct {
     char *bearer_token;
     char *bind_addr;

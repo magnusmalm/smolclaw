@@ -123,6 +123,48 @@ static void test_session_always_allow_cache(void)
     sc_tool_registry_free(reg);
 }
 
+/* Audit M-7: no tool-confirmation bypass via tool-name encoding. The same
+ * `name` string drives the allowlist check, the exact-match lookup, and the
+ * confirm callback, so a crafted/encoded variant of a confirm-required tool's
+ * name cannot reach execution: it simply fails the exact-match lookup ("tool
+ * not found") and the real tool's needs_confirm gate is never circumvented. */
+static void test_tool_name_no_confirm_bypass(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    sc_tool_registry_register(reg, sc_tool_new_simple(
+        "danger", "d", NULL, danger_exec, danger_destroy, 1, NULL));
+    sc_tool_registry_set_confirm(reg, mock_confirm, NULL);
+    g_confirm_ret = 0;  /* deny if ever prompted */
+
+    /* Name variants must NOT match the registered tool — no exec, no confirm. */
+    const char *variants[] = {
+        "danger ",   /* trailing space   */
+        " danger",   /* leading space    */
+        "Danger",    /* case             */
+        "DANGER",
+        "danger\t",  /* control char     */
+        "danger;",   /* shell-ish suffix */
+        "danger\n",
+        "dange",     /* prefix           */
+    };
+    for (size_t i = 0; i < sizeof(variants) / sizeof(variants[0]); i++) {
+        g_confirm_calls = 0; g_exec_calls = 0;
+        sc_tool_result_t *r = sc_tool_registry_execute(
+            reg, variants[i], NULL, NULL, NULL, NULL);
+        sc_tool_result_free(r);
+        ASSERT_INT_EQ(g_exec_calls, 0);     /* never executed */
+        ASSERT_INT_EQ(g_confirm_calls, 0);  /* confirm gate never even reached */
+    }
+
+    /* The exact name still routes through the confirm gate (deny → no exec). */
+    g_confirm_calls = 0; g_exec_calls = 0;
+    sc_tool_result_free(sc_tool_registry_execute(reg, "danger", NULL, NULL, NULL, NULL));
+    ASSERT_INT_EQ(g_confirm_calls, 1);
+    ASSERT_INT_EQ(g_exec_calls, 0);
+
+    sc_tool_registry_free(reg);
+}
+
 static void test_approval_policy_never_skips_confirm(void)
 {
     sc_tool_registry_t *reg = sc_tool_registry_new();
@@ -150,6 +192,7 @@ int main(void)
     RUN_TEST(test_approval_policy_decision);
     RUN_TEST(test_session_always_allow_cache);
     RUN_TEST(test_approval_policy_never_skips_confirm);
+    RUN_TEST(test_tool_name_no_confirm_bypass);
 
     TEST_REPORT();
 }
