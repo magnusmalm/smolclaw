@@ -1,6 +1,6 @@
 # Master Plan: smolclaw Feature & Improvement Roadmap
 
-**Status**: Executing — **Phase 0 & Phase 1 complete (2026-06-27)**, landed on `master`; Phase 2 next  
+**Status**: Executing — **Phase 0 & 1 complete; Phase 2 READY tasks landed (2026-06-27)** on `master` (HEAD `161d9dc`). Remaining Phase 2: 2.1/2.2 xAI OAuth + 2.12 MCP cookbook (GATED-EXT, human acceptance); 2.5 incremental reload (skip — no measured bottleneck).  
 **Author**: Consolidated from cross-repo analyses (2026-03 through 2026-05)  
 **Last Updated**: 2026-06-27  
 **Related**: Individual phase plans in `docs/design/phases/`, source design docs listed below  
@@ -224,8 +224,8 @@ Phases are ordered to **minimize regression risk**: foundations first, agent-loo
 ```text
 Phase 0 — Safety & stability     ✓ DONE  docs/design/phases/phase-0-safety-and-stability.md
 Phase 1 — Context efficiency     ✓ DONE  docs/design/phases/phase-1-context-efficiency.md
-Phase 2 — Operator & provider UX  ← next docs/design/phases/phase-2-operator-provider-ux.md
-Phase 3 — Optional surface area       docs/design/phases/phase-3-optional-surface-area.md
+Phase 2 — Operator & provider UX  ~ READY tasks landed; GATED-EXT (2.1/2.12) remain
+Phase 3 — Optional surface area   ← next docs/design/phases/phase-3-optional-surface-area.md
 Phase 4 — Larger investments          docs/design/phases/phase-4-larger-investments.md
 Phase 5 — Defer / reject              docs/design/phases/phase-5-defer-reject.md
 ```

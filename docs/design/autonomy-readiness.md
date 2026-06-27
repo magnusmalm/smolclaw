@@ -77,21 +77,24 @@ autonomous-to-implement but human-to-accept.
 
 ### Phase 2 — Operator & provider UX
 
+**Status (2026-06-27):** All READY tasks **landed on `master`** (HEAD `161d9dc`).
+GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.5 skipped.
+
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 2.1 xAI Grok OAuth | 🟠 GATED-EXT | Code + mock_http READY; **real login needs SuperGrok sub + current client_id/endpoints** |
+| 2.1 xAI Grok OAuth | 🟠 GATED-EXT | Not started; **real login needs SuperGrok sub + current client_id/endpoints** |
 | 2.2 `auth` subcommand | 🟠 GATED-EXT | Part of 2.1 |
-| 2.3 `session compact` | ✅ READY | Tree-format tests |
-| 2.4 `session prune` | ✅ READY | |
-| 2.5 incremental reload | 🟡 GATED-DEC | Implement only "if measured bottleneck" — needs a measurement decision |
-| 2.6 provider health | 🔵 SHIPPED | Tracker exists in `agent_turn.c`; verify fallback consults it + surface in analytics |
-| 2.7 port conflict logging | ✅ READY | |
-| 2.8 backoff verification | ✅ READY | Audit + add tests if gaps |
-| 2.9 cron expression parser | ✅ READY | Premise verified (`"cron"` kind disabled); unit tests |
-| 2.10 gateway slash MVP | ✅ READY | Mock-channel tests cover acceptance |
-| 2.11 skills format docs | ✅ READY | Docs only |
-| 2.12 MCP cookbook | 🟠 GATED-EXT | Needs ≥1 real MCP server for the smoke-test recipe |
-| 2.13 MoA-lite | ✅ READY | Virtual `moa` provider; mock HTTP tests; `local_only` presets; spec: mixture-of-agents.md |
+| 2.3 `session compact` | 🔵 SHIPPED | `session_maint.c`; `test_session_maint` |
+| 2.4 `session prune` | 🔵 SHIPPED | `sc_session_prune_candidates` |
+| 2.5 incremental reload | 🟡 GATED-DEC | **Skipped** — no measured bottleneck (in-process append covers reload) |
+| 2.6 provider health | 🔵 SHIPPED | `AUTH_EXPIRED`/401 + transition logging; skip-on-unhealthy test |
+| 2.7 port conflict logging | 🔵 SHIPPED | `util/port_diag.c`; `test_port_diag` |
+| 2.8 backoff verification | 🔵 SHIPPED | Audited; transient-retry test |
+| 2.9 cron expression parser | 🔵 SHIPPED | `cron/cron_parse.c`; 7 cron tests |
+| 2.10 gateway slash MVP | 🔵 SHIPPED | `slash.c`; `test_slash` |
+| 2.11 skills format docs | 🔵 SHIPPED | README + CONFIGURATION |
+| 2.12 MCP cookbook | 🟠 GATED-EXT | Not started; needs ≥1 real MCP server for the smoke-test recipe |
+| 2.13 MoA-lite | 🔵 SHIPPED | `providers/moa.c`; `SC_ENABLE_MOA` default n; `test_moa` (9 cases) |
 
 ### Phase 3 — Optional surface area
 
