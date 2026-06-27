@@ -392,3 +392,18 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
     *out_count = idx;
     return msgs;
 }
+
+/* ---- Task 4.7: prompt-budget helpers (pure) -------------------------- */
+
+int sc_context_estimate_tokens(size_t bytes)
+{
+    /* ~4 chars per token, rounded up. */
+    return (int)((bytes + 3) / 4);
+}
+
+int sc_context_budget_warn(int used_tokens, int window, int warn_pct)
+{
+    if (window <= 0 || warn_pct <= 0) return 0;
+    /* used >= window * warn_pct / 100, without overflow-prone float. */
+    return (long)used_tokens * 100 >= (long)window * warn_pct;
+}

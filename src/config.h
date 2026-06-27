@@ -268,6 +268,9 @@ typedef struct {
     int compress_tool_results;   /* 1 = on (default), 0 = off */
     int compress_keep_recent;    /* keep this many most-recent messages verbatim */
     int compress_min_bytes;      /* only compress tool results larger than this */
+    /* Task 4.7: `smolclaw context` warns when estimated prompt tokens reach
+     * this percent of the model context window (0 = never warn). */
+    int context_warn_pct;
     int max_output_chars;
     int max_tool_result_chars;     /* spill a single tool result to disk above this (0 = default) */
     int tool_result_preview_chars; /* preview kept inline after spill */

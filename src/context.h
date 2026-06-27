@@ -85,4 +85,16 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
 /* Load bootstrap files (AGENTS.md, SOUL.md, etc). Caller owns result. */
 char *sc_context_load_bootstrap(const sc_context_builder_t *cb);
 
+/* Task 4.7: prompt-budget helpers (pure, unit-tested).
+ *
+ * sc_context_estimate_tokens — rough token estimate from a byte count using
+ * the common ~4-chars-per-token heuristic (rounded up). This is an estimate,
+ * not a tokenizer; good enough for a budget overview.
+ *
+ * sc_context_budget_warn — returns 1 when `used_tokens` reaches `warn_pct`
+ * percent of `window` (the model's context window). Returns 0 when the inputs
+ * make a warning meaningless (window <= 0 or warn_pct <= 0). */
+int sc_context_estimate_tokens(size_t bytes);
+int sc_context_budget_warn(int used_tokens, int window, int warn_pct);
+
 #endif /* SC_CONTEXT_H */

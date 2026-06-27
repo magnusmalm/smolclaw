@@ -253,9 +253,32 @@ static void test_isolated_constructor_uses_namespaced_memory(void)
     rm_rf(ws);
 }
 
+/* Task 4.7: prompt-budget pure helpers. */
+static void test_context_estimate_tokens(void)
+{
+    ASSERT_INT_EQ(sc_context_estimate_tokens(0), 0);
+    ASSERT_INT_EQ(sc_context_estimate_tokens(1), 1);    /* rounds up */
+    ASSERT_INT_EQ(sc_context_estimate_tokens(4), 1);
+    ASSERT_INT_EQ(sc_context_estimate_tokens(5), 2);
+    ASSERT_INT_EQ(sc_context_estimate_tokens(400), 100);
+}
+
+static void test_context_budget_warn(void)
+{
+    /* 80% threshold of a 1000-token window = 800. */
+    ASSERT_INT_EQ(sc_context_budget_warn(799, 1000, 80), 0);
+    ASSERT_INT_EQ(sc_context_budget_warn(800, 1000, 80), 1);
+    ASSERT_INT_EQ(sc_context_budget_warn(950, 1000, 80), 1);
+    /* Degenerate inputs never warn. */
+    ASSERT_INT_EQ(sc_context_budget_warn(5000, 0, 80), 0);
+    ASSERT_INT_EQ(sc_context_budget_warn(5000, 1000, 0), 0);
+}
+
 int main(void)
 {
     printf("test_context_isolation:\n");
+    RUN_TEST(test_context_estimate_tokens);
+    RUN_TEST(test_context_budget_warn);
     RUN_TEST(test_isolated_constructor_rejects_bad_ns);
     RUN_TEST(test_isolated_skips_memory_block);
     RUN_TEST(test_non_isolated_includes_memory_block);

@@ -211,6 +211,7 @@ static void print_help(void)
 #endif
     printf("  pairing     Manage channel pairing requests\n");
     printf("  cost        View token usage and costs\n");
+    printf("  context     Show prompt budget breakdown for a session\n");
     printf("  doctor      Validate configuration and dependencies\n");
     printf("  selftest    Run doctor checks + LLM round-trip, exit 0/1\n");
     printf("              --config <path>  Use a specific config file\n");
@@ -1302,6 +1303,103 @@ static int session_prune(int argc, char **argv, const char *sessions_dir)
     return 0;
 }
 
+/* Task 4.7: prompt-budget overview. Estimates how the prompt for a session
+ * breaks down — system prompt, tool schemas, conversation history, and tool
+ * results — in bytes and (rough) tokens, and warns when the total approaches
+ * the model context window. Read-only; does not call any provider. */
+static int cmd_context(int argc, char **argv)
+{
+    const char *session_key = "cli:default";
+    int warn_pct_override = -1;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--warn-pct") == 0 && i + 1 < argc)
+            warn_pct_override = atoi(argv[++i]);
+        else if (argv[i][0] != '-')
+            session_key = argv[i];
+    }
+
+    sc_config_t *cfg = load_config_or_exit();
+    char *workspace = sc_config_workspace_path(cfg);
+
+    /* Tools: register the standalone set and size each schema. */
+    size_t tools_bytes = 0;
+    int tool_count = 0;
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    if (reg) {
+        sc_register_tools_standalone(reg, cfg, workspace);
+        sc_tool_definition_t *defs = sc_tool_registry_to_defs(reg, &tool_count);
+        for (int i = 0; i < tool_count; i++) {
+            tools_bytes += strlen(defs[i].name ? defs[i].name : "");
+            tools_bytes += strlen(defs[i].description ? defs[i].description : "");
+            if (defs[i].parameters) {
+                char *p = cJSON_PrintUnformatted(defs[i].parameters);
+                if (p) { tools_bytes += strlen(p); free(p); }
+            }
+        }
+        sc_tool_definitions_free(defs, tool_count);
+    }
+
+    /* System prompt. */
+    sc_context_builder_t *cb = sc_context_builder_new(workspace);
+    if (cb && reg) sc_context_builder_set_tools(cb, reg);
+    char *sys = cb ? sc_context_build_system_prompt(cb) : NULL;
+    size_t sys_bytes = sys ? strlen(sys) : 0;
+
+    /* Conversation history vs tool results from the stored session. */
+    sc_strbuf_t sb; sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/sessions", workspace);
+    char *sessions_dir = sc_strbuf_finish(&sb);
+    sc_session_manager_t *sm = sc_session_manager_new(sessions_dir);
+    size_t hist_bytes = 0, toolres_bytes = 0;
+    int msg_count = 0, toolres_count = 0;
+    if (sm) {
+        int count = 0;
+        sc_llm_message_t *h = sc_session_get_history(sm, session_key, &count);
+        msg_count = count;
+        for (int i = 0; i < count; i++) {
+            size_t c = h[i].content ? strlen(h[i].content) : 0;
+            if (h[i].tool_call_id) { toolres_bytes += c; toolres_count++; }
+            else hist_bytes += c;
+        }
+    }
+
+    int sys_tok     = sc_context_estimate_tokens(sys_bytes);
+    int tools_tok   = sc_context_estimate_tokens(tools_bytes);
+    int hist_tok    = sc_context_estimate_tokens(hist_bytes);
+    int toolres_tok = sc_context_estimate_tokens(toolres_bytes);
+    int total_tok   = sys_tok + tools_tok + hist_tok + toolres_tok;
+    size_t total_bytes = sys_bytes + tools_bytes + hist_bytes + toolres_bytes;
+    int window = cfg->context_window > 0 ? cfg->context_window : cfg->max_tokens;
+    int warn_pct = warn_pct_override >= 0 ? warn_pct_override : cfg->context_warn_pct;
+
+    printf("Prompt budget for session '%s'  (model: %s)\n\n",
+           session_key, cfg->model ? cfg->model : "(unset)");
+    printf("  %-16s %12s %10s\n", "component", "bytes", "~tokens");
+    printf("  %-16s %12s %10s\n", "----------------", "------------", "----------");
+    printf("  %-16s %12zu %10d\n", "system prompt", sys_bytes, sys_tok);
+    printf("  %-16s %12zu %10d   (%d tools)\n", "tool schemas", tools_bytes, tools_tok, tool_count);
+    printf("  %-16s %12zu %10d   (%d msgs)\n", "history", hist_bytes, hist_tok, msg_count - toolres_count);
+    printf("  %-16s %12zu %10d   (%d results)\n", "tool results", toolres_bytes, toolres_tok, toolres_count);
+    printf("  %-16s %12s %10s\n", "", "------------", "----------");
+    printf("  %-16s %12zu %10d\n", "total", total_bytes, total_tok);
+
+    if (window > 0) {
+        int pct = (int)((long)total_tok * 100 / window);
+        printf("\n  context window: %d tokens  (%d%% used)\n", window, pct);
+        if (sc_context_budget_warn(total_tok, window, warn_pct))
+            printf("  WARNING: estimated usage >= %d%% of the context window\n", warn_pct);
+    }
+
+    free(sys);
+    sc_context_builder_free(cb);
+    if (sm) sc_session_manager_free(sm);
+    if (reg) sc_tool_registry_free(reg);
+    free(sessions_dir);
+    free(workspace);
+    sc_config_free(cfg);
+    return 0;
+}
+
 static int cmd_session(int argc, char **argv)
 {
     const char *subcmd = (argc >= 3) ? argv[2] : "";
@@ -2037,6 +2135,10 @@ int main(int argc, char **argv)
 #endif
     } else if (strcmp(command, "session") == 0) {
         int rc = cmd_session(argc, argv);
+        sc_logger_shutdown();
+        return rc;
+    } else if (strcmp(command, "context") == 0) {
+        int rc = cmd_context(argc, argv);
         sc_logger_shutdown();
         return rc;
     } else if (strcmp(command, "backup") == 0) {

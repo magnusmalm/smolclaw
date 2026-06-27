@@ -110,6 +110,7 @@ definitions.
 | compress_tool_results     | bool | true    | Replace old large tool results with a metadata placeholder before each LLM call (token saver). |
 | compress_keep_recent      | int  | 6       | Most-recent messages kept verbatim (never compressed). |
 | compress_min_bytes        | int  | 200     | Only tool results larger than this are compressed; smaller ones are kept. |
+| context_warn_pct          | int  | 80      | `smolclaw context` warns when estimated prompt tokens reach this % of the model context window (0 = never). |
 
 The compression transform rewrites tool-result messages older than the last
 `compress_keep_recent` and larger than `compress_min_bytes` into a one-line

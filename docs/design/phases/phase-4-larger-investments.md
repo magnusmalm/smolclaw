@@ -148,8 +148,16 @@ plumbing + `test_agent.c` test; default behavior unchanged.
 
 **Source:** smallharness-integration task 9
 
-- [ ] `smolclaw context` — byte/token breakdown: system, history, tools, tool results
-- [ ] Warn threshold configurable
+- [x] `smolclaw context [session_key]` — byte/token breakdown: system prompt,
+  tool schemas, conversation history, tool results, total, and % of the model
+  context window. Read-only (no provider call).
+- [x] Warn threshold configurable — `agents.defaults.context_warn_pct` (default
+  80; 0 = never), overridable per-invocation with `--warn-pct N`.
+
+**Status (2026-06-27):** ✅ done. New `cmd_context` (main.c) + pure helpers
+`sc_context_estimate_tokens` / `sc_context_budget_warn` (context.c, unit-tested
+in `test_context_isolation.c`) + `context_warn_pct` config. Token counts are the
+~4-chars/token estimate, not a tokenizer.
 
 ### 4.8 Remaining audit mediums
 
@@ -346,6 +354,17 @@ regression test); M-9 deferred with rationale.
   behavior), pure decision `sc_mask_should_compress()`, transform reads them via
   the agent + honors hot-reload. Test in `test_agent.c`; CONFIGURATION.md
   documents the keys.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
+  `check_size_budget.sh` minimal-dynamic 273 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 3 — `task/4.7-prompt-budget-cli` (task 4.7)** — 2026-06-27. New
+  `smolclaw context [session_key] [--warn-pct N]` CLI: byte/token breakdown of
+  system prompt, tool schemas, conversation history, and tool results, with
+  context-window % and a configurable warn threshold
+  (`agents.defaults.context_warn_pct`, default 80). Pure helpers
+  `sc_context_estimate_tokens` / `sc_context_budget_warn` (context.c) unit-tested
+  in `test_context_isolation.c`; read-only (no provider call). CONFIGURATION.md +
+  README updated.
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
   `check_size_budget.sh` minimal-dynamic 273 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).

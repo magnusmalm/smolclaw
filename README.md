@@ -491,6 +491,7 @@ smolclaw update       Check for and apply updates
 smolclaw backup       Backup and restore state (create/verify/list/restore)
 smolclaw session      Maintain stored sessions (compact [--force] [--max-bytes N] [key...]; prune [--keep N] [--yes])
 smolclaw cost         View token usage and costs
+smolclaw context      Prompt budget breakdown for a session ([session_key] [--warn-pct N])
 smolclaw analytics    Usage analytics (summary, today, week, month, model, channel; requires SC_ENABLE_ANALYTICS)
 smolclaw host-refresh Refresh host inventory and retained metrics
 smolclaw doctor       Validate configuration and dependencies
