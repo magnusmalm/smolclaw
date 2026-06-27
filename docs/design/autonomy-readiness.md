@@ -99,8 +99,8 @@ GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.
 ### Phase 3 — Optional surface area
 
 **Status (2026-06-27):** All READY tasks **landed on `master`** (3.9 silent
-tokens shipped). Still open: 3.5 notify (optional, "ship only if trivial"), 3.1
-Signal (GATED-EXT).
+tokens + 3.5 notify Slack/ntfy shipped). Only open item: 3.1 Signal channel MVP
+(🟠 GATED-EXT — needs a live `signal-cli` daemon to accept; code+mocks autonomous).
 
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
@@ -108,7 +108,7 @@ Signal (GATED-EXT).
 | 3.2 operator mode presets | 🔵 SHIPPED | `sc_config_apply_operator_mode`; `test_config` |
 | 3.3 enhanced tool confirmation | 🔵 SHIPPED / 🟡 | `approval_policy` + always-allow cache; diff-preview & async summary-confirm **deferred** |
 | 3.4 X `note_tweet` | 🔵 SHIPPED | `note_tweet` added to thread/search `tweet.fields` |
-| 3.5 notify Slack/ntfy | ✅ READY | Not yet done; "ship only if trivial" |
+| 3.5 notify Slack/ntfy | 🔵 SHIPPED | `slack://` + `ntfy://` schemes; `test_notify` |
 | 3.6 subagent deny matrices | 🔵 SHIPPED | testable deny fn + MCP read-only default; `test_subagent_caps` |
 | 3.7 session reset policies | 🔵 SHIPPED | `sc_session_reset_due`; `test_session` |
 | 3.8 busy-input queue mode | 🔵 SHIPPED | `sc_bus_drain_inbound_matching`; `test_bus`. `steer` is Phase 5 |

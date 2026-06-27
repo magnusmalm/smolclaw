@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "tools/notify.h"
+#include "tools/notify_internal.h"
 #include "tools/types.h"
 #include "util/curl_common.h"
 #include "util/str.h"
@@ -27,21 +28,11 @@
 /* HTTP timeout */
 #define NOTIFY_TIMEOUT_SEC 10
 
-/* ---------- URL parsing (Apprise-compatible scheme handling) ---------- */
+/* ---------- URL parsing (Apprise-compatible scheme handling) ----------
+ * Scheme enum, parsed_url_t, and these two functions live in
+ * tools/notify_internal.h so test_notify.c can exercise the parser. */
 
-typedef enum {
-    SCHEME_DISCORD,
-    SCHEME_TELEGRAM,
-    SCHEME_JSON,
-} notify_scheme_t;
-
-typedef struct {
-    notify_scheme_t scheme;
-    char *param1;
-    char *param2;
-} parsed_url_t;
-
-static void
+void
 parsed_url_free(parsed_url_t *u)
 {
     free(u->param1);
@@ -49,7 +40,7 @@ parsed_url_free(parsed_url_t *u)
     u->param1 = u->param2 = NULL;
 }
 
-static int
+int
 parse_one_url(const char *s, parsed_url_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -82,6 +73,36 @@ parse_one_url(const char *s, parsed_url_t *out)
         out->scheme = SCHEME_JSON;
         out->param1 = sc_strdup(s + 7);
         return out->param1 ? 0 : -1;
+    }
+    if (strncmp(s, "slack://", 8) == 0) {
+        /* slack://T.../B.../secret -> the path of an incoming webhook,
+         * appended to https://hooks.slack.com/services/. We keep the whole
+         * remainder verbatim so the three Slack path segments pass through. */
+        out->scheme = SCHEME_SLACK;
+        const char *rest = s + 8;
+        if (!*rest) return -1;
+        out->param1 = sc_strdup(rest);
+        return out->param1 ? 0 : -1;
+    }
+    if (strncmp(s, "ntfy://", 7) == 0) {
+        /* ntfy://topic            -> host ntfy.sh, given topic
+         * ntfy://host/topic       -> self-hosted host, given topic
+         * param1 = host, param2 = topic. */
+        out->scheme = SCHEME_NTFY;
+        const char *rest = s + 7;
+        if (!*rest) return -1;
+        const char *slash = strchr(rest, '/');
+        if (slash) {
+            if (slash == rest || !*(slash + 1)) return -1;
+            size_t host_len = (size_t)(slash - rest);
+            out->param1 = sc_strdup(rest);
+            if (out->param1) out->param1[host_len] = '\0';
+            out->param2 = sc_strdup(slash + 1);
+        } else {
+            out->param1 = sc_strdup("ntfy.sh");
+            out->param2 = sc_strdup(rest);
+        }
+        return (out->param1 && out->param2) ? 0 : -1;
     }
     return -1;
 }
@@ -192,6 +213,24 @@ send_one(const parsed_url_t *u, const char *title, const char *body)
                  esc_title, esc_body);
         rc = http_post_json(u->param1, json);
         break;
+
+    case SCHEME_SLACK:
+        snprintf(url, sizeof(url),
+                 "https://hooks.slack.com/services/%s", u->param1);
+        snprintf(json, sizeof(json),
+                 "{\"text\":\"*%s*\\n%s\"}", esc_title, esc_body);
+        rc = http_post_json(url, json);
+        break;
+
+    case SCHEME_NTFY:
+        /* ntfy accepts a JSON publish at the server root with the topic in
+         * the body; https only (LAN-only http self-hosting is out of MVP). */
+        snprintf(url, sizeof(url), "https://%s/", u->param1);
+        snprintf(json, sizeof(json),
+                 "{\"topic\":\"%s\",\"title\":\"%s\",\"message\":\"%s\"}",
+                 u->param2, esc_title, esc_body);
+        rc = http_post_json(url, json);
+        break;
     }
 
     free(esc_title);
@@ -292,7 +331,7 @@ sc_tool_t *sc_tool_notify_new(const char *notify_urls)
     if (!t) { free(d->notify_urls); free(d); return NULL; }
 
     t->name = "notify";
-    t->description = "Send a notification to external services (Discord, Telegram, webhook). "
+    t->description = "Send a notification to external services (Discord, Telegram, Slack, ntfy, webhook). "
                      "Use this when you want to alert the user outside of the chat channel, "
                      "e.g. when a long task completes or something important happens.";
     t->parameters = notify_parameters;

@@ -10,6 +10,9 @@
  *   discord://webhook_id/webhook_token
  *   tg://bottoken/chatid
  *   json://https://example.com/hook
+ *   slack://T00000000/B00000000/XXXXXXXXXXXX   (incoming webhook path)
+ *   ntfy://topic            (ntfy.sh)
+ *   ntfy://host/topic       (self-hosted ntfy, https)
  *
  * Config: "notify_urls" in config.json or SMOLCLAW_NOTIFY_URLS env var.
  * The agent calls this tool when it wants to ping the user externally.

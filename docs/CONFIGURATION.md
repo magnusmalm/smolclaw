@@ -418,7 +418,19 @@ invalid expression disables the job (it never fires) and logs a warning.
 |-------------|--------|---------|-----------------------------------|
 | notify_urls | string | (none)  | Comma-separated Apprise URLs. [1] |
 
-- [1] Used by the `notify` tool, e.g. `discord://id/token,tgram://bot/chat`.
+- [1] Used by the `notify` tool. Multiple endpoints are comma-separated and
+  delivered to all of them, e.g. `discord://id/token,ntfy://alerts`.
+
+Supported URL schemes (Apprise-compatible):
+
+| Scheme                          | Sends to                                         |
+|---------------------------------|--------------------------------------------------|
+| `discord://webhook_id/token`    | Discord incoming webhook (embed)                 |
+| `tg://bottoken/chat_id`         | Telegram `sendMessage`                           |
+| `json://https://host/hook`      | Generic JSON `POST` (`title`/`message`/`source`) |
+| `slack://T0000/B0000/secret`    | Slack incoming webhook (`https://hooks.slack.com/services/<path>`) |
+| `ntfy://topic`                  | ntfy.sh topic (`{topic,title,message}` JSON)     |
+| `ntfy://host/topic`             | self-hosted ntfy (https) topic                   |
 
 ## `operator_mode` / `approval_policy` — tool confirmation (`agents.defaults`)
 

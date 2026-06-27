@@ -121,11 +121,19 @@ consumed the field — its preference just had no data on thread/search). Gated 
 
 ### 3.5 Notify backends
 
-**Files:** `src/tools/notify.c`
+**Files:** `src/tools/notify.c`, `src/tools/notify_internal.h`, `src/tools/notify.h`
 
-- [ ] Slack incoming webhook URL scheme
-- [ ] ntfy.sh / self-hosted ntfy topic scheme
-- [ ] Low priority — ship only if trivial
+- [x] Slack incoming webhook URL scheme — `slack://<webhook-path>` →
+  `https://hooks.slack.com/services/<path>`, `{"text":"*title*\nbody"}`
+- [x] ntfy.sh / self-hosted ntfy topic scheme — `ntfy://topic` (ntfy.sh) and
+  `ntfy://host/topic` (self-hosted, https) → JSON publish `{topic,title,message}`
+- [x] Stayed trivial: both slot into the existing `parse_one_url` + `send_one`
+  switch, reusing `http_post_json`/`json_escape_str`. Parser extracted to
+  `notify_internal.h` and unit-tested (`test_notify.c`, also retro-covering the
+  pre-existing discord/tg/json schemes).
+
+**Status (2026-06-27):** ✅ done. Two new Apprise-compatible schemes; ~50 LOC
+plus the test seam. No Kconfig flag (notify is a core tool).
 
 ### 3.6 Subagent tool matrices
 
@@ -296,6 +304,15 @@ error+empty truth table).
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 6 — `task/3.5-notify-backends` (task 3.5)** — 2026-06-27. Added Slack
+  (`slack://<webhook-path>`) and ntfy (`ntfy://topic`, `ntfy://host/topic`)
+  schemes to the notify tool, slotted into the existing `parse_one_url` +
+  `send_one` switch. Extracted the pure parser to `tools/notify_internal.h` and
+  added `tests/test_notify.c` (9 cases) — the module had no test before, so this
+  also retro-covers discord/tg/json. CONFIGURATION.md gained a scheme table.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 50/50;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A; notify is a core tool).
 
 ---
 

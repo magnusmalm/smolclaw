@@ -528,6 +528,7 @@ set(TEST_SOURCES
     tests/test_gateway_routing.c
     tests/test_curl_common.c
     tests/test_cost.c
+    tests/test_notify.c
 )
 
 if(SC_ENABLE_WEB)
