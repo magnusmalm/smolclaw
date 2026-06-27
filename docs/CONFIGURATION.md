@@ -419,3 +419,38 @@ invalid expression disables the job (it never fires) and logs a warning.
 | notify_urls | string | (none)  | Comma-separated Apprise URLs. [1] |
 
 - [1] Used by the `notify` tool, e.g. `discord://id/token,tgram://bot/chat`.
+
+## Skills — reusable prompt templates
+
+Skills are not configured in `config.json`; they are markdown files
+(`SKILL.md` + YAML frontmatter) discovered from two directories at startup,
+with **user skills taking precedence** over project skills of the same name:
+
+| Path                          | Scope             |
+|-------------------------------|-------------------|
+| `~/.smolclaw/skills/`         | user (per-host)   |
+| `{workspace}/.claude/skills/` | project/workspace |
+
+Each skill is `<dir>/<name>/SKILL.md` or a flat `<dir>/<name>.md`.
+
+**Frontmatter fields:**
+
+| Field                      | Default        | Meaning                                          |
+|----------------------------|----------------|--------------------------------------------------|
+| `name`                     | dir/file name  | Skill name (the `/name` slash + tool argument)   |
+| `description`              | (none)         | Shown to the model in the skill listing          |
+| `when-to-use`              | (none)         | Guidance for when the model should invoke it     |
+| `arguments`                | (none)         | Hint for the `$ARGUMENTS` placeholder            |
+| `allowed-tools`            | all            | Comma-separated tool restriction for the skill   |
+| `model`                    | inherit        | Model override while the skill runs              |
+| `context`                  | `inline`       | `inline` (expand in place) or `fork` (subagent)  |
+| `user-invocable`           | `true`         | `false` hides the `/name` slash command          |
+| `disable-model-invocation` | `false`        | `true` = user-only; the model cannot call it     |
+
+The body after the second `---` is the prompt; `$ARGUMENTS` is replaced with
+the invocation text. Invoke via the `/name args` slash command (when
+`user-invocable`) or the `skill` tool (unless `disable-model-invocation`).
+The format follows the [agentskills.io](https://agentskills.io) / Claude Code
+`SKILL.md` convention; there is no Skills Hub in core. See the README
+"Skills" section and
+[using-grok-implement-skill.md](development/using-grok-implement-skill.md).

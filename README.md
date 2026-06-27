@@ -486,6 +486,7 @@ smolclaw pairing      Manage channel trust (list/approve/revoke)
 smolclaw vault        Manage encrypted secrets
 smolclaw update       Check for and apply updates
 smolclaw backup       Backup and restore state (create/verify/list/restore)
+smolclaw session      Maintain stored sessions (compact [--force] [--max-bytes N] [key...]; prune [--keep N] [--yes])
 smolclaw cost         View token usage and costs
 smolclaw analytics    Usage analytics (summary, today, week, month, model, channel; requires SC_ENABLE_ANALYTICS)
 smolclaw host-refresh Refresh host inventory and retained metrics
@@ -494,6 +495,52 @@ smolclaw doctor       Validate configuration and dependencies
 smolclaw selftest     Run doctor checks + an LLM round-trip; exits 0/1
 smolclaw version      Show version (includes git hash and build date)
 ```
+
+### Skills
+
+Skills are reusable prompt templates — a markdown file with YAML frontmatter
+followed by the prompt body. They are discovered from two directories (user
+skills take precedence over project skills of the same name):
+
+- `~/.smolclaw/skills/` — user skills
+- `{workspace}/.claude/skills/` — project skills
+
+Each skill is either `<dir>/<name>/SKILL.md` or a flat `<dir>/<name>.md`.
+
+```markdown
+---
+name: triage
+description: Summarize an incident and propose next steps
+when-to-use: when the user pastes logs or an alert
+arguments: "<incident text>"
+allowed-tools: read_file, web_search   # optional; omit = all tools
+model: anthropic/claude-sonnet-4-5     # optional; omit = inherit
+context: inline                        # "inline" (default) or "fork" (subagent)
+user-invocable: true                   # default true; false hides the /slash
+disable-model-invocation: false        # default false; true = user-only
+---
+
+Triage the following. $ARGUMENTS
+
+Steps: 1) classify severity 2) summarize 3) propose actions.
+```
+
+The body is expanded on use, with `$ARGUMENTS` replaced by the invocation text.
+
+**Invoking a skill:**
+
+- **Slash command** — `/triage <text>` in any channel or the CLI expands the
+  skill as a user message (only when `user-invocable` is true). Note the gateway
+  reserves `/help`, `/status`, `/reset`, `/new`, `/model`, `/compress`, so avoid
+  those as skill names.
+- **`skill` tool** — the model calls it by name (unless
+  `disable-model-invocation` is set). `context: inline` returns the expanded
+  prompt as the tool result; `context: fork` runs it in a subagent.
+
+The frontmatter mirrors the [agentskills.io](https://agentskills.io) /
+Claude Code `SKILL.md` format for portability; smolclaw ships no Skills Hub —
+drop files in the directories above. To author skills with the agent itself,
+see [docs/development/using-grok-implement-skill.md](docs/development/using-grok-implement-skill.md).
 
 ## Security
 

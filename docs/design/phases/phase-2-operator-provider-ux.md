@@ -241,11 +241,20 @@ tests.
 
 **Files:** `README.md`, `docs/CONFIGURATION.md` (no code unless examples need fixtures)
 
-- [ ] Document `SKILL.md` frontmatter (name, description, optional model/tool overrides)
-- [ ] Document search paths: `~/.smolclaw/skills/`, `{workspace}/.claude/skills/`
-- [ ] Document slash-command invocation (`/skill-name`) and `skill` tool
-- [ ] Note [agentskills.io](https://agentskills.io) compatibility goal (no Skills Hub in core)
-- [ ] Cross-link `docs/development/using-grok-implement-skill.md`
+- [x] Document `SKILL.md` frontmatter — verified against `src/skill.c`: `name`,
+  `description`, `when-to-use`, `arguments`, `allowed-tools`, `model`,
+  `context` (inline/fork), `user-invocable`, `disable-model-invocation`
+- [x] Document search paths: `~/.smolclaw/skills/`, `{workspace}/.claude/skills/`
+  (user precedence; `<name>/SKILL.md` or flat `<name>.md`)
+- [x] Document slash-command (`/skill-name`) and `skill` tool invocation, incl.
+  the gateway-reserved slash names that shadow skills
+- [x] Note [agentskills.io](https://agentskills.io) compatibility (no Skills Hub)
+- [x] Cross-link `docs/development/using-grok-implement-skill.md`
+
+**Status (2026-06-27):** ✅ done (docs-only). Skills sections added to
+`README.md` (### Skills) and `docs/CONFIGURATION.md`; README command list
+updated with `session` (slice 2). All fields/paths verified against
+`src/skill.c` + `src/agent.c` rather than assumed.
 
 ### 2.12 MCP integration cookbook (Tier 2 kickoff)
 
@@ -377,6 +386,12 @@ fallback (failure) and Phase 5 OpenRouter `/compare` (rejected). Presets may mix
   **Verification gates:** Release build clean (KC-2 `implicit`=0, no new
   warnings); `ctest` 46/46; `check_size_budget.sh` minimal-dynamic 269 KB ≤
   1024 KB; `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 6 — `task/2.11-skills-docs` (task 2.11)** — 2026-06-27. Docs-only.
+  Skills sections in `README.md` + `docs/CONFIGURATION.md` (frontmatter, search
+  paths, slash + `skill`-tool invocation, agentskills.io note); README commands
+  updated with `session`. Fields verified against `src/skill.c`/`src/agent.c`.
+  **Verification gates:** docs-only (no code changed → build/ctest/size
+  unchanged from slice 5); `check_claude_md.sh` clean; cross-link verified.
 
 ---
 
