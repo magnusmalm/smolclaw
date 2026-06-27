@@ -53,8 +53,14 @@ Recorded **2026-06-26** at git `45b74441df0b0be437655ce283f4b4981ba836db`.
 
 - [x] Record `build/smolclaw` and `build-minimal/smolclaw` byte sizes (see table)
 - [x] Record `ctest` pass count
-  - `ctest --test-dir build` (full/defconfig): **43/43 passed** (two consecutive
-    runs, 0 failures; 2026-06-27 re-verify)
+  - `cp configs/defconfig .config && cmake -B build -DCMAKE_BUILD_TYPE=Release`:
+    **39/39 passed** (two consecutive runs, 0 failures; 2026-06-27 re-verify on a
+    clean checkout). The committed `configs/defconfig` is minimal and relies on
+    Kconfig defaults.
+  - **43/43** is reached only when the four optional feature tests
+    `test_analytics`, `test_delegate`, `test_output_filter`, `test_x` are also
+    built (i.e. `SC_ENABLE_ANALYTICS`/`DELEGATE`/`OUTPUT_FILTER`/`X` on). Those 4
+    also pass; they are not Phase-0 code. Quote 39/39 as the reproducible number.
 - [x] Note git SHA in this doc
   - `45b74441df0b0be437655ce283f4b4981ba836db`
 
@@ -150,7 +156,8 @@ KC-2 clean (0 `implicit` in build log). `check_size_budget.sh build-size/smolcla
 - [x] Minimal build verifies no FTS5 symbols (`nm build-minimal/smolclaw`: 0)
 - [x] Full build + `test_memory_tools` / `test_memory_search` pass
 
-**Verification gates (2026-06-27):** `ctest --test-dir build` **43/43** passed.
+**Verification gates (2026-06-27):** `ctest --test-dir build` **39/39** passed
+(`configs/defconfig`; 43/43 with the 4 optional feature tests — see §0.1).
 Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary and
 `libsqlite3.a`. KC-2 clean; size budget unchanged (minimal has no SQLite link).
 
@@ -195,7 +202,8 @@ Analytics-only (`MEMORY_SEARCH` off, `ANALYTICS` on): 0 FTS5 symbols in binary a
 **Acceptance:** Rapid shutdown during summarization does not leak threads (M-8).
 
 **Verification gates (2026-06-27):** `test_summarize_shutdown_cancels_task` and
-`test_session_summarization` pass; `ctest --test-dir build` **43/43** green.
+`test_session_summarization` pass; `ctest --test-dir build` **39/39** green
+(`configs/defconfig`; see §0.1).
 
 ### 0.8 Deferred runtime initialization
 
@@ -234,14 +242,14 @@ memoization bloat.
 
 **Verification gates (2026-06-27):** `test_deferred_rebuild_on_first_search`,
 `test_deferred_rebuild_survives_inventory_put`, `test_deny_list_lazy_init`;
-`ctest --test-dir build` **43/43** green; size budget OK.
+`ctest --test-dir build` **39/39** green (`configs/defconfig`; see §0.1); size budget OK.
 
 ---
 
 ## 3. Exit Criteria
 
 - [x] All Phase 0 checkboxes complete (0.1–0.8)
-- [x] `ctest --test-dir build` passes (43/43 defconfig, 2026-06-27); `build-verify` 39/39 (MinSizeRel)
+- [x] `ctest --test-dir build` passes (39/39 `configs/defconfig`, 2026-06-27; 43/43 with 4 optional feature tests — see §0.1); `build-verify` 39/39 (MinSizeRel)
 - [x] Binary size ≤ baseline or documented reduction from 0.4/0.5 (§0.4: −42.6% release)
 - [x] RSS/startup improvement from 0.8 recorded (deferred rebuild + lazy deny; see §0.8)
 - [x] No open HIGH audit items in provider/channel/tool hot paths (§0.2, §0.3)
