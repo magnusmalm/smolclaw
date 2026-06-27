@@ -30,6 +30,7 @@
 #include "tools/message.h"
 #include "audit.h"
 #include "session_maint.h"
+#include "slash.h"
 #include "providers/factory.h"
 #include "util/sandbox.h"
 #include "util/str.h"
@@ -649,6 +650,15 @@ static void agent_interactive_loop(sc_agent_t *agent, sc_bus_t *bus,
             free(trimmed);
             printf("Goodbye!\n");
             break;
+        }
+
+        /* Slash commands: handled locally, no LLM turn. */
+        char *slash_reply = NULL;
+        if (sc_slash_dispatch(agent, session_key, trimmed, &slash_reply)) {
+            if (slash_reply) printf("\n%s %s\n\n", SC_LOGO, slash_reply);
+            free(slash_reply);
+            free(trimmed);
+            continue;
         }
 
         if (!no_stream) printf("\n%s ", SC_LOGO);
@@ -1470,6 +1480,23 @@ static void gateway_process_message(sc_agent_t *agent,
                                      sc_channel_manager_t *ch_mgr,
                                      sc_inbound_msg_t *msg)
 {
+    /* Slash commands (e.g. /reset, /model, /help): handle locally without an
+     * LLM turn and reply on the same channel. System/internal channels are
+     * never user chat input, so they bypass this. */
+    if (!(msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0)) {
+        char *slash_reply = NULL;
+        if (sc_slash_dispatch(agent, msg->session_key, msg->content,
+                              &slash_reply)) {
+            if (slash_reply && slash_reply[0])
+                sc_channel_manager_send(ch_mgr, msg->channel, msg->chat_id,
+                                        slash_reply);
+            sc_audit_log_ext("slash", msg->content, 0, 0, msg->channel,
+                             msg->chat_id, "slash_command");
+            free(slash_reply);
+            return;
+        }
+    }
+
     /* Start typing indicator thread */
     typing_ctx_t typing = { ch_mgr, msg->channel, msg->chat_id, 1 };
     pthread_t typing_tid;

@@ -53,6 +53,11 @@ void sc_session_truncate(sc_session_manager_t *sm, const char *key, int keep_las
 /* Persist session to JSONL file */
 int sc_session_save(sc_session_manager_t *sm, const char *key);
 
+/* Clear a session: drop all nodes and the summary, then persist the empty
+ * session (so a restart won't resurrect it). Returns 0 on success (including
+ * when the key was never stored), -1 on error. */
+int sc_session_reset(sc_session_manager_t *sm, const char *key);
+
 /* Branch: set the active parent to the given node id.
  * The next message appended will fork from that point.
  * Returns 0 on success, -1 if node_id not found. */

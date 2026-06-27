@@ -195,10 +195,28 @@ isolation. New test `test_provider_health_skips_auth_expired_fallback`
 **Explicitly defer to Phase 5:** `/background`, `/voice`, `/insights`, `/reasoning`, `/rollback`,
 `/approve`/`/deny` (use existing tool confirm flow).
 
-- [ ] Detect leading `/` in inbound gateway messages before agent turn
-- [ ] Dispatch without LLM call; reply via same channel
-- [ ] Per-channel allowlist config (optional); admins = all commands (future 3.7 tier)
-- [ ] Tests: mock channel receives `/reset`, `/model`, `/help` responses
+- [x] Detect leading `/` in inbound gateway messages before agent turn
+  (`gateway_process_message`) **and** in the interactive CLI REPL
+- [x] Dispatch without LLM call; reply via same channel
+- [ ] Per-channel allowlist config — **deferred to 3.7** (admin tier); MVP
+  exposes the same five commands on every channel
+- [x] Tests: `tests/test_slash.c` exercises `/help`, `/status`, `/reset`,
+  `/new`, `/model` (show + alias + literal), `/compress`, and pass-through for
+  non-/ and unknown-/ input
+
+**Status (2026-06-27):** ✅ done. New `src/slash.c` (+`slash.h`):
+`sc_slash_dispatch()` returns 1 (handled, with a malloc'd reply) or 0 (not a
+recognized command → normal agent turn — so legitimate slash-prefixed content
+like `/etc/hosts` still reaches the LLM). Added `sc_session_reset()` to
+session.c for `/reset`. `/compress` force-summarizes by briefly lowering the
+threshold (the model is strdup-copied into the summarize worker, so no race
+with `/model`). `/model <alias>` resolves config aliases and swaps the
+gateway's active model. Wired into both the gateway loop and the CLI REPL;
+audit entry per command. **Note:** the model switch is gateway-global (not
+per-session) and stays on the current provider — true per-session / cross-
+provider switching is out of MVP scope. Live REPL/gateway smoke not run here
+(offline env has no LLM credentials for agent startup); logic covered by unit
+tests.
 
 ### 2.11 Skills format documentation
 
@@ -279,6 +297,13 @@ isolation. New test `test_provider_health_skips_auth_expired_fallback`
   `.bak` retained, prune keeps newest N, audit entries written).
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 44/44;
   `check_size_budget.sh` minimal-dynamic 261 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 3 — `task/2.10-gateway-slash-mvp` (task 2.10)** — 2026-06-27.
+  New `src/slash.c` (`/help`, `/status`, `/reset`+`/new`, `/model`, `/compress`)
+  + `sc_session_reset()` in session.c; wired into the gateway loop and CLI REPL.
+  5-case `tests/test_slash.c`.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 45/45;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
 
 ---

@@ -692,6 +692,34 @@ int sc_session_save(sc_session_manager_t *sm, const char *key)
     return ret;
 }
 
+int sc_session_reset(sc_session_manager_t *sm, const char *key)
+{
+    if (!sm || !key) return -1;
+
+    sc_session_t *s = find_session(sm, key);
+    if (!s) return 0;  /* nothing stored → already "reset" */
+
+    for (int i = 0; i < s->node_count; i++)
+        sc_llm_message_free_fields(&s->nodes[i].msg);
+    s->node_count = 0;
+    s->active_leaf = -1;
+
+    free(s->branch);
+    s->branch = NULL;
+    s->branch_count = 0;
+    s->branch_dirty = 1;
+
+    free(s->summary);
+    s->summary = NULL;
+
+    s->updated = (long)time(NULL);
+
+    /* Persist the cleared session so a gateway restart doesn't resurrect it. */
+    if (sm->storage_dir)
+        return sc_session_save(sm, key);
+    return 0;
+}
+
 int sc_session_branch(sc_session_manager_t *sm, const char *key, int node_id)
 {
     if (!sm || !key) return -1;
