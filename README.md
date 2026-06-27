@@ -16,7 +16,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 ## Features
 
 - **Channels** — CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat
-  UI), X/Twitter (REST polling, OAuth 1.0a)
+  UI), X/Twitter (REST polling, OAuth 1.0a), Signal (via external signal-cli daemon)
 - **Providers** — Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM,
   Ollama
 - **Tools** — File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is
@@ -148,7 +148,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_SIGNAL`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
 
 ## Architecture
 
@@ -171,7 +171,7 @@ User ─── Channel ──┘         │
 | Providers     | `src/providers/`            | Claude, HTTP (OpenAI-compat), factory routing   |
 | Tools         | `src/tools/`                | Registry + individual tools                     |
 | MCP           | `src/mcp/`                  | External tool servers via JSON-RPC 2.0          |
-| Channels      | `src/channels/`             | CLI, Telegram, Discord, IRC, Slack, Web, X      |
+| Channels      | `src/channels/`             | CLI, Telegram, Discord, IRC, Slack, Web, X, Signal |
 | Memory        | `src/memory.c`              | Long-term memory + daily notes                  |
 | Sessions      | `src/session.c`             | Per-conversation JSON, truncation + summary     |
 | Context       | `src/context.c`             | System prompt builder, scratchpad/action log    |

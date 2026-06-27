@@ -1,9 +1,14 @@
 # Signal Channel
 
-> **Status**: Planned feature — Not yet implemented  
+> **Status**: Implemented (MVP) — text DMs + groups, polling receive.  
+> Build with `-DSC_ENABLE_SIGNAL=ON` (Kconfig `SC_ENABLE_SIGNAL`, **default off**).  
 > Design document: [docs/design/signal-channel.md](../design/signal-channel.md)
+>
+> The mock-tested code is complete (`tests/test_signal.c`). A manual smoke test
+> against a real `signal-cli` daemon with a test number is still recommended
+> before production use.
 
-The Signal channel will allow you to interact with smolclaw directly inside Signal, using either direct messages or group chats.
+The Signal channel lets you interact with smolclaw directly inside Signal, using either direct messages or group chats.
 
 smolclaw does **not** speak the Signal protocol natively. It connects to an external `signal-cli` daemon (or the popular `bbernhard/signal-cli-rest-api` Docker container) over HTTP JSON-RPC.
 
@@ -50,7 +55,7 @@ Use the `bbernhard/signal-cli-rest-api` image with `MODE=json-rpc`.
 
 ### 3. Configure smolclaw
 
-Example configuration (subject to final API):
+Example configuration:
 
 ```json
 {
@@ -68,9 +73,16 @@ Example configuration (subject to final API):
 }
 ```
 
+The daemon is reached at `http://<http_host>:<http_port>/api/v1/rpc`. To point
+at a non-default endpoint (e.g. a container on another host), set `http_url`
+to the full base URL — it overrides `http_host`/`http_port`. A `proxy` field
+and per-channel `tools` allowlist are also supported. Every field has an
+environment override (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
+`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, …).
+
 ---
 
-## Pairing New Contacts (Planned Behavior)
+## Pairing New Contacts
 
 When `dm_policy` is set to `"pairing"`, unknown numbers will receive a message like:
 
@@ -92,17 +104,17 @@ UUID-based identifiers are preferred when available.
 
 ## Groups
 
-Basic group support is planned. Use the `group_trigger` setting to reduce noise in busy groups — only messages containing the trigger word will be processed by the agent.
+Basic group support is implemented. Use the `group_trigger` setting to reduce noise in busy groups — only messages containing the trigger substring are processed by the agent (when unset, all group messages are processed). Group replies are routed back to the originating group.
 
 ---
 
 ## Current Limitations (MVP Scope)
 
-When first implemented, the Signal channel is expected to have these limitations:
+The Signal channel MVP has these limitations:
 
-- Text messages only (no attachments or voice notes in the initial release)
-- Polling-based receive (real-time SSE streaming planned for a follow-up)
-- No reactions, polls, or read receipts initially
+- Text messages only (no attachments or voice notes)
+- Polling-based receive (real-time SSE streaming is a planned follow-up)
+- No reactions, polls, or read receipts
 - Single account per channel instance
 
 Media support, typing indicators, and richer features are planned for later phases.

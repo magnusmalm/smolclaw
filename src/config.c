@@ -694,6 +694,14 @@ static void env_override_channels(sc_config_t *cfg)
     env_override_bool(&cfg->x.enable_dms,         "SMOLCLAW_CHANNELS_X_ENABLE_DMS");
     env_override_bool(&cfg->x.read_only,         "SMOLCLAW_CHANNELS_X_READ_ONLY");
     env_override_str(&cfg->x.dm_policy,           "SMOLCLAW_CHANNELS_X_DM_POLICY");
+    env_override_bool(&cfg->signal_.enabled,      "SMOLCLAW_CHANNELS_SIGNAL_ENABLED");
+    env_override_str(&cfg->signal_.account,       "SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT");
+    env_override_str(&cfg->signal_.http_host,     "SMOLCLAW_CHANNELS_SIGNAL_HTTP_HOST");
+    env_override_int(&cfg->signal_.http_port,     "SMOLCLAW_CHANNELS_SIGNAL_HTTP_PORT");
+    env_override_str(&cfg->signal_.http_url,      "SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL");
+    env_override_str(&cfg->signal_.proxy,         "SMOLCLAW_CHANNELS_SIGNAL_PROXY");
+    env_override_str(&cfg->signal_.group_trigger, "SMOLCLAW_CHANNELS_SIGNAL_GROUP_TRIGGER");
+    env_override_str(&cfg->signal_.dm_policy,     "SMOLCLAW_CHANNELS_SIGNAL_DM_POLICY");
 }
 
 /* Apply env overrides for providers */
@@ -859,6 +867,12 @@ sc_config_t *sc_config_default(void)
     cfg->x.poll_interval_sec = 60;
     cfg->x.read_only = 1;
     cfg->x.dm_policy = sc_strdup(default_dm);
+
+    /* Signal: disabled by default; native signal-cli daemon defaults */
+    cfg->signal_.enabled = 0;
+    cfg->signal_.http_host = sc_strdup("127.0.0.1");
+    cfg->signal_.http_port = 7583;
+    cfg->signal_.dm_policy = sc_strdup(default_dm);
 
     /* Web: disabled by default */
     cfg->web.enabled = 0;
@@ -1150,6 +1164,23 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
             sc_json_get_array(xcfg, "allow_from"), &cfg->x.allow_from_count);
         cfg->x.tools = sc_json_parse_string_list(
             sc_json_get_array(xcfg, "tools"), &cfg->x.tool_count);
+    }
+
+    const cJSON *sig = sc_json_get_object(channels, "signal");
+    if (sig) {
+        cfg->signal_.enabled = sc_json_get_bool(sig, "enabled", 0);
+        override_str_field(&cfg->signal_.account, sig, "account");
+        override_str_field(&cfg->signal_.http_host, sig, "http_host");
+        cfg->signal_.http_port = sc_json_get_int(sig, "http_port",
+                                                  cfg->signal_.http_port);
+        override_str_field(&cfg->signal_.http_url, sig, "http_url");
+        override_str_field(&cfg->signal_.proxy, sig, "proxy");
+        override_str_field(&cfg->signal_.group_trigger, sig, "group_trigger");
+        override_str_field(&cfg->signal_.dm_policy, sig, "dm_policy");
+        cfg->signal_.allow_from = sc_json_parse_string_list(
+            sc_json_get_array(sig, "allow_from"), &cfg->signal_.allow_from_count);
+        cfg->signal_.tools = sc_json_parse_string_list(
+            sc_json_get_array(sig, "tools"), &cfg->signal_.tool_count);
     }
 }
 
@@ -1809,6 +1840,25 @@ static void save_channels(cJSON *root, const sc_config_t *cfg)
         cJSON_AddStringToObject(x_obj, "dm_policy", cfg->x.dm_policy);
     save_allow_from(x_obj, (const char *const *)cfg->x.allow_from,
                     cfg->x.allow_from_count);
+
+    /* signal */
+    cJSON *sig_obj = cJSON_AddObjectToObject(channels, "signal");
+    cJSON_AddBoolToObject(sig_obj, "enabled", cfg->signal_.enabled);
+    if (cfg->signal_.account)
+        cJSON_AddStringToObject(sig_obj, "account", cfg->signal_.account);
+    if (cfg->signal_.http_host)
+        cJSON_AddStringToObject(sig_obj, "http_host", cfg->signal_.http_host);
+    cJSON_AddNumberToObject(sig_obj, "http_port", cfg->signal_.http_port);
+    if (cfg->signal_.http_url)
+        cJSON_AddStringToObject(sig_obj, "http_url", cfg->signal_.http_url);
+    if (cfg->signal_.proxy)
+        cJSON_AddStringToObject(sig_obj, "proxy", cfg->signal_.proxy);
+    if (cfg->signal_.group_trigger)
+        cJSON_AddStringToObject(sig_obj, "group_trigger", cfg->signal_.group_trigger);
+    if (cfg->signal_.dm_policy)
+        cJSON_AddStringToObject(sig_obj, "dm_policy", cfg->signal_.dm_policy);
+    save_allow_from(sig_obj, (const char *const *)cfg->signal_.allow_from,
+                    cfg->signal_.allow_from_count);
 }
 
 /* Serialize MCP section to JSON */
@@ -2037,6 +2087,16 @@ void sc_config_free(sc_config_t *cfg)
     for (int i = 0; i < cfg->x.allow_from_count; i++)
         free(cfg->x.allow_from[i]);
     free(cfg->x.allow_from);
+
+    free(cfg->signal_.account);
+    free(cfg->signal_.http_host);
+    free(cfg->signal_.http_url);
+    free(cfg->signal_.proxy);
+    free(cfg->signal_.group_trigger);
+    free(cfg->signal_.dm_policy);
+    for (int i = 0; i < cfg->signal_.allow_from_count; i++)
+        free(cfg->signal_.allow_from[i]);
+    free(cfg->signal_.allow_from);
 
     free(cfg->web_tools.brave_api_key);
     free(cfg->web_tools.brave_base_url);

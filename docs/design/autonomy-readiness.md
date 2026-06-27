@@ -98,13 +98,15 @@ GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.
 
 ### Phase 3 — Optional surface area
 
-**Status (2026-06-27):** All READY tasks **landed on `master`** (3.9 silent
-tokens + 3.5 notify Slack/ntfy shipped). Only open item: 3.1 Signal channel MVP
-(🟠 GATED-EXT — needs a live `signal-cli` daemon to accept; code+mocks autonomous).
+**Status (2026-06-27):** All READY tasks landed; **3.1 Signal channel MVP is now
+code-complete + mock-accepted** (`SC_ENABLE_SIGNAL` default n). Phase 3 is
+feature-complete behind flags. The only outstanding item is the **live
+`signal-cli` smoke test** for 3.1 — a human acceptance gate (no autonomous work
+left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm.
 
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 3.1 Signal channel MVP | 🟠 GATED-EXT | Not started; **real `signal-cli` daemon + test number** for smoke test |
+| 3.1 Signal channel MVP | 🔵/🟠 | **Code-complete + mock-accepted** (`SC_ENABLE_SIGNAL` default n; `signal.c` + `signal_internal.h`; `test_signal` 18 cases). Live `signal-cli` smoke test = remaining human gate |
 | 3.2 operator mode presets | 🔵 SHIPPED | `sc_config_apply_operator_mode`; `test_config` |
 | 3.3 enhanced tool confirmation | 🔵 SHIPPED / 🟡 | `approval_policy` + always-allow cache; diff-preview & async summary-confirm **deferred** |
 | 3.4 X `note_tweet` | 🔵 SHIPPED | `note_tweet` added to thread/search `tweet.fields` |

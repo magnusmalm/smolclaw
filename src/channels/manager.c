@@ -34,6 +34,9 @@
 #if SC_ENABLE_X
 #include "channels/x.h"
 #endif
+#if SC_ENABLE_SIGNAL
+#include "channels/signal.h"
+#endif
 #if SC_ENABLE_VOICE
 #include "voice/transcriber.h"
 #endif
@@ -219,6 +222,24 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
             manager_add_channel(mgr, xch, cfg->x.dm_policy, rl);
         else
             SC_LOG_ERROR("channels", "Failed to initialize X channel");
+#if SC_STRICT_SECURITY
+        }
+#endif
+    }
+#endif
+
+#if SC_ENABLE_SIGNAL
+    if (cfg->signal_.enabled && cfg->signal_.account && cfg->signal_.account[0]) {
+#if SC_STRICT_SECURITY
+        if (!quarantine_check("Signal", cfg->signal_.dm_policy,
+                              cfg->signal_.allow_from_count)) {
+#endif
+        SC_LOG_INFO("channels", "Initializing Signal channel");
+        sc_channel_t *sig = sc_channel_signal_new(&cfg->signal_, bus);
+        if (sig)
+            manager_add_channel(mgr, sig, cfg->signal_.dm_policy, rl);
+        else
+            SC_LOG_ERROR("channels", "Failed to initialize Signal channel");
 #if SC_STRICT_SECURITY
         }
 #endif

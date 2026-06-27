@@ -43,20 +43,31 @@
 
 **Deliverables:**
 
-- [ ] Kconfig `SC_ENABLE_SIGNAL` (default **n**, `select NEED_PTHREADS`)
-- [ ] `sc_signal_config_t` + JSON + env overrides
-- [ ] `src/channels/signal.c` + `signal.h` (~550–700 LOC)
-- [ ] JSON-RPC client: `receive`, `send`, `subscribeReceive`
-- [ ] Polling thread; text-only DMs + groups
-- [ ] Identifier normalization: prefer `uuid:...`, support `+phone`
-- [ ] `group_trigger`, full pairing / `allow_from` / strict security
-- [ ] Wire in `manager.c` with quarantine check
-- [ ] `tests/test_signal.c` via `mock_http.h` (≥10 cases from design §8.2)
-- [ ] Update `docs/channels/signal.md` for implemented MVP
+- [x] Kconfig `SC_ENABLE_SIGNAL` (default **n**, `select NEED_PTHREADS`); KC-1
+  wired (FEATURE_SYMS + cmake override + defconfig.minimal)
+- [x] `sc_signal_config_t` (`signal_` field — avoids shadowing libc `signal()`)
+  + JSON + env overrides + serialize + free
+- [x] `src/channels/signal.c` + `signal.h` + `signal_internal.h` (pure-helper seam)
+- [x] JSON-RPC client `signal_rpc(method, params)` over `POST /api/v1/rpc`;
+  `receive` + `send` (subscribeReceive deferred — polling-only MVP)
+- [x] Polling thread with backoff; text-only DMs + groups
+- [x] Identifier normalization: prefer `uuid:...`, support `+phone`
+  (`sc_signal_normalize_sender`); group `chat_id` → `signal:group:<id>`
+- [x] `group_trigger` filter; full pairing / `allow_from` / strict security
+  via `channels/base.c` + manager quarantine check
+- [x] Wire in `manager.c` with quarantine check
+- [x] `tests/test_signal.c` via `mock_http.h` (18 cases: pure-helper truth
+  tables + send/lifecycle; covers design §8.2 DM-phone/DM-uuid/group/allow_from/
+  trigger/send/error)
+- [x] Update `docs/channels/signal.md` for implemented MVP; README feature table
 
-**Explicitly NOT in 3.1:** SSE streaming, attachments, reactions (Phase 5).
+**Explicitly NOT in 3.1:** SSE streaming, attachments, reactions (Phase 5);
+`subscribeReceive`/typing/health (Phase 2 of the Signal design).
 
-**Effort:** design estimates 9–13 dev-days.
+**Status (2026-06-27):** ✅ code-complete (mock-accepted). 🟠 **Live smoke test
+against a real `signal-cli` daemon + test number remains a human acceptance gate**
+(GATED-EXT). The receive-loop's exact daemon JSON-RPC shape (`receive` polling
+per design §6.2) should be reconciled during that smoke test.
 
 ### 3.2 Operator mode presets
 
@@ -313,6 +324,21 @@ error+empty truth table).
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 50/50;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A; notify is a core tool).
+- **Slice 7 — `task/3.1-signal` (task 3.1)** — 2026-06-27. Signal channel MVP
+  behind `SC_ENABLE_SIGNAL` (default n). New `src/channels/signal.{c,h}` +
+  `signal_internal.h` (pure seam: sender/group normalization, group-trigger,
+  id validation, recipient decomposition, base-url, envelope extraction);
+  JSON-RPC client over `POST /api/v1/rpc`; polling receive thread with backoff;
+  DM + group send. `sc_signal_config_t` (always-compiled config plumbing, like
+  the X channel) + KC-1 wiring + manager construction/quarantine. New
+  `tests/test_signal.c` (18 cases via mock_http + pure helpers). Docs:
+  `docs/channels/signal.md` flipped to Implemented (MVP), README updated.
+  **Mock-accepted; live signal-cli smoke test is a remaining human gate.**
+  **Verification gates:** Release `-DSC_ENABLE_SIGNAL=ON` build clean (KC-2
+  `implicit`=0); `ctest` 50/50 incl. `test_signal` (#36); minimal (SIGNAL off)
+  builds clean, `check_size_budget.sh` 273 KB ≤ 1024 KB (+4 KB from the
+  always-compiled config section); `check_claude_md.sh` clean; KC-1 satisfied
+  (new flag recognized by genconfig, disabled in minimal).
 
 ---
 

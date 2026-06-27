@@ -123,6 +123,24 @@ typedef struct {
     int tool_count;
 } sc_x_config_t;
 
+/* Signal channel config (task 3.1). Talks JSON-RPC to an external signal-cli
+ * daemon — smolclaw does not implement the Signal protocol. The field is named
+ * `signal_` in sc_config_t to avoid shadowing the libc signal() function. */
+typedef struct {
+    int enabled;
+    char *account;          /* E.164 bot number, e.g. "+15551234567" */
+    char *http_host;        /* daemon host, default "127.0.0.1" */
+    int http_port;          /* daemon port, default 7583 */
+    char *http_url;         /* full base URL override (wins over host/port) */
+    char *proxy;
+    char *group_trigger;    /* substring that must appear to act in groups */
+    char *dm_policy;
+    char **allow_from;
+    int allow_from_count;
+    char **tools;           /* per-channel tool allowlist (NULL = all) */
+    int tool_count;
+} sc_signal_config_t;
+
 /* Web channel config */
 typedef struct {
     int enabled;
@@ -360,6 +378,7 @@ typedef struct {
     sc_slack_config_t slack;
     sc_web_config_t web;
     sc_x_config_t x;
+    sc_signal_config_t signal_;
 
     /* Tools */
     sc_web_tools_config_t web_tools;

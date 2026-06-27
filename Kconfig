@@ -59,6 +59,18 @@ config SC_ENABLE_X
 	  Uses OAuth 1.0a with HMAC-SHA1 (OpenSSL).
 	  Requires Pay-Per-Use or Basic API tier (Free tier cannot poll mentions).
 
+config SC_ENABLE_SIGNAL
+	bool "Signal channel (via external signal-cli daemon)"
+	default n
+	select NEED_PTHREADS
+	help
+	  Enable the Signal channel. smolclaw does NOT implement the Signal
+	  protocol itself; it talks JSON-RPC to a separately running signal-cli
+	  daemon (or the bbernhard/signal-cli-rest-api container) over HTTP.
+	  Text-only DMs + groups, polling receive.
+
+	  Recommended: a dedicated bot phone number + dm_policy="pairing".
+
 endmenu
 
 menu "Tools"
