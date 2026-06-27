@@ -635,6 +635,48 @@ static void test_session_summarization(void)
     destroy_test_agent(&ctx);
 }
 
+/* 1.4: reactive compaction on context-length error. When the provider rejects
+ * a call with HTTP 400 + a context/length error, the turn loop drops the oldest
+ * message group(s) and retries instead of failing the turn. Regression test for
+ * the wiring bug where call_llm_with_fallback collapsed the 400 to NULL and the
+ * reactive block was unreachable. */
+static void test_reactive_compaction_on_context_error(void)
+{
+    /* High summary threshold so no async summarization interferes. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    /* Seed history so truncation has groups to drop (system + 6 + user > 2). */
+    for (int i = 0; i < 3; i++) {
+        char umsg[64], amsg[64];
+        snprintf(umsg, sizeof(umsg), "User message %d", i);
+        snprintf(amsg, sizeof(amsg), "Assistant reply %d", i);
+        sc_session_add_message(ctx.agent->sessions, "test-reactive", "user", umsg);
+        sc_session_add_message(ctx.agent->sessions, "test-reactive", "assistant", amsg);
+    }
+
+    /* Call 1: context-length rejection. Call 2 (after truncation): success. */
+    ctx.mpd->responses[0] = (sc_llm_response_t){
+        .content = "error: maximum context length exceeded",
+        .http_status = 400,
+        .finish_reason = "error",
+    };
+    ctx.mpd->responses[1] = (sc_llm_response_t){
+        .content = "Recovered after truncation.",
+        .finish_reason = "end_turn",
+    };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "One more question",
+                                             "test-reactive");
+    ASSERT_NOT_NULL(response);
+    ASSERT_STR_EQ(response, "Recovered after truncation.");
+    /* Two provider calls: the rejected one + the post-truncation retry. */
+    ASSERT_INT_EQ(ctx.mpd->chat_call_count, 2);
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
 static void test_summarize_shutdown_cancels_task(void)
 {
     /* Async summarization with failing provider enters 2s backoff; shutdown
@@ -1878,6 +1920,7 @@ int main(void)
     RUN_TEST(test_agent_loop_tool_call);
     RUN_TEST(test_agent_loop_provider_failure);
     RUN_TEST(test_session_summarization);
+    RUN_TEST(test_reactive_compaction_on_context_error);
     RUN_TEST(test_summarize_shutdown_cancels_task);
     RUN_TEST(test_agent_tool_call_limit);
     RUN_TEST(test_agent_multi_tool_calls);

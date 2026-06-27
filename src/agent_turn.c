@@ -798,6 +798,14 @@ static sc_llm_response_t *call_llm_with_fallback(
                 model, provider->name, llm_elapsed, iteration, primary_http);
     sc_audit_log_ext("llm", model, 1, (long)(llm_elapsed * 1000),
                      tc->channel, tc->chat_id, "llm_fail");
+    /* Signal a context-length rejection to the turn loop for reactive
+     * compaction. The 400 response (and its content) is freed below; the
+     * caller only sees NULL, so the status must be captured here. */
+    if (resp && primary_http == 400 && resp->content &&
+        (strstr(resp->content, "context") ||
+         strstr(resp->content, "token") ||
+         strstr(resp->content, "length")))
+        tc->context_overflow = 1;
     if (resp) { sc_llm_response_free(resp); resp = NULL; }
 
     int fallback_http[8] = {0};
@@ -1657,22 +1665,16 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                       provider && provider->name ? provider->name : "?",
                       tc.msgs_len);
 
+        tc.context_overflow = 0;
         sc_llm_response_t *resp = call_llm_with_fallback(
             agent, provider, model, tc.msgs, tc.msgs_len,
             tool_defs, tool_count, &tc, iteration);
 
-        if (!resp) break;
-
-        /* Reactive compaction via grouped truncation: if the API rejects
-         * with a context-length error, drop the oldest message group
-         * (bounded by assistant responses) and retry up to 3 times. */
-        if (resp->http_status == 400 && resp->content &&
-            (strstr(resp->content, "context") ||
-             strstr(resp->content, "token") ||
-             strstr(resp->content, "length"))) {
-            sc_llm_response_free(resp);
-            resp = NULL;
-
+        /* Reactive compaction via grouped truncation: if the API rejected the
+         * call with a context-length error, call_llm_with_fallback returns NULL
+         * and sets tc.context_overflow (the 400 status is otherwise collapsed to
+         * NULL). Drop the oldest message group and retry up to 3 times. */
+        if (!resp && tc.context_overflow) {
             int retries = 0;
             while (retries < 3 && tc.msgs_len > 2) {
                 /* Find the first assistant message boundary after system msgs.
@@ -1702,32 +1704,28 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                             "%d remaining (retry %d/3)",
                             drop_end - 1, tc.msgs_len, retries + 1);
 
+                tc.context_overflow = 0;
                 resp = call_llm_with_fallback(
                     agent, provider, model, tc.msgs, tc.msgs_len,
                     tool_defs, tool_count, &tc, iteration);
-                if (!resp) break;
-                if (resp->http_status == 200) break;
-
-                /* Still too large — drop another group */
-                if (resp->http_status == 400) {
-                    sc_llm_response_free(resp);
-                    resp = NULL;
+                if (resp) break;                /* recovered (HTTP 200) */
+                if (tc.context_overflow) {       /* still too large — drop more */
                     retries++;
                     continue;
                 }
                 break;  /* non-context error */
             }
 
-            if (!resp) break;
-            if (resp->http_status != 200) {
+            if (!resp) {
                 SC_LOG_ERROR("agent", "Grouped truncation exhausted (%d retries)", retries);
-                sc_llm_response_free(resp);
                 final_content = sc_strdup(
                     "Context window full after truncation. Please start a new session.");
                 break;
             }
             /* Fall through to normal response handling */
         }
+
+        if (!resp) break;
 
         /* Some models return tool calls as text — extract them */
         extract_text_tool_calls(resp, tool_defs, tool_count);

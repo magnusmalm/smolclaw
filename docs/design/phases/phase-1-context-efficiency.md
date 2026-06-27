@@ -65,12 +65,25 @@
 
 **Source:** claude-code P0 #2
 
-**Files:** `src/agent_turn.c`, `src/agent_session.c`
+**Files:** `src/agent_turn.c`, `src/agent_internal.h`, `tests/test_agent.c`
 
-- [ ] Track `last_prompt_tokens` from provider usage
-- [ ] Pre-call: if >85% of `context_window`, trigger sync summarization
-- [ ] Reactive: on HTTP 400 context-length errors, truncate to last 2 msgs + summary, retry
-- [ ] Keep `session_summary_threshold` as fallback when usage unavailable
+> **Status (2026-06-27):** 1.3 was **already shipped** (proactive token-aware
+> trigger at `agent_turn.c`: when `last_prompt_tokens > 85% of context_window`
+> → `sc_maybe_summarize`, with a 3-failure circuit breaker). 1.4 was
+> **implemented but dead-wired** — `call_llm_with_fallback` collapses every
+> non-200 (incl. 400) to `NULL`, so the `if (!resp) break;` fired before the
+> `resp->http_status == 400` reactive block, which was unreachable. **Fixed**
+> this slice: the helper now sets `tc.context_overflow` on a 400 context error
+> before freeing the response, and the turn loop reacts on that flag.
+
+- [x] Track `last_prompt_tokens` from provider usage *(shipped)*
+- [x] Pre-call: if >85% of `context_window`, trigger sync summarization *(shipped, with breaker)*
+- [x] Reactive: on HTTP 400 context-length errors, drop oldest message group and retry (×3)
+  *(was unreachable; **fixed + regression test** `test_reactive_compaction_on_context_error`)*
+- [x] Keep `session_summary_threshold` as fallback when usage unavailable *(unchanged)*
+
+**Verification gates (2026-06-27):** KC-2 clean; `ctest --test-dir build` **39/39**;
+`test_agent` 177/0 (incl. new reactive test); minimal-dynamic **245 KB ≤ 1024 KB**.
 
 ### 1.5 Adaptive tool selection
 

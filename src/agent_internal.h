@@ -100,6 +100,8 @@ typedef struct {
      * HTTP 0 (connection failure) and 429 (rate limit) don't consume
      * tokens, so waiting costs nothing. Cap at 300s extra. */
     int grace_secs;         /* accumulated grace time */
+    int context_overflow;   /* set by call_llm_with_fallback on a 400 context-length
+                             * error so the turn loop can reactively compact */
 
     /* LLM failure tracking — populated when all providers fail */
     char *failure_reason;  /* malloc'd, freed by caller */
