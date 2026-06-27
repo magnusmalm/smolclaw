@@ -257,7 +257,19 @@ typedef enum {
     SC_PROVIDER_HEALTHY,
     SC_PROVIDER_RATE_LIMITED,
     SC_PROVIDER_UNREACHABLE,
+    SC_PROVIDER_AUTH_EXPIRED,
 } sc_provider_status_t;
+
+static const char *provider_status_name(sc_provider_status_t s)
+{
+    switch (s) {
+    case SC_PROVIDER_RATE_LIMITED: return "rate-limited";
+    case SC_PROVIDER_UNREACHABLE:  return "unreachable";
+    case SC_PROVIDER_AUTH_EXPIRED: return "auth-expired";
+    case SC_PROVIDER_HEALTHY:      return "healthy";
+    }
+    return "unknown";
+}
 
 static struct {
     const char *name;         /* borrowed pointer (provider->name is static) */
@@ -284,6 +296,8 @@ static void provider_health_update(const char *name, int http_status,
         s_provider_health[slot].name = name;
     }
 
+    sc_provider_status_t prev = s_provider_health[slot].status;
+
     if (http_status == 200) {
         s_provider_health[slot].status = SC_PROVIDER_HEALTHY;
         s_provider_health[slot].retry_after = 0;
@@ -291,10 +305,34 @@ static void provider_health_update(const char *name, int http_status,
         s_provider_health[slot].status = SC_PROVIDER_RATE_LIMITED;
         int wait = retry_after_secs > 0 ? retry_after_secs : 60;
         s_provider_health[slot].retry_after = time(NULL) + wait;
+    } else if (http_status == 401) {
+        /* Expired or invalid credentials: skip in the fallback chain until the
+         * cooldown lapses so a re-auth (e.g. xAI OAuth refresh) has a chance to
+         * take effect before we hammer the same provider again. */
+        s_provider_health[slot].status = SC_PROVIDER_AUTH_EXPIRED;
+        s_provider_health[slot].retry_after = time(NULL) + 300;
     } else if (http_status == 0) {
         s_provider_health[slot].status = SC_PROVIDER_UNREACHABLE;
         s_provider_health[slot].retry_after = time(NULL) + 120;
     }
+
+    /* Surface unhealthy transitions in the log (task 2.6). */
+    if (s_provider_health[slot].status != SC_PROVIDER_HEALTHY &&
+        s_provider_health[slot].status != prev) {
+        SC_LOG_WARN("agent", "Provider '%s' marked %s (HTTP %d); fallback chain "
+                    "will skip it until cooldown lapses",
+                    name ? name : "(null)",
+                    provider_status_name(s_provider_health[slot].status),
+                    http_status);
+    }
+}
+
+/* Reset all provider-health state. Process-global; primarily for test
+ * isolation, but also a clean operational reset point. */
+void sc_provider_health_reset(void)
+{
+    s_provider_health_count = 0;
+    memset(s_provider_health, 0, sizeof(s_provider_health));
 }
 
 static int provider_health_ok(const char *name)

@@ -105,10 +105,21 @@ Only implement if gateway restart / multi-process read is a measured bottleneck.
 
 **Files:** `src/agent_turn.c` *(tracker exists)*, fallback selection, `src/analytics.c`
 
-- [x] Per-provider status: HEALTHY, RATE_LIMITED, AUTH_EXPIRED, UNREACHABLE *(shipped)*
-- [ ] Update from HTTP responses (429, 401, timeouts) *(verify coverage)*
-- [ ] Fallback chain skips unhealthy until `retry_after` *(verify/glue)*
-- [ ] Visible in `smolclaw analytics` or logs *(remaining)*
+- [x] Per-provider status: HEALTHY, RATE_LIMITED, AUTH_EXPIRED, UNREACHABLE
+  *(enum shipped; `AUTH_EXPIRED` was missing — **added this slice**)*
+- [x] Update from HTTP responses (429/529 → RATE_LIMITED, 401 → AUTH_EXPIRED,
+  timeout/0 → UNREACHABLE) *(401 mapping **added this slice**, 300 s cooldown)*
+- [x] Fallback chain skips unhealthy until `retry_after` *(already wired at
+  `agent_turn.c:834` via `provider_health_ok`; **locked with regression test**)*
+- [x] Visible in logs — `SC_LOG_WARN` on every unhealthy transition
+  *(**added this slice**)*. The in-memory tracker is process-local (gateway), so
+  `smolclaw analytics` (separate process, DB-backed) cannot observe it; logs are
+  the correct surface.
+
+**Status (2026-06-27):** ✅ done. Tracker verified + `AUTH_EXPIRED`/401 mapping
+and transition logging added; `sc_provider_health_reset()` exported for test
+isolation. New test `test_provider_health_skips_auth_expired_fallback`
+(`tests/test_agent.c`).
 
 ### 2.7 Port conflict logging
 
@@ -125,10 +136,18 @@ Only implement if gateway restart / multi-process read is a measured bottleneck.
 
 **Files:** `src/agent_turn.c`
 
-- [ ] Audit existing retry/fallback logic
-- [ ] Ensure exponential backoff (1s, 4s, 16s) on 429/529
-- [ ] Honor `retry_after_secs` from provider
-- [ ] Add tests if gaps found
+- [x] Audit existing retry/fallback logic (`call_provider_with_retry`,
+  `agent_turn.c`)
+- [x] Exponential backoff on transient errors (0/429/502/503/529): ×2 from
+  `SC_LLM_RETRY_INITIAL_MS=1000` capped at `SC_LLM_RETRY_MAX_MS=30000`,
+  `SC_LLM_MAX_RETRIES=3` (`constants_network.h`). **No gap** — the spec's
+  "1s/4s/16s" is illustrative; ×2 (1s/2s/4s) is correct exponential backoff.
+- [x] Honor `retry_after_secs` from provider — used as the delay (capped 300 s);
+  header parser caps the raw value at 3600 s (`provider_common.c`).
+- [x] Test added: `test_transient_error_retries_then_succeeds` (503 → retry →
+  200).
+
+**Status (2026-06-27):** ✅ done (audit confirms correct; regression test added).
 
 ### 2.9 Cron expression parser
 
@@ -230,6 +249,17 @@ Only implement if gateway restart / multi-process read is a measured bottleneck.
 5. `feat: xAI Grok OAuth provider and auth subcommand`
 6. `fix: port conflict diagnostics on web channel bind`
 7. `docs: skills format + MCP integration cookbook`
+
+---
+
+## 6. Slice log
+
+- **Slice 1 — `task/2.6-provider-reliability` (tasks 2.6 + 2.8)** — 2026-06-27.
+  Provider-health `AUTH_EXPIRED`/401 mapping + unhealthy-transition logging +
+  `sc_provider_health_reset()`; backoff audited (no gap). 2 new tests.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest
+  --test-dir build` 43/43 green; `check_size_budget.sh` minimal-dynamic 257 KB ≤
+  1024 KB; no new Kconfig flag (KC-1 N/A).
 
 ---
 

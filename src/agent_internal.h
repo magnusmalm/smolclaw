@@ -126,6 +126,10 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
                            char **out_thinking,
                            int isolated, const char *namespace_id);
 
+/* Reset all process-global provider-health tracking (rate-limit / auth-expired
+ * / unreachable cooldowns). Primarily for test isolation. */
+void sc_provider_health_reset(void);
+
 /* ---------- agent_session.c ---------- */
 
 /* Summarize session if over threshold, then consolidate to long-term memory.

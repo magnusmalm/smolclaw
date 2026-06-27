@@ -392,6 +392,10 @@ static test_agent_ctx_t create_test_agent(int summary_threshold)
 
     mock_total_chat_calls = 0;
 
+    /* Provider-health tracking is process-global; reset it so a provider
+     * marked unhealthy by an earlier test cannot leak into this one. */
+    sc_provider_health_reset();
+
     /* Mock provider */
     ctx.mpd = calloc(1, sizeof(*ctx.mpd));
     ctx.provider = calloc(1, sizeof(*ctx.provider));
@@ -1193,6 +1197,105 @@ static void test_failure_reason_null_provider(void)
 }
 
 /* ======================================================================
+ * Provider health tracking (task 2.6) + retry/backoff (task 2.8)
+ * ====================================================================== */
+
+/* Free the per-call captures mock_chat() left on a stack-local mock. */
+static void free_mock_captures(mock_provider_data_t *m)
+{
+    free(m->last_system_prompt);
+    m->last_system_prompt = NULL;
+    if (m->last_msgs) {
+        for (int i = 0; i < m->last_msg_count; i++)
+            sc_llm_message_free_fields(&m->last_msgs[i]);
+        free(m->last_msgs);
+        m->last_msgs = NULL;
+    }
+}
+
+static void test_provider_health_skips_auth_expired_fallback(void)
+{
+    /* A fallback that returns 401 is marked AUTH_EXPIRED and skipped on the
+     * next turn (until cooldown), while a healthy fallback keeps serving. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    mock_provider_data_t auth_mpd = {0};
+    sc_provider_t auth_fb = {0};
+    auth_fb.name = "fb-auth";
+    auth_fb.chat = mock_chat;
+    auth_fb.get_default_model = mock_get_model;
+    auth_fb.data = &auth_mpd;
+    auth_mpd.responses[0] = (sc_llm_response_t){ .http_status = 401 };
+    auth_mpd.response_count = 1;
+
+    mock_provider_data_t good_mpd = {0};
+    sc_provider_t good_fb = {0};
+    good_fb.name = "fb-good";
+    good_fb.chat = mock_chat;
+    good_fb.get_default_model = mock_get_model;
+    good_fb.data = &good_mpd;
+    good_mpd.responses[0] =
+        (sc_llm_response_t){ .content = "ok", .finish_reason = "end_turn" };
+    good_mpd.responses[1] =
+        (sc_llm_response_t){ .content = "ok", .finish_reason = "end_turn" };
+    good_mpd.response_count = 2;
+
+    sc_provider_t *fb_ptrs[2] = { &auth_fb, &good_fb };
+    char *fb_models[2] = { "fb-auth-model", "fb-good-model" };
+    ctx.agent->fallback_providers = fb_ptrs;
+    ctx.agent->fallback_models = fb_models;
+    ctx.agent->fallback_count = 2;
+
+    /* Primary fails with a non-transient 500 on both turns (no retry sleep). */
+    ctx.mpd->responses[0] = (sc_llm_response_t){ .http_status = 500 };
+    ctx.mpd->responses[1] = (sc_llm_response_t){ .http_status = 500 };
+    ctx.mpd->response_count = 2;
+
+    /* Turn 1: auth fallback is tried (401), good fallback serves. */
+    char *r1 = sc_agent_process_direct(ctx.agent, "Hello", "health-1");
+    ASSERT_NOT_NULL(r1);
+    ASSERT_INT_EQ(auth_mpd.chat_call_count, 1);
+    ASSERT_INT_EQ(good_mpd.chat_call_count, 1);
+    free(r1);
+
+    /* Turn 2: auth fallback is now AUTH_EXPIRED → skipped; good still serves. */
+    char *r2 = sc_agent_process_direct(ctx.agent, "Hello again", "health-2");
+    ASSERT_NOT_NULL(r2);
+    ASSERT_INT_EQ(auth_mpd.chat_call_count, 1);  /* not called again */
+    ASSERT_INT_EQ(good_mpd.chat_call_count, 2);
+    free(r2);
+
+    ctx.agent->fallback_providers = NULL;
+    ctx.agent->fallback_models = NULL;
+    ctx.agent->fallback_count = 0;
+
+    free_mock_captures(&auth_mpd);
+    free_mock_captures(&good_mpd);
+    destroy_test_agent(&ctx);
+}
+
+static void test_transient_error_retries_then_succeeds(void)
+{
+    /* A transient 503 is retried (exponential backoff) and the subsequent 200
+     * is returned — verifies task 2.8 retry path end-to-end. */
+    test_agent_ctx_t ctx = create_test_agent(100);
+
+    ctx.mpd->responses[0] = (sc_llm_response_t){ .http_status = 503 };
+    ctx.mpd->responses[1] =
+        (sc_llm_response_t){ .content = "recovered", .finish_reason = "end_turn" };
+    ctx.mpd->response_count = 2;
+
+    char *response = sc_agent_process_direct(ctx.agent, "Hello", "retry-1");
+    ASSERT_NOT_NULL(response);
+    ASSERT(strstr(response, "recovered") != NULL,
+           "Should return the post-retry success content");
+    ASSERT_INT_EQ(ctx.mpd->chat_call_count, 2);  /* one failure + one retry */
+
+    free(response);
+    destroy_test_agent(&ctx);
+}
+
+/* ======================================================================
  * Context transform tests
  * ====================================================================== */
 
@@ -1931,6 +2034,8 @@ int main(void)
     RUN_TEST(test_failure_reason_with_fallbacks);
     RUN_TEST(test_failure_reason_all_401);
     RUN_TEST(test_failure_reason_null_provider);
+    RUN_TEST(test_provider_health_skips_auth_expired_fallback);
+    RUN_TEST(test_transient_error_retries_then_succeeds);
     RUN_TEST(test_context_transform_appends);
     RUN_TEST(test_context_transform_chain_order);
     RUN_TEST(test_context_transform_stop_chain);
