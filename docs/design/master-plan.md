@@ -54,6 +54,8 @@ Every item in this roadmap must satisfy:
   Notes: <650 LOC cap
 - **[`docs/design/deferred-initialization.md`](deferred-initialization.md)** — Status: Spec complete;
   Phase(s): 0; Notes: Hermes PR pattern lift; RSS/startup
+- **[`docs/design/mixture-of-agents.md`](mixture-of-agents.md)** — Status: Design complete;
+  Phase(s): 2; Notes: Hermes MoA-lite; virtual provider; `SC_ENABLE_MOA` default n
 - `docs/integrations/mcp-cookbook.md` *(not yet created — authored as the Phase 2.12 deliverable)* —
   Status: Planned; Phase(s): 2; Notes: Tier 2 MCP delegation (browser, HA, media)
 - **[`lazyagent_borrow_tasks.md`](../../lazyagent_borrow_tasks.md)** — Status: Pattern lifts;
@@ -153,6 +155,8 @@ Every item in this roadmap must satisfy:
   config gate: always
 - **Gateway slash + cron (2.9–2.10)** — LOC (rough): 280–500; Binary Δ (rough): +10–15 KB; Kconfig /
   config gate: config / `SC_ENABLE_CRON`
+- **Mixture of Agents MoA-lite (2.13)** — LOC (rough): 350–550; Binary Δ (rough): +10–20 KB; Kconfig /
+  config gate: `SC_ENABLE_MOA` default **n**; spec: `mixture-of-agents.md`
 - **Gateway polish (3.7–3.9)** — LOC (rough): 290–460; Binary Δ (rough): +10 KB; Kconfig / config
   gate: config
 - **Session search (4.11)** — LOC (rough): 300–500; Binary Δ (rough): +15–25 KB; Kconfig / config
@@ -169,7 +173,7 @@ roadmap. **Tiers define where code lives**; **phases define execution order**.
 
 | Tier | Meaning | Where it ships | Examples in this roadmap |
 |------|---------|----------------|--------------------------|
-| **T1** | Core C binary (Kconfig-gated) | Phases 0–4 | 0.8 deferred init; 2.9–2.11 cron, slash, skills docs; 3.7–3.9 gateway polish; 4.11–4.12 session_search, compact tool |
+| **T1** | Core C binary (Kconfig-gated) | Phases 0–4 | 0.8 deferred init; 2.9–2.11 cron, slash, skills docs; **2.13 MoA-lite**; 3.7–3.9 gateway polish; 4.11–4.12 session_search, compact tool |
 | **T2** | MCP subprocess delegation | Parallel from Phase 2 | 2.12 MCP cookbook — browser, HA, image/TTS; zero smolclaw binary cost |
 | **T3** | Separate orchestration layer | Never in smolclaw (`SCOPE.md`) | Fleet dashboards, relay for 15+ channels, Desktop/TUI, ACP adapter, RL/Atropos, Skills Hub |
 | **T4** | Minimal self-improvement loop | Phase 4.13–4.14 (opt-in) | Post-turn memory review, `write_approval` staging; **not** `skill_manage`, `/learn`, Honcho |
@@ -184,9 +188,10 @@ Python/Playwright dependency cone.
 | 7 core channels | Today + Signal P3 | 20+ native adapters impractical |
 | Browser / media | T2 MCP (+ optional P4 wrappers) | No in-process Playwright |
 | Self-improving loop | T4 subset (4.13–4.14) | skill_manage, Skills Hub → T3 |
+| Mixture of Agents | Phase 2.13 (MoA-lite) | Full Hermes UI / unlimited presets → out of core |
 | Docker/Modal/Daytona terminals | microsandbox 4.9 + T2 | Six backends — partial by design |
 
-Task IDs: see phase plans — **0.8**, **2.9–2.12**, **3.7–3.9**, **4.11–4.14**.
+Task IDs: see phase plans — **0.8**, **2.9–2.13**, **3.7–3.9**, **4.11–4.14**.
 
 ---
 
@@ -328,6 +333,7 @@ docs/design/
   xai-grok-oauth.md                       ← authoritative for OAuth
   smallharness-integration.md             ← authoritative for local-model lifts
   deferred-initialization.md              ← authoritative for lazy runtime init (0.8)
+  mixture-of-agents.md                    ← authoritative for MoA-lite virtual provider (2.13)
   integrations/mcp-cookbook.md          ← Tier 2 MCP delegation (NOT YET CREATED; Phase 2.12 deliverable)
 ```
 

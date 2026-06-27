@@ -91,6 +91,7 @@ autonomous-to-implement but human-to-accept.
 | 2.10 gateway slash MVP | ✅ READY | Mock-channel tests cover acceptance |
 | 2.11 skills format docs | ✅ READY | Docs only |
 | 2.12 MCP cookbook | 🟠 GATED-EXT | Needs ≥1 real MCP server for the smoke-test recipe |
+| 2.13 MoA-lite | ✅ READY | Virtual `moa` provider; mock HTTP tests; `local_only` presets; spec: mixture-of-agents.md |
 
 ### Phase 3 — Optional surface area
 

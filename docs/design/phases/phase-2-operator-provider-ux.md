@@ -35,6 +35,8 @@ gateway slash commands, Hermes-gap operator docs.
   docs only; Binary: 0; Gate: —
 - **2.12** — Task: MCP integration cookbook; Source: Hermes-gap; Tier: **T2**; LOC: docs only;
   Binary: 0; Gate: —
+- **2.13** — Task: Mixture of Agents (MoA-lite); Source: mixture-of-agents.md; Tier: **T1**;
+  LOC: 350–550; Binary: +10–20 KB; Gate: `SC_ENABLE_MOA` default **n**
 
 ---
 
@@ -258,6 +260,40 @@ tests.
 - [ ] Smoke-test recipe: one MCP server + `smolclaw gateway` end-to-end
 - [ ] Tier 2 rule: zero smolclaw binary cost; optional thin native wrapper only after ≥3 fleet deployments
 
+### 2.13 Mixture of Agents (MoA-lite)
+
+**Authoritative spec:** [`../mixture-of-agents.md`](../mixture-of-agents.md)  
+**Hermes reference:** [Mixture of Agents](https://hermes-agent.nousresearch.com/docs/user-guide/features/mixture-of-agents)
+
+**New files:** `src/providers/moa.c`, `src/providers/moa.h`, `tests/test_moa.c`
+
+**Modified:** `src/providers/factory.c`, `src/config.{c,h}`, `src/agent_turn.c`, `src/agent.c`,
+`src/slash.c`, `CMakeLists.txt`, `Kconfig`, `docs/CONFIGURATION.md`, `README.md`
+
+Deliverables:
+
+- [ ] Virtual `moa` provider with named presets in `config.json` (`reference_models` + `aggregator`)
+- [ ] Per-iteration loop: trimmed reference fan-out (no tools) → inject on user-tail → aggregator with tools
+- [ ] Parallel reference calls (cap 3); reference failure included in context, turn continues
+- [ ] `local_only` preset policy — Ollama/vLLM/loopback custom only; reject cloud slots
+- [ ] `enabled: false` on preset → aggregator alone (MoA off for that preset)
+- [ ] Block recursive MoA (aggregator cannot be `moa` provider)
+- [ ] Cost/audit sums reference + aggregator usage per iteration
+- [ ] Model aliases / `/model` can select `moa:<preset>`; help text in `slash.c`
+- [ ] Kconfig `SC_ENABLE_MOA` — **default n**; FEATURE_SYMS update (KC-1)
+- [ ] `tests/test_moa.c` — mock HTTP: trim, inject, fan-out, `local_only`, `enabled: false`
+
+**Smol contract:** No dashboard UI; no `/moa` one-shot required for MVP; distinct from
+fallback (failure) and Phase 5 OpenRouter `/compare` (rejected). Presets may mix local
+(`ollama`, `vllm`) and cloud providers when `local_only` is false.
+
+**Example presets (documented, not hard-coded):**
+
+| Preset | References | Aggregator |
+|--------|------------|------------|
+| `hybrid` | `ollama/*` + `openrouter/*` | `anthropic/*` |
+| `airgap` | `ollama/*` | `ollama/*` (`local_only: true`) |
+
 ---
 
 ## 3. Exit Criteria
@@ -271,6 +307,8 @@ tests.
 - [ ] Gateway slash MVP works on at least CLI + one async channel (Telegram or Discord)
 - [ ] Skills section present in README and CONFIGURATION
 - [ ] `docs/integrations/mcp-cookbook.md` published with ≥1 tested MCP example
+- [ ] MoA: `tests/test_moa.c` green; preset with mock references + aggregator passes one iteration
+- [ ] MoA: `local_only` airgap preset rejects cloud provider at config load
 
 ---
 
@@ -282,6 +320,8 @@ tests.
 | Session compact breaks tree  | Parse validation before swap; `.bak`            |
 | Loopback blocked on some VPS | Document `--no-browser`; user opens URL locally |
 | Compact during active turn   | Session lock + `--force` gate                   |
+| MoA cost / latency blow-up   | Default off; cap 3 references; document multiplier |
+| Cloud egress on "local" task | `local_only` preset + CONFIGURATION warnings  |
 
 ---
 
@@ -294,6 +334,7 @@ tests.
 5. `feat: xAI Grok OAuth provider and auth subcommand`
 6. `fix: port conflict diagnostics on web channel bind`
 7. `docs: skills format + MCP integration cookbook`
+8. `feat: mixture-of-agents virtual provider (MoA-lite)` — after 2.6 provider health + `/model` (2.10)
 
 ---
 
