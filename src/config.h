@@ -315,6 +315,10 @@ typedef struct {
     /* Auto-approve tool confirmations (for headless/autonomous operation) */
     int auto_confirm;
 
+    /* Tool confirmation policy (task 3.3): sc_approval_policy_t —
+     * 0 dangerous-only (default), 1 always, 2 never. */
+    int approval_policy;
+
     /* Model aliases for in-prompt override */
     char **model_alias_names;
     char **model_alias_models;
@@ -406,6 +410,11 @@ int sc_config_save(const char *path, const sc_config_t *cfg);
 
 /* Get resolved workspace path (with ~ expanded) */
 char *sc_config_workspace_path(const sc_config_t *cfg);
+
+/* Apply an operator-mode preset (task 3.2): sets approval_policy and clamps
+ * max_tool_iterations for "explore"/"edit"/"review"/"ship". "custom", NULL, or
+ * an unknown mode is a no-op (explicit config preserved). Pure / testable. */
+void sc_config_apply_operator_mode(sc_config_t *cfg, const char *mode);
 
 /* Get config file path (~/.smolclaw/config.json) */
 char *sc_config_get_path(void);

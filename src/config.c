@@ -48,6 +48,32 @@ static void free_provider(sc_provider_config_t *p)
     free(p->proxy);
 }
 
+/* Map an approval-policy name to its int (sc_approval_policy_t). */
+static int parse_approval_policy(const char *s, int dflt)
+{
+    if (!s) return dflt;
+    if (strcmp(s, "always") == 0)         return 1;
+    if (strcmp(s, "never") == 0)          return 2;
+    if (strcmp(s, "dangerous-only") == 0) return 0;
+    return dflt;
+}
+
+void sc_config_apply_operator_mode(sc_config_t *cfg, const char *mode)
+{
+    if (!cfg || !mode || strcmp(mode, "custom") == 0) return;
+
+    int clamp = 0;
+    if (strcmp(mode, "explore") == 0)      { cfg->approval_policy = 0; clamp = 15; }
+    else if (strcmp(mode, "edit") == 0)    { cfg->approval_policy = 0; clamp = 25; }
+    else if (strcmp(mode, "review") == 0)  { cfg->approval_policy = 1; clamp = 15; }
+    else if (strcmp(mode, "ship") == 0)    { cfg->approval_policy = 2; clamp = 50; }
+    else return;  /* unknown mode → no-op */
+
+    if (clamp > 0 &&
+        (cfg->max_tool_iterations <= 0 || cfg->max_tool_iterations > clamp))
+        cfg->max_tool_iterations = clamp;
+}
+
 #if SC_ENABLE_MOA
 static void parse_moa_slot(const cJSON *obj, sc_moa_slot_cfg_t *slot)
 {
@@ -991,6 +1017,15 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->verbose = sc_json_get_bool(defaults, "verbose", cfg->verbose);
     cfg->auto_confirm = sc_json_get_bool(defaults, "auto_confirm",
                                           cfg->auto_confirm);
+
+    /* Operator mode preset (3.2) then explicit approval_policy override (3.3).
+     * Default policy is dangerous-only (matches prior per-tool confirm). */
+    cfg->approval_policy = 0;
+    sc_config_apply_operator_mode(cfg,
+        sc_json_get_string(defaults, "operator_mode", NULL));
+    cfg->approval_policy = parse_approval_policy(
+        sc_json_get_string(defaults, "approval_policy", NULL),
+        cfg->approval_policy);
 
     /* Pricing overrides (borrowed pointer — lives as long as parsed config JSON) */
     {

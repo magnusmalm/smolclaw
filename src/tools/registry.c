@@ -122,6 +122,9 @@ void sc_tool_registry_free(sc_tool_registry_t *reg)
     for (int i = 0; i < reg->discovered_count; i++)
         free(reg->discovered_tools[i]);
     free(reg->discovered_tools);
+    for (int i = 0; i < reg->always_allow_count; i++)
+        free(reg->always_allow[i]);
+    free(reg->always_allow);
     free(reg);
 }
 
@@ -131,6 +134,38 @@ void sc_tool_registry_set_confirm(sc_tool_registry_t *reg,
     if (!reg) return;
     reg->confirm_cb = cb;
     reg->confirm_ctx = ctx;
+}
+
+int sc_approval_requires_confirm(int policy, int tool_needs_confirm)
+{
+    switch (policy) {
+    case SC_APPROVAL_NEVER:  return 0;
+    case SC_APPROVAL_ALWAYS: return 1;
+    case SC_APPROVAL_DANGEROUS_ONLY:
+    default:                 return tool_needs_confirm ? 1 : 0;
+    }
+}
+
+void sc_tool_registry_set_approval_policy(sc_tool_registry_t *reg, int policy)
+{
+    if (reg) reg->approval_policy = policy;
+}
+
+static int always_allowed(const sc_tool_registry_t *reg, const char *name)
+{
+    for (int i = 0; i < reg->always_allow_count; i++)
+        if (strcmp(reg->always_allow[i], name) == 0) return 1;
+    return 0;
+}
+
+static void remember_always_allow(sc_tool_registry_t *reg, const char *name)
+{
+    if (always_allowed(reg, name)) return;
+    char **na = realloc(reg->always_allow,
+                        (size_t)(reg->always_allow_count + 1) * sizeof(char *));
+    if (!na) return;
+    reg->always_allow = na;
+    reg->always_allow[reg->always_allow_count++] = sc_strdup(name);
 }
 
 void sc_tool_registry_add_pre_hook(sc_tool_registry_t *reg, const char *name,
@@ -284,8 +319,10 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
         return sc_tool_result_error("tool not found");
     }
 
-    /* Confirmation check */
-    if (tool->needs_confirm) {
+    /* Confirmation check (task 3.3): the approval policy decides whether a tool
+     * confirms; a session "always allow" approval skips re-prompting. */
+    if (sc_approval_requires_confirm(reg->approval_policy, tool->needs_confirm)
+        && !always_allowed(reg, name)) {
         if (!reg->confirm_cb) {
             SC_LOG_WARN("tool", "Tool requires confirmation but no handler: %s", name);
             sc_audit_log(name, "(denied: no confirm handler)", 1, 0);
@@ -297,6 +334,10 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
             args_preview = cJSON_PrintUnformatted(args);
         }
         int approved = reg->confirm_cb(name, args_preview ? args_preview : "", reg->confirm_ctx);
+        if (approved == 2) {  /* "always allow this tool" for the session */
+            remember_always_allow(reg, name);
+            approved = 1;
+        }
         if (!approved) {
             SC_LOG_INFO("tool", "Tool denied by user: %s", name);
             sc_audit_log(name, args_preview ? args_preview : "", 1, 0);

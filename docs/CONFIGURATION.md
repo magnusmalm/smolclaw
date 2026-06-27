@@ -420,6 +420,36 @@ invalid expression disables the job (it never fires) and logs a warning.
 
 - [1] Used by the `notify` tool, e.g. `discord://id/token,tgram://bot/chat`.
 
+## `operator_mode` / `approval_policy` — tool confirmation (`agents.defaults`)
+
+`approval_policy` controls which tools prompt for confirmation:
+
+| Value            | Behavior                                                  |
+|------------------|-----------------------------------------------------------|
+| `dangerous-only` | (default) confirm only tools marked dangerous (`needs_confirm`) |
+| `always`         | confirm **every** tool call                               |
+| `never`          | never confirm (autonomous)                                |
+
+On interactive CLI the prompt accepts `y` / `N` / `a` (always-allow this tool
+for the session). Confirmations are still auto-approved on the gateway (deny
+patterns + allowlist are the gateway's guards); `approval_policy` shapes the
+interactive (CLI/Web) experience.
+
+`operator_mode` is a preset that sets `approval_policy` and clamps
+`max_tool_iterations` (an explicit `approval_policy` overrides the preset):
+
+| Mode      | approval_policy  | max_tool_iterations clamp |
+|-----------|------------------|---------------------------|
+| `explore` | dangerous-only   | ≤ 15                      |
+| `edit`    | dangerous-only   | ≤ 25                      |
+| `review`  | always           | ≤ 15                      |
+| `ship`    | never            | ≤ 50                      |
+| `custom`  | (no preset — explicit config preserved) |        |
+
+Per-mode tool-allowlist ceilings are not yet applied (use `allowed_tools` /
+per-channel lists). Interactive diff-preview and async summary-confirm are
+planned follow-ups.
+
 ## `session_reset` — automatic session hygiene (top-level)
 
 Starts a fresh session for a chat when the prior one is stale, without a manual

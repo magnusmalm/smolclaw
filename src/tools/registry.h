@@ -62,7 +62,25 @@ typedef struct sc_tool_registry {
     /* Oversized-result spill thresholds (<=0 = built-in defaults) */
     int    max_result_chars;     /* spill a single result to disk above this */
     int    result_preview_chars; /* preview kept inline after spill */
+    /* Approval policy (task 3.3): which tools trigger confirm_cb. */
+    int    approval_policy;      /* sc_approval_policy_t */
+    /* Session "always allow" cache: tools the user approved with "always". */
+    char **always_allow;
+    int    always_allow_count;
 } sc_tool_registry_t;
+
+/* Confirmation policy (task 3.3). */
+typedef enum {
+    SC_APPROVAL_DANGEROUS_ONLY = 0,  /* confirm only tools with needs_confirm */
+    SC_APPROVAL_ALWAYS         = 1,  /* confirm every tool */
+    SC_APPROVAL_NEVER          = 2,  /* never confirm (autonomous) */
+} sc_approval_policy_t;
+
+/* Whether a tool requires confirmation under `policy`. Pure / testable. */
+int sc_approval_requires_confirm(int policy, int tool_needs_confirm);
+
+/* Set the registry's approval policy. */
+void sc_tool_registry_set_approval_policy(sc_tool_registry_t *reg, int policy);
 
 /* Mark a tool as discovered (fetched via tool_search). */
 void sc_tool_registry_mark_discovered(sc_tool_registry_t *reg, const char *name);

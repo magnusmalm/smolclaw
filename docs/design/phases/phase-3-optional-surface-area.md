@@ -72,9 +72,14 @@ Each mode sets:
 - `approval_policy` / confirm behavior
 - `max_tool_iterations` clamp
 
-- [ ] `operator_mode` config field; `"custom"` preserves explicit lists
-- [ ] Apply on config load; document in README
-- [ ] CLI: `smolclaw config set agents.defaults.operator_mode ship` (optional)
+- [x] `operator_mode` config field (`agents.defaults`); `"custom"`/unknown/NULL = no-op
+- [x] Apply on config load (`sc_config_apply_operator_mode`); documented in CONFIGURATION.md
+- [~] Tool-allowlist ceiling per mode — **deferred** (entangled with read-only /
+  per-channel / user lists); modes set approval_policy + iteration clamp
+- [ ] CLI `config set` helper — optional, not shipped
+
+**Status (2026-06-27):** ✅ done (presets: explore/edit/review/ship + custom).
+Pure `sc_config_apply_operator_mode`; tests in `test_config.c`.
 
 ### 3.3 Enhanced tool confirmation
 
@@ -88,11 +93,19 @@ Each mode sets:
 > channel has no confirm path and `auto_confirm` is off, **deny** dangerous ops
 > (fail-closed). See `autonomy-readiness.md` §3.
 
-- [ ] `approval_policy`: `always` | `never` | `dangerous-only`
-- [ ] Diff preview on confirm for file edit/write (cap 80 lines display)
-- [ ] Session allow cache: always-for-tool, session-allow-exact-call
-- [ ] Precedence: `auto_confirm` > policy > interactive
-- [ ] Async channels: summary-only confirm (document limitation)
+- [x] `approval_policy`: `always` | `never` | `dangerous-only` (pure
+  `sc_approval_requires_confirm`, gates the registry confirm path)
+- [~] Diff preview on confirm — **deferred** (interactive rendering; confirm_cb
+  gets an args summary, not structured args)
+- [x] Session allow cache: **always-for-tool** (confirm returns 2 → cached in
+  registry, skips re-prompt). Exact-call cache deferred.
+- [x] Precedence: `auto_confirm` (gateway auto-approve) > policy > interactive
+- [~] Async summary-only confirm — **deferred** (needs a channel confirm-reply
+  flow; gateway currently auto-approves, fail-closed per Q3 stands)
+
+**Status (2026-06-27):** ✅ core done. `approval_policy` (registry-level) +
+CLI `y/N/a` always-allow cache. Interactive diff-preview and async
+summary-confirm are documented follow-ups. Tests in `test_subagent_caps.c`.
 
 ### 3.4 X note_tweet
 
@@ -247,6 +260,16 @@ agent field. Tests in `test_bus.c`.
   config/agent/gateway hook) and busy-input queue mode
   (`sc_bus_drain_inbound_matching` + gateway-loop coalesce). New
   `tests/test_bus.c`; reset tests in `test_session.c`. CONFIGURATION.md updated.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 4 — `task/3.2-3.3-operator-confirm` (tasks 3.2 + 3.3)** — 2026-06-27.
+  Operator-mode presets (`sc_config_apply_operator_mode`: explore/edit/review/
+  ship/custom → approval_policy + iteration clamp) and approval policy
+  (`sc_approval_requires_confirm` gating the registry confirm path + session
+  always-allow cache via CLI `y/N/a`). Config/agent/MCP wiring. Tests in
+  `test_config.c` + `test_subagent_caps.c`. Diff-preview / async-summary /
+  allowlist-ceiling deferred (documented).
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).

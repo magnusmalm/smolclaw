@@ -145,13 +145,15 @@ int sc_cli_confirm_tool(const char *tool, const char *args, void *ctx)
     fprintf(stderr, "\n[CONFIRM] Tool: %s\n", tool);
     if (preview[0])
         fprintf(stderr, "  Args: %s\n", preview);
-    fprintf(stderr, "  Allow? (y/N): ");
+    fprintf(stderr, "  Allow? (y=yes / N=no / a=always for this tool): ");
     fflush(stderr);
 
     char buf[16];
     if (!fgets(buf, sizeof(buf), stdin))
         return 0;
 
+    if (buf[0] == 'a' || buf[0] == 'A')
+        return 2;  /* always-allow this tool for the session (cached in registry) */
     return (buf[0] == 'y' || buf[0] == 'Y');
 }
 

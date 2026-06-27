@@ -250,6 +250,7 @@ static void cmd_mcp_server(int argc, char **argv)
     }
 
     sc_register_tools_standalone(reg, cfg, workspace);
+    sc_tool_registry_set_approval_policy(reg, cfg->approval_policy);
 
     /* Tool exposure precedence: explicit config allowlist > read-only default
      * (3.6: an external MCP client gets read-only tools unless the operator

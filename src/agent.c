@@ -1031,6 +1031,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     sc_tool_registry_set_result_limits(agent->tools,
                                        cfg->max_tool_result_chars,
                                        cfg->tool_result_preview_chars);
+    sc_tool_registry_set_approval_policy(agent->tools, cfg->approval_policy);
     register_default_tools(agent, cfg);
 
     /* Context builder */

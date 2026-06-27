@@ -573,10 +573,42 @@ static void test_config_env_int_bounds(void)
     unlink(tmppath);
 }
 
+/* Task 3.2: operator-mode presets. */
+static void test_operator_mode(void)
+{
+    sc_config_t cfg = {0};
+
+    cfg.approval_policy = 0; cfg.max_tool_iterations = 100;
+    sc_config_apply_operator_mode(&cfg, "review");
+    ASSERT_INT_EQ(cfg.approval_policy, 1);              /* always */
+    ASSERT(cfg.max_tool_iterations <= 15, "review clamps iterations");
+
+    cfg.approval_policy = 0; cfg.max_tool_iterations = 100;
+    sc_config_apply_operator_mode(&cfg, "ship");
+    ASSERT_INT_EQ(cfg.approval_policy, 2);              /* never */
+    ASSERT(cfg.max_tool_iterations <= 50, "ship clamps iterations");
+
+    cfg.approval_policy = 0; cfg.max_tool_iterations = 100;
+    sc_config_apply_operator_mode(&cfg, "explore");
+    ASSERT_INT_EQ(cfg.approval_policy, 0);              /* dangerous-only */
+    ASSERT(cfg.max_tool_iterations <= 15, "explore clamps iterations");
+
+    /* custom / NULL / unknown → no-op (preserve explicit config) */
+    cfg.approval_policy = 9; cfg.max_tool_iterations = 7;
+    sc_config_apply_operator_mode(&cfg, "custom");
+    ASSERT_INT_EQ(cfg.approval_policy, 9);
+    ASSERT_INT_EQ(cfg.max_tool_iterations, 7);
+    sc_config_apply_operator_mode(&cfg, NULL);
+    sc_config_apply_operator_mode(&cfg, "bogus");
+    ASSERT_INT_EQ(cfg.approval_policy, 9);
+    ASSERT_INT_EQ(cfg.max_tool_iterations, 7);
+}
+
 int main(void)
 {
     printf("test_config\n");
 
+    RUN_TEST(test_operator_mode);
     RUN_TEST(test_config_default);
     RUN_TEST(test_config_load);
     RUN_TEST(test_config_limits);

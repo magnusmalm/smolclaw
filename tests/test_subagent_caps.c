@@ -6,6 +6,7 @@
 #include "sc_features.h"
 #include "agent.h"
 #include "tools/registry.h"
+#include "tools/types.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -64,6 +65,80 @@ static void test_mcp_readonly_allowlist(void)
     sc_tool_registry_free(reg);
 }
 
+/* ---- approval policy + session always-allow cache (task 3.3) ---- */
+
+static int g_confirm_ret;
+static int g_confirm_calls;
+static int g_exec_calls;
+
+static int mock_confirm(const char *tool, const char *args, void *ctx)
+{
+    (void)tool; (void)args; (void)ctx;
+    g_confirm_calls++;
+    return g_confirm_ret;
+}
+
+static sc_tool_result_t *danger_exec(sc_tool_t *self, cJSON *args, void *ctx)
+{
+    (void)self; (void)args; (void)ctx;
+    g_exec_calls++;
+    return sc_tool_result_new("ran");
+}
+
+static void danger_destroy(sc_tool_t *self) { free(self); }
+
+static void test_approval_policy_decision(void)
+{
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_NEVER, 1), 0);
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_NEVER, 0), 0);
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_ALWAYS, 0), 1);
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_ALWAYS, 1), 1);
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_DANGEROUS_ONLY, 1), 1);
+    ASSERT_INT_EQ(sc_approval_requires_confirm(SC_APPROVAL_DANGEROUS_ONLY, 0), 0);
+}
+
+static void test_session_always_allow_cache(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    sc_tool_registry_register(reg, sc_tool_new_simple(
+        "danger", "d", NULL, danger_exec, danger_destroy, 1, NULL));
+    sc_tool_registry_set_confirm(reg, mock_confirm, NULL);
+    /* default policy = dangerous-only; danger has needs_confirm=1 → confirms */
+
+    /* Deny → execute not reached. */
+    g_confirm_ret = 0; g_confirm_calls = 0; g_exec_calls = 0;
+    sc_tool_result_free(sc_tool_registry_execute(reg, "danger", NULL, NULL, NULL, NULL));
+    ASSERT_INT_EQ(g_confirm_calls, 1);
+    ASSERT_INT_EQ(g_exec_calls, 0);
+
+    /* "always" (2) → runs and caches; second call skips confirm. */
+    g_confirm_ret = 2; g_confirm_calls = 0; g_exec_calls = 0;
+    sc_tool_result_free(sc_tool_registry_execute(reg, "danger", NULL, NULL, NULL, NULL));
+    ASSERT_INT_EQ(g_confirm_calls, 1);
+    ASSERT_INT_EQ(g_exec_calls, 1);
+    sc_tool_result_free(sc_tool_registry_execute(reg, "danger", NULL, NULL, NULL, NULL));
+    ASSERT_INT_EQ(g_confirm_calls, 1);   /* cached — not re-prompted */
+    ASSERT_INT_EQ(g_exec_calls, 2);
+
+    sc_tool_registry_free(reg);
+}
+
+static void test_approval_policy_never_skips_confirm(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    sc_tool_registry_register(reg, sc_tool_new_simple(
+        "danger2", "d", NULL, danger_exec, danger_destroy, 1, NULL));
+    sc_tool_registry_set_confirm(reg, mock_confirm, NULL);
+    sc_tool_registry_set_approval_policy(reg, SC_APPROVAL_NEVER);
+
+    g_confirm_ret = 0; g_confirm_calls = 0; g_exec_calls = 0;
+    sc_tool_result_free(sc_tool_registry_execute(reg, "danger2", NULL, NULL, NULL, NULL));
+    ASSERT_INT_EQ(g_confirm_calls, 0);   /* never → no prompt */
+    ASSERT_INT_EQ(g_exec_calls, 1);      /* still runs */
+
+    sc_tool_registry_free(reg);
+}
+
 int main(void)
 {
     printf("test_subagent_caps\n");
@@ -72,6 +147,9 @@ int main(void)
     RUN_TEST(test_spawn_depth_deny_matrix);
 #endif
     RUN_TEST(test_mcp_readonly_allowlist);
+    RUN_TEST(test_approval_policy_decision);
+    RUN_TEST(test_session_always_allow_cache);
+    RUN_TEST(test_approval_policy_never_skips_confirm);
 
     TEST_REPORT();
 }
