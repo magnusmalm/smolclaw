@@ -22,7 +22,9 @@
 #include "audit.h"
 #include "logger.h"
 #include "session.h"
+#include "providers/stream_buffer.h"
 #include "tools/tool_selection.h"
+#include "util/json_compact.h"
 #include "util/str.h"
 #include "util/secrets.h"
 #include "util/prompt_guard.h"
@@ -343,9 +345,15 @@ static sc_llm_response_t *call_provider_with_retry(
 
         sc_llm_response_t *resp;
         if (stream_cb && provider->chat_stream) {
+            /* 1.6: wrap the channel callback so inline JSON tool calls are
+             * buffered (not flashed) during streaming. Fresh buffer per attempt. */
+            sc_stream_buffer_t *sb = sc_stream_buffer_new(stream_cb, stream_ctx);
             resp = provider->chat_stream(provider, msgs, msg_count,
                                           tools, tool_count, model, options,
-                                          stream_cb, stream_ctx);
+                                          sb ? sc_stream_buffer_cb : stream_cb,
+                                          sb ? (void *)sb : stream_ctx);
+            sc_stream_buffer_finish(sb);
+            sc_stream_buffer_free(sb);
         } else {
             resp = provider->chat(provider, msgs, msg_count,
                                    tools, tool_count, model, options);
@@ -595,6 +603,15 @@ static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
             raw_content = "Tool execution error";
     }
 
+    /* 1.7: JSON-aware compaction. Shrink oversized string fields / arrays in
+     * JSON tool results before they enter history. Never compact errors. */
+    char *compacted = NULL;
+    if (result && !result->is_error && raw_content[0]) {
+        compacted = sc_json_compact_for_llm(raw_content, 4096, 50);
+        if (compacted)
+            raw_content = compacted;
+    }
+
     tc->total_output_bytes += strlen(raw_content);
 
     int inj = sc_prompt_guard_scan(raw_content);
@@ -637,6 +654,7 @@ static sc_llm_message_t wrap_tool_output(const sc_tool_call_t *call,
     free(wrapped_str);
     free(warned_content);
     free(redacted);
+    free(compacted);
 
     return tool_msg;
 }

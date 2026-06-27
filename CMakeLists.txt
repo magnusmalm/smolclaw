@@ -225,6 +225,7 @@ target_link_libraries(sqlite3 PUBLIC m)
 set(SC_SOURCES
     src/util/str.c
     src/util/json_helpers.c
+    src/util/json_compact.c
     src/util/uuid.c
     src/util/task.c
     src/util/arena.c
@@ -263,6 +264,7 @@ set(SC_SOURCES
     src/providers/provider_common.c
     src/providers/http.c
     src/providers/claude.c
+    src/providers/stream_buffer.c
     src/providers/factory.c
     src/pairing.c
     src/rate_limit.c
@@ -500,6 +502,8 @@ set(TEST_SOURCES
     tests/test_pairing.c
     tests/test_channel_manager.c
     tests/test_tool_selection.c
+    tests/test_json_compact.c
+    tests/test_stream_buffer.c
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_exec_safety.c

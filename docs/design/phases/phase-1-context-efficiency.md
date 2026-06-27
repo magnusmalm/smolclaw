@@ -118,23 +118,43 @@ new `test_tool_selection` 25/0 (greeting / fileish / editish / shellish / ambigu
 
 **Source:** smallharness-integration task 3
 
-**Files:** `src/agent_turn.c`, streaming callbacks
+**Files:** new `src/providers/stream_buffer.{c,h}`, `src/agent_turn.c`
+(`call_provider_with_retry`), new `tests/test_stream_buffer.c`
 
-- [ ] Detect start of inline JSON tool call during stream (`{"name":...`)
-- [ ] Buffer instead of emitting to channel until stream end
-- [ ] Parse with `arguments` / `parameters` / `args` aliases
-- [ ] Port test cases from SmallHarness `agent.rs` tests
+> **Status (2026-06-27): done.** A buffering wrapper sits between the provider
+> and the channel callback: when streamed text starts with `{`, it withholds it
+> until end-of-stream, then **suppresses** it if it looks like a tool call (the
+> post-hoc extractor still parses it) or **flushes** it otherwise. Prose passes
+> through immediately. Wrapped once in `call_provider_with_retry` (covers
+> primary + fallback), fresh per attempt.
+
+- [x] Detect start of inline JSON tool call during stream (`{"name":...`)
+- [x] Buffer instead of emitting to channel until stream end
+- [x] Parse with `arguments` / `parameters` / `args` aliases (`sc_stream_looks_like_tool_call`)
+- [x] Tests: suppress tool call / pass prose / flush non-tool JSON / idempotent finish
 
 ### 1.7 JSON-aware compaction
 
 **Source:** smallharness-integration task 4
 
-**Files:** `src/agent_turn.c` or `src/tools/output_filter.c`
+**Files:** new `src/util/json_compact.{c,h}` (always compiled — **not**
+`output_filter.c`, which is `SC_ENABLE_OUTPUT_FILTER`-gated), `src/agent_turn.c`
+(`wrap_tool_output`), new `tests/test_json_compact.c`
 
-- [ ] After tool execute, before session insert: compact JSON results
-- [ ] Cap string fields (`content`, `output`, `diff`) at ~4 KB
-- [ ] Cap arrays (`matches`, `entries`) at 50 items with `compacted: true` metadata
-- [ ] Do not compact error payloads
+> **Status (2026-06-27): done.** `sc_json_compact_for_llm` parses the tool
+> result and, if JSON, truncates long string fields and caps big arrays,
+> marking the object `compacted: true`. Applied in `wrap_tool_output` before the
+> result enters history; **errors are never compacted**.
+
+- [x] After tool execute, before session insert: compact JSON results
+- [x] Cap string fields (`content`, `output`, `diff`, …) at ~4 KB with `...[truncated N chars]`
+- [x] Cap arrays (`matches`, `entries`, …) at 50 items with `compacted: true` + `<key>_total`
+- [x] Do not compact error payloads (`result->is_error` skipped)
+
+**Verification gates (2026-06-27):** KC-2 clean; `ctest --test-dir build` **42/42**;
+`test_json_compact` 13/0, `test_stream_buffer` 14/0, `test_agent` 177/0; minimal-dynamic
+**257 KB ≤ 1024 KB**. No new Kconfig flags. 1.6's "no raw JSON flashes on a live Ollama stream"
+is a manual 🟠 check; the buffer logic is unit-tested.
 
 ### 1.8 Prompt prefix warmup
 
