@@ -167,12 +167,20 @@ isolation. New test `test_provider_health_skips_auth_expired_fallback`
 
 **Files:** `src/cron/service.c`, `src/cron/jobs.c` (or new `src/cron/cron_parse.c`), `tests/test_cron.c`
 
-- [ ] Parse standard 5-field cron expressions (`min hour dom month dow`)
-- [ ] Compute `next_run` from expression + timezone (reuse existing job storage)
-- [ ] Re-enable `"kind": "cron"` in config; document in `docs/CONFIGURATION.md`
-- [ ] Unit tests: daily, weekly, `*/15` intervals, invalid expression errors
-- [ ] Keep existing `"kind": "every"` and `"kind": "at"` behavior unchanged (the
-  three schedule kinds in `src/cron/service.h` are `"at"`, `"every"`, `"cron"` — there is no `"interval"`)
+- [x] Parse standard 5-field cron expressions (`min hour dom month dow`) —
+  `*`, ranges, lists, `*/step`; dow `0-6`/`7`; Vixie dom/dow OR semantics
+- [x] Compute `next_run` from expression + timezone (`sc_cron_next_after`,
+  per-job `tz` via scoped `TZ`); reuses existing job storage
+- [x] Re-enable `"kind": "cron"` in `compute_next_run`; documented in
+  `docs/CONFIGURATION.md`; exposed via the `cron` tool (`schedule_type:"cron"`,
+  `expr`, `tz`) so the agent can create them
+- [x] Unit tests: daily, weekly, `*/15`, Sunday-as-7, invalid expressions,
+  impossible date (Feb 31 → no run), and service-level enable check
+- [x] `"every"` / `"at"` behavior unchanged
+
+**Status (2026-06-27):** ✅ done. New `src/cron/cron_parse.c` (+`.h`); wired into
+`src/cron/service.c` and `src/tools/cron.c`. Gated behind `SC_ENABLE_CRON`
+(absent from the minimal profile, so no minimal-size impact).
 
 **Hermes parity:** `cronjob` tool schedule formats (subset — no shell-only cron tasks).
 
@@ -305,6 +313,15 @@ tests.
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 45/45;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 4 — `task/2.9-cron-parser` (task 2.9)** — 2026-06-27.
+  New `src/cron/cron_parse.c` (5-field parser + `next_after` with tz); re-enabled
+  `"cron"` in `compute_next_run`; extended the `cron` tool with
+  `schedule_type:"cron"`/`expr`/`tz`; documented in CONFIGURATION.md. 7 new cron
+  tests. Gated by `SC_ENABLE_CRON` (not in minimal).
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 45/45;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB (unchanged — cron not
+  in minimal); `check_claude_md.sh` clean; existing `SC_ENABLE_CRON` flag (KC-1
+  N/A).
 
 ---
 

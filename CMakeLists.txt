@@ -311,7 +311,7 @@ if(SC_ENABLE_VOICE)
 endif()
 
 if(SC_ENABLE_CRON)
-    list(APPEND SC_SOURCES src/tools/cron.c src/cron/service.c src/memory_compact.c)
+    list(APPEND SC_SOURCES src/tools/cron.c src/cron/service.c src/cron/cron_parse.c src/memory_compact.c)
 endif()
 
 if(SC_ENABLE_SPAWN)

@@ -390,6 +390,26 @@ silently ignored**. Each value:
 | enabled  | bool | true    | Enable the heartbeat service.  |
 | interval | int  | 30      | Heartbeat interval in minutes. |
 
+## `cron` — scheduled jobs (`SC_ENABLE_CRON`)
+
+Jobs are created at runtime via the `cron` tool (or hand-edited in the cron
+job store) and persisted as JSON. Each job has a `schedule` with one of three
+`kind`s:
+
+| Kind    | Fields            | Behavior                                          |
+|---------|-------------------|---------------------------------------------------|
+| `at`    | `atMs`            | Fire once at an absolute unix-ms time, then delete |
+| `every` | `everyMs`         | Fire on a fixed interval (ms)                     |
+| `cron`  | `expr`, `tz`      | Fire on a 5-field cron schedule                   |
+
+Cron `expr` is the standard `min hour dom month dow` (e.g. `0 9 * * 1` =
+Mondays at 09:00). Each field supports `*`, single values, `a-b` ranges,
+comma lists, and `*/step`. Day-of-week is `0-6` (Sunday = 0; `7` also = Sunday).
+When both day-of-month and day-of-week are restricted, a time matches if
+**either** matches (standard Vixie-cron semantics). `tz` is an optional IANA
+timezone (e.g. `Europe/Stockholm`); it defaults to the server's local time. An
+invalid expression disables the job (it never fires) and logs a warning.
+
 ## `notify_urls` — outbound notifications (top-level)
 
 | Key         | Type   | Default | Description                       |

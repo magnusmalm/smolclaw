@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "tools/cron.h"
+#include "cron/cron_parse.h"
 #include "tools/types.h"
 #include "util/str.h"
 #include "util/json_helpers.h"
@@ -52,12 +53,25 @@ static cJSON *cron_parameters(sc_tool_t *self)
     cJSON_AddStringToObject(sched_type, "type", "string");
     cJSON_AddStringToObject(sched_type, "description",
         "Schedule type: 'at' (one-time, seconds from now), "
-        "'every' (recurring, interval in seconds)");
+        "'every' (recurring, interval in seconds), or "
+        "'cron' (recurring, 5-field cron expression in 'expr')");
 
     cJSON *seconds = cJSON_AddObjectToObject(props, "seconds");
     cJSON_AddStringToObject(seconds, "type", "number");
     cJSON_AddStringToObject(seconds, "description",
         "Seconds from now (for 'at') or interval seconds (for 'every')");
+
+    cJSON *expr = cJSON_AddObjectToObject(props, "expr");
+    cJSON_AddStringToObject(expr, "type", "string");
+    cJSON_AddStringToObject(expr, "description",
+        "Cron expression for 'cron' schedule_type: 'min hour dom month dow' "
+        "(e.g. '0 9 * * 1' = Mondays 09:00). Supports *, ranges, lists, */step");
+
+    cJSON *tz = cJSON_AddObjectToObject(props, "tz");
+    cJSON_AddStringToObject(tz, "type", "string");
+    cJSON_AddStringToObject(tz, "description",
+        "Optional IANA timezone for 'cron' (e.g. 'Europe/Stockholm'); "
+        "defaults to the server's local time");
 
     cJSON *message = cJSON_AddObjectToObject(props, "message");
     cJSON_AddStringToObject(message, "type", "string");
@@ -83,22 +97,34 @@ static sc_tool_result_t *do_add(sc_cron_service_t *svc, cJSON *args)
     if (!message) return sc_tool_result_error("'message' is required for add");
 
     const char *sched_type = sc_json_get_string(args, "schedule_type", "at");
-    double seconds = sc_json_get_double(args, "seconds", 0);
-
-    if (seconds <= 0)
-        return sc_tool_result_error("'seconds' must be a positive number");
 
     sc_cron_schedule_t schedule = {0};
-    if (strcmp(sched_type, "every") == 0) {
-        schedule.kind = "every";
-        schedule.every_ms = (long)(seconds * 1000);
+    double seconds = 0;
+    if (strcmp(sched_type, "cron") == 0) {
+        const char *expr = sc_json_get_string(args, "expr", NULL);
+        if (!expr || !expr[0])
+            return sc_tool_result_error("'expr' is required for 'cron' schedule");
+        sc_cron_expr_t parsed;
+        if (sc_cron_parse(expr, &parsed) != 0)
+            return sc_tool_result_error("Invalid cron expression");
+        schedule.kind = "cron";
+        schedule.expr = (char *)expr;  /* add_job strdups */
+        schedule.tz = (char *)sc_json_get_string(args, "tz", "");
     } else {
-        /* Default: "at" (one-time) */
-        schedule.kind = "at";
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        long now = (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-        schedule.at_ms = now + (long)(seconds * 1000);
+        seconds = sc_json_get_double(args, "seconds", 0);
+        if (seconds <= 0)
+            return sc_tool_result_error("'seconds' must be a positive number");
+        if (strcmp(sched_type, "every") == 0) {
+            schedule.kind = "every";
+            schedule.every_ms = (long)(seconds * 1000);
+        } else {
+            /* Default: "at" (one-time) */
+            schedule.kind = "at";
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            long now = (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+            schedule.at_ms = now + (long)(seconds * 1000);
+        }
     }
 
     sc_cron_job_t *job = sc_cron_service_add_job(svc, name, schedule,
@@ -107,8 +133,12 @@ static sc_tool_result_t *do_add(sc_cron_service_t *svc, cJSON *args)
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-    sc_strbuf_appendf(&sb, "Job created: id=%s, name=%s, type=%s, seconds=%.0f",
-                       job->id, name, sched_type, seconds);
+    if (strcmp(sched_type, "cron") == 0)
+        sc_strbuf_appendf(&sb, "Job created: id=%s, name=%s, type=cron, expr=\"%s\"",
+                           job->id, name, schedule.expr);
+    else
+        sc_strbuf_appendf(&sb, "Job created: id=%s, name=%s, type=%s, seconds=%.0f",
+                           job->id, name, sched_type, seconds);
     char *result = sc_strbuf_finish(&sb);
     sc_tool_result_t *r = sc_tool_result_new(result);
     free(result);

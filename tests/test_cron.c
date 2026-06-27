@@ -6,10 +6,12 @@
 
 #include "test_main.h"
 #include "cron/service.h"
+#include "cron/cron_parse.h"
 #include "util/str.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <event2/event.h>
 
@@ -314,6 +316,126 @@ static void test_cron_null_safety(void)
     cleanup_dir(tmpdir);
 }
 
+/* --- cron expression parser (task 2.9) --- */
+
+/* A fixed UTC reference: 2026-01-01 00:00:00 UTC (divisible by 60). All
+ * expression tests use tz="UTC" and verify via gmtime_r so they are
+ * independent of the host's local timezone. */
+#define CRON_REF 1767225600L
+
+static void test_cron_parse_daily(void)
+{
+    sc_cron_expr_t e;
+    ASSERT_INT_EQ(sc_cron_parse("0 9 * * *", &e), 0);
+
+    long next = sc_cron_next_after(&e, CRON_REF, "UTC");
+    ASSERT(next > CRON_REF, "next must be after the reference");
+    ASSERT(next <= CRON_REF + 24L * 3600, "daily job within 24h");
+
+    time_t tt = (time_t)next;
+    struct tm tm;
+    gmtime_r(&tt, &tm);
+    ASSERT_INT_EQ(tm.tm_hour, 9);
+    ASSERT_INT_EQ(tm.tm_min, 0);
+    ASSERT_INT_EQ(tm.tm_sec, 0);
+}
+
+static void test_cron_parse_weekly(void)
+{
+    sc_cron_expr_t e;
+    ASSERT_INT_EQ(sc_cron_parse("30 14 * * 1", &e), 0);  /* Mondays 14:30 */
+
+    long next = sc_cron_next_after(&e, CRON_REF, "UTC");
+    ASSERT(next > CRON_REF, "after");
+    ASSERT(next <= CRON_REF + 8L * 24 * 3600, "within a week");
+
+    time_t tt = (time_t)next;
+    struct tm tm;
+    gmtime_r(&tt, &tm);
+    ASSERT_INT_EQ(tm.tm_wday, 1);   /* Monday */
+    ASSERT_INT_EQ(tm.tm_hour, 14);
+    ASSERT_INT_EQ(tm.tm_min, 30);
+}
+
+static void test_cron_parse_interval(void)
+{
+    sc_cron_expr_t e;
+    ASSERT_INT_EQ(sc_cron_parse("*/15 * * * *", &e), 0);
+    ASSERT(e.minute[0] && e.minute[15] && e.minute[30] && e.minute[45],
+           "quarter-hour minutes set");
+    ASSERT(!e.minute[1] && !e.minute[16], "non-quarter minutes unset");
+
+    /* CRON_REF is on a :00 boundary → next match is +15 min. */
+    long next = sc_cron_next_after(&e, CRON_REF, "UTC");
+    ASSERT(next == CRON_REF + 15 * 60, "next quarter hour is 15 min later");
+}
+
+static void test_cron_parse_sunday7(void)
+{
+    sc_cron_expr_t e;
+    ASSERT_INT_EQ(sc_cron_parse("0 0 * * 7", &e), 0);  /* 7 == Sunday */
+    ASSERT(e.dow[0], "dow 7 maps to Sunday (0)");
+    ASSERT(!e.dow_star, "dow is restricted");
+}
+
+static void test_cron_parse_invalid(void)
+{
+    sc_cron_expr_t e;
+    ASSERT_INT_EQ(sc_cron_parse("0 9 * *", &e), -1);      /* 4 fields */
+    ASSERT_INT_EQ(sc_cron_parse("0 9 * * * *", &e), -1);  /* 6 fields */
+    ASSERT_INT_EQ(sc_cron_parse("60 9 * * *", &e), -1);   /* minute > 59 */
+    ASSERT_INT_EQ(sc_cron_parse("0 24 * * *", &e), -1);   /* hour > 23 */
+    ASSERT_INT_EQ(sc_cron_parse("0 9 32 * *", &e), -1);   /* dom > 31 */
+    ASSERT_INT_EQ(sc_cron_parse("0 9 * 13 *", &e), -1);   /* month > 12 */
+    ASSERT_INT_EQ(sc_cron_parse("0 9 * * 8", &e), -1);    /* dow > 7 */
+    ASSERT_INT_EQ(sc_cron_parse("abc 9 * * *", &e), -1);  /* non-numeric */
+    ASSERT_INT_EQ(sc_cron_parse("", &e), -1);             /* empty */
+}
+
+static void test_cron_parse_impossible_date(void)
+{
+    sc_cron_expr_t e;
+    /* Feb 31 never occurs → no match within the one-year search bound. */
+    ASSERT_INT_EQ(sc_cron_parse("0 0 31 2 *", &e), 0);
+    ASSERT(sc_cron_next_after(&e, CRON_REF, "UTC") == -1,
+           "impossible date yields no next run");
+}
+
+/* The cron *kind* is re-enabled end-to-end: adding a job computes next_run. */
+static void test_cron_kind_enabled_in_service(void)
+{
+    char tmpdir[] = "/tmp/sc_test_cron_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/cron.json", tmpdir);
+    char *store = sc_strbuf_finish(&sb);
+
+    struct event_base *base = event_base_new();
+    sc_cron_service_t *cs = sc_cron_service_new(store, base);
+    ASSERT_NOT_NULL(cs);
+
+    sc_cron_schedule_t sched = {
+        .kind = "cron", .expr = "0 9 * * *", .tz = "UTC"
+    };
+    sc_cron_job_t *job = sc_cron_service_add_job(cs, "daily", sched,
+                                                 "morning", 0, NULL, NULL);
+    ASSERT_NOT_NULL(job);
+    ASSERT(job->state.next_run_ms > 0, "cron job has a computed next_run (enabled)");
+
+    /* An invalid expression disables the job (next_run == 0). */
+    sc_cron_schedule_t bad = { .kind = "cron", .expr = "nope", .tz = "UTC" };
+    sc_cron_job_t *job2 = sc_cron_service_add_job(cs, "bad", bad,
+                                                  "x", 0, NULL, NULL);
+    ASSERT_NOT_NULL(job2);
+    ASSERT_INT_EQ((int)job2->state.next_run_ms, 0);
+
+    sc_cron_service_free(cs);
+    event_base_free(base);
+    free(store);
+    cleanup_dir(tmpdir);
+}
+
 int main(void)
 {
     printf("test_cron\n");
@@ -323,6 +445,13 @@ int main(void)
     RUN_TEST(test_cron_at_job_deletes);
     RUN_TEST(test_cron_persistence);
     RUN_TEST(test_cron_null_safety);
+    RUN_TEST(test_cron_parse_daily);
+    RUN_TEST(test_cron_parse_weekly);
+    RUN_TEST(test_cron_parse_interval);
+    RUN_TEST(test_cron_parse_sunday7);
+    RUN_TEST(test_cron_parse_invalid);
+    RUN_TEST(test_cron_parse_impossible_date);
+    RUN_TEST(test_cron_kind_enabled_in_service);
 
     TEST_REPORT();
 }

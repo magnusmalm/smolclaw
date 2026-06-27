@@ -4,6 +4,7 @@
  */
 
 #include "cron/service.h"
+#include "cron/cron_parse.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -270,11 +271,16 @@ static long compute_next_run(sc_cron_schedule_t *sched, long now)
         return now + sched->every_ms;
     }
 
-    /* "cron" expressions would need a cron parser - not implemented in C version.
-     * For simplicity, treat as disabled. */
     if (strcmp(sched->kind, "cron") == 0) {
-        SC_LOG_WARN("cron", "Cron expressions not yet implemented");
-        return 0;
+        sc_cron_expr_t e;
+        if (sc_cron_parse(sched->expr, &e) != 0) {
+            SC_LOG_WARN("cron", "Invalid cron expression '%s'; job disabled",
+                        sched->expr ? sched->expr : "");
+            return 0;
+        }
+        long next_sec = sc_cron_next_after(&e, now / 1000, sched->tz);
+        if (next_sec < 0) return 0;  /* no match within a year (e.g. Feb 31) */
+        return next_sec * 1000;
     }
 
     return 0;
