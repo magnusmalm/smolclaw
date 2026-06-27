@@ -92,10 +92,27 @@ auxiliary model path uses same provider factory).
 
 **Source:** claude-code P1 #6
 
-**Files:** `src/agent.c` (transform hook), optional `src/tools/context_compress.c`
+**Files:** `src/agent.c` (transform hook), `src/config.{c,h}`
 
-- [ ] Before LLM call: truncate tool messages older than last 4 below 10K to 500-char summary
-- [ ] Uses existing `sc_agent_add_transform()` mechanism
+> **Recon (2026-06-27):** the core was **already shipped** — `mask_old_observations`
+> (agent.c) runs via `sc_agent_add_transform()` before every LLM call and
+> replaces old (older than last 6), large (>200 B) tool results with a one-line
+> metadata placeholder. That already meets 4.4's goal (and is more aggressive
+> than the spec's 500-char target). The only unmet deliverable was **"Gate:
+> config"** — the behavior was hardcoded.
+
+- [x] Before LLM call: compress old large tool results to a metadata placeholder
+  *(already shipped via `mask_old_observations`)*
+- [x] Uses existing `sc_agent_add_transform()` mechanism *(already shipped)*
+- [x] **Config gate (this slice):** `compress_tool_results` (default true),
+  `compress_keep_recent` (default 6), `compress_min_bytes` (default 200) under
+  `agents.defaults`; defaults preserve prior behavior. Decision extracted to pure
+  `sc_mask_should_compress()` (unit-tested); transform reads the values via the
+  agent and honors hot-reload.
+
+**Status (2026-06-27):** ✅ done. Owner chose "config gate" scope (the core
+compression was already shipped). Pure `sc_mask_should_compress` + config
+plumbing + `test_agent.c` test; default behavior unchanged.
 
 ### 4.5 Project memory index
 
@@ -321,6 +338,17 @@ regression test); M-9 deferred with rationale.
   **Verification gates:** Release `-DSC_ENABLE_WEB=ON` build clean (KC-2
   `implicit`=0); `ctest` 49/49; `check_size_budget.sh` minimal-dynamic 273 KB ≤
   1024 KB; `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 2 — `task/4.4-compress-old-results` (task 4.4)** — 2026-06-27. Recon
+  found the core (compress old tool results via the transform hook) already
+  shipped as `mask_old_observations`; this slice adds the unmet "Gate: config"
+  deliverable. New `agents.defaults` fields `compress_tool_results` /
+  `compress_keep_recent` / `compress_min_bytes` (defaults preserve prior
+  behavior), pure decision `sc_mask_should_compress()`, transform reads them via
+  the agent + honors hot-reload. Test in `test_agent.c`; CONFIGURATION.md
+  documents the keys.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
+  `check_size_budget.sh` minimal-dynamic 273 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 

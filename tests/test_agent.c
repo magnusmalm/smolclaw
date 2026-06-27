@@ -1439,6 +1439,28 @@ static void test_no_transforms(void)
     destroy_test_agent(&ctx);
 }
 
+/* Task 4.4: old-tool-result compression decision (configurable gate). */
+static void test_mask_should_compress(void)
+{
+    int count = 10, keep = 6, min_bytes = 200;
+
+    /* Recent messages (index >= count-keep = 4) are kept verbatim. */
+    ASSERT_INT_EQ(sc_mask_should_compress(4, count, keep, 5000, min_bytes), 0);
+    ASSERT_INT_EQ(sc_mask_should_compress(9, count, keep, 5000, min_bytes), 0);
+    /* Old + large → compress. */
+    ASSERT_INT_EQ(sc_mask_should_compress(0, count, keep, 5000, min_bytes), 1);
+    ASSERT_INT_EQ(sc_mask_should_compress(3, count, keep, 201, min_bytes), 1);
+    /* Old but small (<= min_bytes) → keep verbatim. */
+    ASSERT_INT_EQ(sc_mask_should_compress(0, count, keep, 200, min_bytes), 0);
+    ASSERT_INT_EQ(sc_mask_should_compress(0, count, keep, 10, min_bytes), 0);
+
+    /* keep_recent = 0 → every old message eligible; keep huge → none old. */
+    ASSERT_INT_EQ(sc_mask_should_compress(9, count, 0, 5000, min_bytes), 1);
+    ASSERT_INT_EQ(sc_mask_should_compress(0, count, 100, 5000, min_bytes), 0);
+    /* min_bytes = 0 → any non-empty old result compresses. */
+    ASSERT_INT_EQ(sc_mask_should_compress(0, count, keep, 1, 0), 1);
+}
+
 /* ======================================================================
  * Integration tests for pi-mono-inspired features
  * ====================================================================== */
@@ -2040,6 +2062,7 @@ int main(void)
     RUN_TEST(test_context_transform_chain_order);
     RUN_TEST(test_context_transform_stop_chain);
     RUN_TEST(test_no_transforms);
+    RUN_TEST(test_mask_should_compress);
     /* Integration tests for pi-mono features */
     RUN_TEST(test_integ_parallel_read_only);
     RUN_TEST(test_integ_mixed_parallel_sequential);

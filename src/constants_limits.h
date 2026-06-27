@@ -25,6 +25,9 @@
 #define SC_MAX_SEARCH_RESULTS   5
 #define SC_SESSION_SUMMARY_THRESHOLD 20
 #define SC_SESSION_KEEP_LAST    4
+/* Task 4.4: old-tool-result compression transform defaults. */
+#define SC_COMPRESS_KEEP_RECENT 6    /* keep this many recent messages verbatim */
+#define SC_COMPRESS_MIN_BYTES   200  /* only compress results larger than this */
 #define SC_SUMMARY_MAX_TOKENS   256
 #define SC_SUMMARY_MAX_TRANSCRIPT 4000
 #define SC_CONSOLIDATION_MAX_TOKENS  256

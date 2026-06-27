@@ -889,19 +889,35 @@ summarize_tool_arg(const sc_tool_call_t *tc, char *buf, size_t bufsz)
     return "";
 }
 
+int sc_mask_should_compress(int index, int count, int keep_recent,
+                            size_t len, int min_bytes)
+{
+    if (keep_recent < 0) keep_recent = 0;
+    int cutoff = count > keep_recent ? count - keep_recent : 0;
+    if (index >= cutoff) return 0;          /* recent — keep verbatim */
+    if (min_bytes < 0) min_bytes = 0;
+    return len > (size_t)min_bytes;          /* only compress larger results */
+}
+
 static int mask_old_observations(sc_context_snap_t *snap, void *userdata)
 {
-    (void)userdata;
+    sc_agent_t *agent = userdata;
+    /* Defaults preserve prior behavior if no agent is threaded through. */
+    int enabled     = agent ? agent->compress_tool_results : 1;
+    int keep_recent = agent ? agent->compress_keep_recent  : MASK_KEEP_RECENT;
+    int min_bytes   = agent ? agent->compress_min_bytes     : MASK_SIZE_EXEMPT;
+    if (!enabled) return 0;
+
     int count = *snap->msg_count;
-    int cutoff = count > MASK_KEEP_RECENT ? count - MASK_KEEP_RECENT : 0;
     sc_llm_message_t *msgs = *snap->msgs;
 
-    for (int i = 0; i < cutoff; i++) {
+    for (int i = 0; i < count; i++) {
         sc_llm_message_t *msg = &msgs[i];
         if (!msg->tool_call_id) continue;   /* not a tool result */
         if (!msg->content) continue;
         size_t len = strlen(msg->content);
-        if (len <= MASK_SIZE_EXEMPT) continue;  /* short results kept */
+        if (!sc_mask_should_compress(i, count, keep_recent, len, min_bytes))
+            continue;
 
         /* Find the matching tool call to get name + args */
         const sc_tool_call_t *tc = find_tool_call_for_id(msgs, i, msg->tool_call_id);
@@ -993,6 +1009,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_iterations = cfg->max_tool_iterations;
     agent->session_summary_threshold = cfg->session_summary_threshold;
     agent->session_keep_last = cfg->session_keep_last;
+    agent->compress_tool_results = cfg->compress_tool_results;
+    agent->compress_keep_recent = cfg->compress_keep_recent;
+    agent->compress_min_bytes = cfg->compress_min_bytes;
     agent->session_reset_mode = cfg->session_reset.mode;
     agent->session_reset_daily_hour = cfg->session_reset.daily_reset_hour;
     agent->session_reset_idle_min = cfg->session_reset.idle_minutes;
@@ -1068,9 +1087,10 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     /* Per-channel tool allowlists */
     load_channel_tools(agent, cfg);
 
-    /* Context transform: mask old tool results to save tokens */
+    /* Context transform: mask old tool results to save tokens (task 4.4:
+     * configurable via compress_* fields; agent passed as userdata). */
     sc_agent_add_transform(agent, "mask_old_observations",
-                           mask_old_observations, NULL);
+                           mask_old_observations, agent);
 
     /* Load skills from standard directories */
     agent->skills = sc_skill_registry_new();
@@ -1256,6 +1276,9 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;
     agent->tool_selection = cfg->tool_selection;
+    agent->compress_tool_results = cfg->compress_tool_results;
+    agent->compress_keep_recent = cfg->compress_keep_recent;
+    agent->compress_min_bytes = cfg->compress_min_bytes;
     agent_set_warmup(agent, cfg);
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;

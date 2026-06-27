@@ -107,6 +107,15 @@ definitions.
 | session_keep_last         | int  | 4       | Recent messages kept verbatim.         |
 | summary_max_transcript    | int  | 4000    | Max transcript chars to summarizer.    |
 | memory_consolidation      | bool | true    | Extract facts from summaries to notes. |
+| compress_tool_results     | bool | true    | Replace old large tool results with a metadata placeholder before each LLM call (token saver). |
+| compress_keep_recent      | int  | 6       | Most-recent messages kept verbatim (never compressed). |
+| compress_min_bytes        | int  | 200     | Only tool results larger than this are compressed; smaller ones are kept. |
+
+The compression transform rewrites tool-result messages older than the last
+`compress_keep_recent` and larger than `compress_min_bytes` into a one-line
+`[tool_result: name(args) -> ok, N bytes, M lines]` placeholder — preserving
+*what the agent did* while dropping verbose output from the context window. Set
+`compress_tool_results` to `false` to keep all tool results verbatim.
 
 ### Tool output and limits
 

@@ -553,6 +553,9 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->restrict_to_workspace, "SMOLCLAW_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE");
     env_override_int(&cfg->session_summary_threshold, "SMOLCLAW_AGENTS_DEFAULTS_SESSION_SUMMARY_THRESHOLD");
     env_override_int(&cfg->session_keep_last, "SMOLCLAW_AGENTS_DEFAULTS_SESSION_KEEP_LAST");
+    env_override_bool(&cfg->compress_tool_results, "SMOLCLAW_AGENTS_DEFAULTS_COMPRESS_TOOL_RESULTS");
+    env_override_int(&cfg->compress_keep_recent, "SMOLCLAW_AGENTS_DEFAULTS_COMPRESS_KEEP_RECENT");
+    env_override_int(&cfg->compress_min_bytes, "SMOLCLAW_AGENTS_DEFAULTS_COMPRESS_MIN_BYTES");
     env_override_int(&cfg->max_output_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_OUTPUT_CHARS");
     env_override_int(&cfg->max_tool_result_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_RESULT_CHARS");
     env_override_int(&cfg->tool_result_preview_chars, "SMOLCLAW_AGENTS_DEFAULTS_TOOL_RESULT_PREVIEW_CHARS");
@@ -800,6 +803,9 @@ sc_config_t *sc_config_default(void)
     cfg->max_tool_iterations  = SC_DEFAULT_MAX_ITERATIONS;
     cfg->session_summary_threshold = SC_SESSION_SUMMARY_THRESHOLD;
     cfg->session_keep_last    = SC_SESSION_KEEP_LAST;
+    cfg->compress_tool_results = 1;
+    cfg->compress_keep_recent = SC_COMPRESS_KEEP_RECENT;
+    cfg->compress_min_bytes   = SC_COMPRESS_MIN_BYTES;
     cfg->max_output_chars     = SC_MAX_OUTPUT_CHARS;
     cfg->max_tool_result_chars = SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
     cfg->tool_result_preview_chars = SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
@@ -962,6 +968,12 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
         "session_summary_threshold", cfg->session_summary_threshold);
     cfg->session_keep_last = sc_json_get_int(defaults,
         "session_keep_last", cfg->session_keep_last);
+    cfg->compress_tool_results = sc_json_get_bool(defaults,
+        "compress_tool_results", cfg->compress_tool_results);
+    cfg->compress_keep_recent = sc_json_get_int(defaults,
+        "compress_keep_recent", cfg->compress_keep_recent);
+    cfg->compress_min_bytes = sc_json_get_int(defaults,
+        "compress_min_bytes", cfg->compress_min_bytes);
     cfg->max_output_chars = sc_json_get_int(defaults,
         "max_output_chars", cfg->max_output_chars);
     cfg->max_tool_result_chars = sc_json_get_int(defaults,
@@ -1664,6 +1676,9 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddNumberToObject(defaults, "max_tool_iterations", cfg->max_tool_iterations);
     cJSON_AddNumberToObject(defaults, "session_summary_threshold", cfg->session_summary_threshold);
     cJSON_AddNumberToObject(defaults, "session_keep_last", cfg->session_keep_last);
+    cJSON_AddBoolToObject(defaults, "compress_tool_results", cfg->compress_tool_results);
+    cJSON_AddNumberToObject(defaults, "compress_keep_recent", cfg->compress_keep_recent);
+    cJSON_AddNumberToObject(defaults, "compress_min_bytes", cfg->compress_min_bytes);
     cJSON_AddNumberToObject(defaults, "max_output_chars", cfg->max_output_chars);
     cJSON_AddNumberToObject(defaults, "max_tool_result_chars", cfg->max_tool_result_chars);
     cJSON_AddNumberToObject(defaults, "tool_result_preview_chars", cfg->tool_result_preview_chars);

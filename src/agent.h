@@ -39,6 +39,10 @@ typedef struct sc_agent {
     int max_iterations;
     int session_summary_threshold;
     int session_keep_last;
+    /* Task 4.4: old-tool-result compression transform (configurable). */
+    int compress_tool_results;
+    int compress_keep_recent;
+    int compress_min_bytes;
     /* Automatic session reset policy (task 3.7) */
     int session_reset_mode;        /* sc_session_reset_mode_t */
     int session_reset_daily_hour;
@@ -170,6 +174,13 @@ void sc_agent_wait_summarize(sc_agent_t *agent);
  * and the LLM call. name is borrowed (not copied). */
 void sc_agent_add_transform(sc_agent_t *agent, const char *name,
                              sc_context_transform_fn fn, void *userdata);
+
+/* Task 4.4: pure decision for the old-tool-result compression transform.
+ * Returns 1 iff the message at `index` (of `count` total) is old enough
+ * (index < count - keep_recent) and its tool-result content is larger than
+ * `min_bytes`. Pure — unit-tested in test_agent.c. */
+int sc_mask_should_compress(int index, int count, int keep_recent,
+                            size_t len, int min_bytes);
 
 /* Hot-reload safe config fields (limits, allowlist, rate limits) */
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);
