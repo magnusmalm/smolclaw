@@ -9,6 +9,7 @@
 #include "agent_internal.h"
 #include "session.h"
 #include "util/str.h"
+#include "sc_features.h"
 
 /* Resolve a model alias name to its target model, or return the input
  * unchanged if it isn't a configured alias. */
@@ -67,6 +68,11 @@ static char *cmd_model(sc_agent_t *agent, const char *arg)
             for (int i = 0; i < agent->alias_count; i++)
                 sc_strbuf_appendf(&sb, " %s", agent->alias_names[i]);
         }
+#if SC_ENABLE_MOA
+        if (agent->provider && agent->provider->name &&
+            strcmp(agent->provider->name, "moa") == 0)
+            sc_strbuf_appendf(&sb, "\n(MoA active — /model <preset> switches preset)");
+#endif
         return sc_strbuf_finish(&sb);
     }
 

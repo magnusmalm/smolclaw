@@ -237,6 +237,16 @@ config SC_ENABLE_MCP_SERVER
 	  usable from Claude Code, Cursor, etc.
 	  Lightweight: no LLM, agent, bus, or channels.
 
+config SC_ENABLE_MOA
+	bool "Mixture of Agents (MoA-lite) virtual provider"
+	default n
+	help
+	  Enable the virtual 'moa' provider. On each LLM call, reference
+	  models run first (no tools, trimmed context); their outputs are
+	  injected for an aggregator model that acts as the real model.
+	  Config-json presets, parallel reference cap of 3, optional
+	  local_only policy. Multiplies API cost per iteration — opt-in.
+
 endmenu
 
 menu "Security"

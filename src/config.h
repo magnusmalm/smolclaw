@@ -2,6 +2,7 @@
 #define SC_CONFIG_H
 
 #include "cJSON.h"
+#include "sc_features.h"
 
 /* Provider config (API key + base URL) */
 typedef struct {
@@ -9,6 +10,36 @@ typedef struct {
     char *api_base;
     char *proxy;
 } sc_provider_config_t;
+
+#if SC_ENABLE_MOA
+/* Mixture of Agents (MoA-lite) — task 2.13. See docs/design/mixture-of-agents.md */
+#define SC_MOA_MAX_REFS    3
+#define SC_MOA_MAX_PRESETS 8
+
+typedef struct {
+    char *provider;   /* e.g. "ollama", "openrouter", "anthropic" */
+    char *model;      /* bare model name passed to that provider */
+} sc_moa_slot_cfg_t;
+
+typedef struct {
+    char *name;
+    int   enabled;                 /* default 1 */
+    int   local_only;              /* default 0 — reject cloud slots */
+    sc_moa_slot_cfg_t reference_models[SC_MOA_MAX_REFS];
+    int   reference_count;
+    sc_moa_slot_cfg_t aggregator;
+    double reference_temperature;  /* default 0.6 */
+    double aggregator_temperature; /* default 0 = inherit turn options */
+    int   reference_max_tokens;    /* default 1024 */
+    int   aggregator_max_tokens;   /* default 0 = inherit turn options */
+} sc_moa_preset_cfg_t;
+
+typedef struct {
+    char *default_preset;
+    sc_moa_preset_cfg_t presets[SC_MOA_MAX_PRESETS];
+    int   preset_count;
+} sc_moa_config_t;
+#endif /* SC_ENABLE_MOA */
 
 /* Telegram channel config */
 typedef struct {
@@ -292,6 +323,10 @@ typedef struct {
         sc_provider_config_t config;
     } custom_providers[8];
     int custom_provider_count;
+
+#if SC_ENABLE_MOA
+    sc_moa_config_t moa;
+#endif
 
     /* Channels */
     sc_telegram_config_t telegram;

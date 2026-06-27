@@ -32,7 +32,9 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
   output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec
   blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API
 - **Integration** — SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for
-  Landlock sandbox), model fallback chain, in-prompt model override, typing indicators, auto cost
+  Landlock sandbox), model fallback chain, in-prompt model override, Mixture of Agents (MoA-lite:
+  reference fan-out → aggregator, config presets, `local_only` air-gap policy; `SC_ENABLE_MOA`,
+  default off), typing indicators, auto cost
   reporting to an external collector (single pricing path via cost.c; local models report $0,
   provider actuals preferred)
 - **Web UI** — Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn

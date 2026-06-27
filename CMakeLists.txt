@@ -314,6 +314,9 @@ endif()
 if(SC_ENABLE_CRON)
     list(APPEND SC_SOURCES src/tools/cron.c src/cron/service.c src/cron/cron_parse.c src/memory_compact.c)
 endif()
+if(SC_ENABLE_MOA)
+    list(APPEND SC_SOURCES src/providers/moa.c)
+endif()
 
 if(SC_ENABLE_SPAWN)
     list(APPEND SC_SOURCES src/tools/spawn.c)
@@ -563,6 +566,10 @@ endif()
 
 if(SC_ENABLE_CRON)
     list(APPEND TEST_SOURCES tests/test_cron.c)
+endif()
+
+if(SC_ENABLE_MOA)
+    list(APPEND TEST_SOURCES tests/test_moa.c)
 endif()
 
 if(SC_ENABLE_HEARTBEAT)

@@ -281,16 +281,30 @@ updated with `session` (slice 2). All fields/paths verified against
 
 Deliverables:
 
-- [ ] Virtual `moa` provider with named presets in `config.json` (`reference_models` + `aggregator`)
-- [ ] Per-iteration loop: trimmed reference fan-out (no tools) → inject on user-tail → aggregator with tools
-- [ ] Parallel reference calls (cap 3); reference failure included in context, turn continues
-- [ ] `local_only` preset policy — Ollama/vLLM/loopback custom only; reject cloud slots
-- [ ] `enabled: false` on preset → aggregator alone (MoA off for that preset)
-- [ ] Block recursive MoA (aggregator cannot be `moa` provider)
-- [ ] Cost/audit sums reference + aggregator usage per iteration
-- [ ] Model aliases / `/model` can select `moa:<preset>`; help text in `slash.c`
-- [ ] Kconfig `SC_ENABLE_MOA` — **default n**; FEATURE_SYMS update (KC-1)
-- [ ] `tests/test_moa.c` — mock HTTP: trim, inject, fan-out, `local_only`, `enabled: false`
+- [x] Virtual `moa` provider with named presets in `config.json` (`reference_models` + `aggregator`)
+- [x] Per-iteration loop: trimmed reference fan-out (no tools) → inject on user-tail → aggregator with tools
+- [x] Parallel reference calls (cap 3, pthread per ref); reference failure injected as error text, turn continues
+- [x] `local_only` preset policy — Ollama/vLLM/loopback+RFC1918 custom only; reject cloud slots at load
+- [x] `enabled: false` on preset → aggregator alone (MoA off for that preset)
+- [x] Block recursive MoA (aggregator provider `moa` → preset rejected)
+- [~] Cost/audit — aggregator usage flows through the normal turn accounting; per-reference token
+  sums **deferred** (references are fire-and-forget threads; v2 can aggregate their usage)
+- [x] `/model <preset>` selects a preset (the moa provider resolves the preset by the turn's model
+  arg — **no alias table needed**, since `use_model = agent->model`); gated hint in `slash.c`
+- [x] Kconfig `SC_ENABLE_MOA` — **default n**; FEATURE_SYMS + cmake override + defconfig comment (KC-1)
+- [x] `tests/test_moa.c` — 9 cases: reference_view, injection (+synthetic tail), fan-out, ref-failure,
+  `enabled:false`, `local_only` reject, recursive reject, `is_local`
+
+**Status (2026-06-27):** ✅ done. New `src/providers/moa.c` (+`moa.h`); config
+parse in `config.{c,h}`; factory routes `provider:"moa"` / `model:"moa/<preset>"`.
+**Deviation from spec:** preset switching uses the moa provider's own
+preset-by-`model` lookup instead of registering `moa:<preset>` alias-table
+entries (simpler, same `/model` UX — `use_model` is already `agent->model`).
+Aggregator inherits the turn's options (preset `aggregator_temperature`/
+`aggregator_max_tokens` override when set). Slots are resolved eagerly at
+provider construction via `sc_provider_create_for_model` so the provider owns
+its handles (no `cfg` lifetime dependency). Live integration (real
+Ollama+cloud) is the manual 🟠 acceptance; mock tests cover the logic.
 
 **Smol contract:** No dashboard UI; no `/moa` one-shot required for MVP; distinct from
 fallback (failure) and Phase 5 OpenRouter `/compare` (rejected). Presets may mix local
@@ -392,6 +406,15 @@ fallback (failure) and Phase 5 OpenRouter `/compare` (rejected). Presets may mix
   updated with `session`. Fields verified against `src/skill.c`/`src/agent.c`.
   **Verification gates:** docs-only (no code changed → build/ctest/size
   unchanged from slice 5); `check_claude_md.sh` clean; cross-link verified.
+- **Slice 7 — `task/2.13-moa-lite` (task 2.13)** — 2026-06-27. New
+  `src/providers/moa.c` (+`moa.h`): virtual `moa` provider — parallel reference
+  fan-out → tail injection → aggregator. Config parse (`config.{c,h}`), factory
+  routing, `Kconfig SC_ENABLE_MOA` (default n) + FEATURE_SYMS/cmake/defconfig,
+  `/model` hint, CONFIGURATION.md + README. 9-case `tests/test_moa.c`.
+  **Verification gates:** Release+`-DSC_ENABLE_MOA=ON` build clean (KC-2
+  `implicit`=0); `ctest` 47/47; `check_size_budget.sh` minimal-dynamic 269 KB ≤
+  1024 KB (MoA off in minimal — `SC_ENABLE_MOA 0`); `check_claude_md.sh` clean;
+  KC-1 satisfied (FEATURE_SYMS + cmake override + defconfig comment).
 
 ---
 

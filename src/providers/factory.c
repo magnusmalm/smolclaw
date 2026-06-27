@@ -13,6 +13,10 @@
 #include "providers/claude.h"
 #include "config.h"
 #include "logger.h"
+#include "sc_features.h"
+#if SC_ENABLE_MOA
+#include "providers/moa.h"
+#endif
 
 #define LOG_TAG "provider-factory"
 
@@ -225,6 +229,14 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
 
     const char *provider_name = cfg->provider;
     const char *model = cfg->model;
+
+#if SC_ENABLE_MOA
+    /* Virtual MoA provider: provider "moa" (preset = model) or model "moa/<preset>". */
+    if (provider_name && strcmp(provider_name, "moa") == 0)
+        return sc_provider_moa_new(cfg, model);
+    if (model && strncmp(model, "moa/", 4) == 0)
+        return sc_provider_moa_new(cfg, model + 4);
+#endif
 
     const char *api_key = NULL;
     const char *api_base = NULL;

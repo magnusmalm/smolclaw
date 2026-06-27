@@ -1,8 +1,8 @@
 # smolclaw default config — the Kconfig default-y feature set
 # This file is intentionally empty: it accepts Kconfig defaults. That enables
 # the "default y" features only. The "default n" features (X, X_TOOLS, GITEA,
-# CAMERA, VOICE, CODE_GRAPH, OUTPUT_FILTER, ANALYTICS, DELEGATE, STRICT_SECURITY)
-# stay OFF — enable them with menuconfig or -DSC_ENABLE_*=ON.
+# CAMERA, VOICE, CODE_GRAPH, OUTPUT_FILTER, ANALYTICS, DELEGATE, MOA,
+# STRICT_SECURITY) stay OFF — enable them with menuconfig or -DSC_ENABLE_*=ON.
 # NOTE: this is NOT "all features"; ctest on this profile is 39 tests, 43 with
 # X + OUTPUT_FILTER + ANALYTICS + DELEGATE additionally enabled.
 # Copy to .config and run cmake to use.

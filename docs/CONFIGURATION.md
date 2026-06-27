@@ -454,3 +454,56 @@ The format follows the [agentskills.io](https://agentskills.io) / Claude Code
 `SKILL.md` convention; there is no Skills Hub in core. See the README
 "Skills" section and
 [using-grok-implement-skill.md](development/using-grok-implement-skill.md).
+
+## `moa` — Mixture of Agents (`SC_ENABLE_MOA`, default off)
+
+Set `"provider": "moa"` and `"model": "<preset>"` to route each LLM call
+through a Mixture-of-Agents ensemble: **reference** models run first (no tools,
+trimmed context) and their answers are injected as private guidance for an
+**aggregator** model that acts as the real model for the iteration (including
+tool calls). MoA multiplies API cost per iteration — it is opt-in for hard
+tasks, not the default path. Build with `-DSC_ENABLE_MOA=ON`.
+
+```json
+{
+  "provider": "moa",
+  "model": "default",
+  "moa": {
+    "default_preset": "default",
+    "presets": {
+      "default": {
+        "enabled": true,
+        "local_only": false,
+        "reference_models": [
+          {"provider": "ollama", "model": "qwen2.5:7b"},
+          {"provider": "openrouter", "model": "deepseek/deepseek-chat"}
+        ],
+        "aggregator": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+        "reference_temperature": 0.6,
+        "reference_max_tokens": 1024
+      }
+    }
+  }
+}
+```
+
+| Preset key              | Default | Meaning                                            |
+|-------------------------|---------|----------------------------------------------------|
+| `enabled`               | true    | `false` → aggregator alone (MoA off for the preset) |
+| `local_only`            | false   | Reject non-local slots at load (ollama/vllm/RFC1918) |
+| `reference_models`      | (none)  | Up to 3 `{provider, model}` reference slots         |
+| `aggregator`            | (req.)  | `{provider, model}` — the real model for the turn   |
+| `reference_temperature` | 0.6     | Temperature for reference calls                     |
+| `reference_max_tokens`  | 1024    | Output cap for reference calls                      |
+| `aggregator_temperature`| inherit | Override aggregator temperature (0 = inherit turn)  |
+| `aggregator_max_tokens` | inherit | Override aggregator output cap (0 = inherit turn)   |
+
+- **Switch presets** at runtime with `/model <preset>` (the gateway's model is
+  the active preset name).
+- **`local_only: true`** rejects any preset slot that isn't `ollama`, `vllm`, or
+  a custom provider on a loopback / RFC1918 `api_base` — use it for air-gapped
+  presets. ⚠️ Without it, reference/aggregator cloud providers see the
+  conversation tail.
+- Recursive presets (an aggregator whose provider is `moa`) are rejected.
+- Reference failures are non-fatal: the error is injected as the reference text
+  and the aggregator still runs. Design: `docs/design/mixture-of-agents.md`.

@@ -48,6 +48,55 @@ static void free_provider(sc_provider_config_t *p)
     free(p->proxy);
 }
 
+#if SC_ENABLE_MOA
+static void parse_moa_slot(const cJSON *obj, sc_moa_slot_cfg_t *slot)
+{
+    if (!obj) return;
+    slot->provider = sc_strdup(sc_json_get_string(obj, "provider", NULL));
+    slot->model    = sc_strdup(sc_json_get_string(obj, "model", NULL));
+}
+
+/* Parse the top-level "moa" section into cfg->moa (task 2.13). */
+static void parse_moa(sc_config_t *cfg, const cJSON *root)
+{
+    const cJSON *moa = sc_json_get_object(root, "moa");
+    if (!moa) return;
+
+    cfg->moa.default_preset =
+        sc_strdup(sc_json_get_string(moa, "default_preset", NULL));
+
+    const cJSON *presets = sc_json_get_object(moa, "presets");
+    if (!presets) return;
+
+    cJSON *p;
+    cJSON_ArrayForEach(p, (cJSON *)presets) {
+        if (!p->string) continue;
+        if (cfg->moa.preset_count >= SC_MOA_MAX_PRESETS) break;
+
+        sc_moa_preset_cfg_t *pr = &cfg->moa.presets[cfg->moa.preset_count];
+        pr->name                  = sc_strdup(p->string);
+        pr->enabled               = sc_json_get_bool(p, "enabled", 1);
+        pr->local_only            = sc_json_get_bool(p, "local_only", 0);
+        pr->reference_temperature = sc_json_get_double(p, "reference_temperature", 0.6);
+        pr->aggregator_temperature= sc_json_get_double(p, "aggregator_temperature", 0);
+        pr->reference_max_tokens  = sc_json_get_int(p, "reference_max_tokens", 1024);
+        pr->aggregator_max_tokens = sc_json_get_int(p, "aggregator_max_tokens", 0);
+
+        parse_moa_slot(sc_json_get_object(p, "aggregator"), &pr->aggregator);
+
+        const cJSON *refs = sc_json_get_array(p, "reference_models");
+        if (refs) {
+            cJSON *r;
+            cJSON_ArrayForEach(r, (cJSON *)refs) {
+                if (pr->reference_count >= SC_MOA_MAX_REFS) break;
+                parse_moa_slot(r, &pr->reference_models[pr->reference_count++]);
+            }
+        }
+        cfg->moa.preset_count++;
+    }
+}
+#endif /* SC_ENABLE_MOA */
+
 /* Helper: serialize a provider section to JSON */
 static void provider_to_json(cJSON *parent, const char *name,
                              const sc_provider_config_t *p)
@@ -1216,6 +1265,10 @@ sc_config_t *sc_config_load(const char *path)
     load_agent_defaults(cfg, root);
 
     /* providers */
+#if SC_ENABLE_MOA
+    parse_moa(cfg, root);
+#endif
+
     const cJSON *providers = sc_json_get_object(root, "providers");
     if (providers) {
         parse_provider(providers, "anthropic",  &cfg->anthropic);
@@ -1972,6 +2025,20 @@ void sc_config_free(sc_config_t *cfg)
 
     /* Notifications */
     free(cfg->notify_urls);
+
+#if SC_ENABLE_MOA
+    free(cfg->moa.default_preset);
+    for (int i = 0; i < cfg->moa.preset_count; i++) {
+        sc_moa_preset_cfg_t *pr = &cfg->moa.presets[i];
+        free(pr->name);
+        free(pr->aggregator.provider);
+        free(pr->aggregator.model);
+        for (int j = 0; j < pr->reference_count; j++) {
+            free(pr->reference_models[j].provider);
+            free(pr->reference_models[j].model);
+        }
+    }
+#endif
 
     cJSON_Delete(cfg->response_format);
     if (cfg->raw) cJSON_Delete(cfg->raw);
