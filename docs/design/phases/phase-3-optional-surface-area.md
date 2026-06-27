@@ -115,8 +115,17 @@ Each mode sets:
 
 **Files:** `src/tools/spawn.c`, `src/tools/registry.c`
 
-- [ ] Depth-based deny lists (depth≥1: no spawn/delegate/cron; depth≥2: stricter)
-- [ ] MCP standalone mode: read-only tools only
+- [x] Depth-based deny lists (depth≥1: no spawn/delegate/cron; depth≥2: also
+  notify/converse/background) — was already wired in `spawn_depth_guard`;
+  refactored the decision into testable `sc_spawn_tool_denied_at_depth()`
+- [x] MCP standalone mode: read-only tools by default (`sc_tools_readonly_names`
+  applied in `cmd_mcp_server`); `--all-tools` opt-out; explicit `allowed_tools`
+  config still wins
+
+**Status (2026-06-27):** ✅ done. The depth guard pre-existed; this slice made
+it testable and added the MCP read-only default + `--all-tools`. New
+`tests/test_subagent_caps.c` (deny matrix + read-only allowlist). README
+documents the flag.
 
 ### 3.7 Session reset policies
 
@@ -195,6 +204,18 @@ Each mode sets:
 5. `feat: silent delivery tokens for gateway`
 6. `feat: Signal channel MVP (SC_ENABLE_SIGNAL, default off)` — large, isolated PR
 7. `feat: notify slack/ntfy backends` (optional)
+
+---
+
+## 6. Slice log
+
+- **Slice 1 — `task/3.6-subagent-caps` (task 3.6)** — 2026-06-27. Refactored the
+  spawn depth-deny decision into testable `sc_spawn_tool_denied_at_depth()`;
+  added MCP-server read-only default (`sc_tools_readonly_names` +
+  `cmd_mcp_server --all-tools` opt-out). New `tests/test_subagent_caps.c`.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 48/48;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 

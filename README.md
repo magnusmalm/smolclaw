@@ -484,6 +484,7 @@ smolclaw onboard      Initialize configuration and workspace
 smolclaw agent        Interactive agent (or -m "message" for single turn)
 smolclaw gateway      Start all channels + services
 smolclaw mcp-server   Run as an MCP server (JSON-RPC over stdio; needs SC_ENABLE_MCP_SERVER)
+                      Read-only tools by default; --all-tools to expose write/exec
 smolclaw pairing      Manage channel trust (list/approve/revoke)
 smolclaw vault        Manage encrypted secrets
 smolclaw update       Check for and apply updates

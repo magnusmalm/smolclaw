@@ -68,22 +68,31 @@ static const char *depth2_denied[] = {
     "spawn", "delegate", "cron", "notify", "converse", "background"
 };
 
+int sc_spawn_tool_denied_at_depth(const char *tool, int depth)
+{
+    if (!tool || depth < 1) return 0;  /* top-level: allow all */
+
+    const char **denied;
+    int count;
+    if (depth >= 2) {
+        denied = depth2_denied;
+        count = (int)(sizeof(depth2_denied) / sizeof(depth2_denied[0]));
+    } else {
+        denied = depth1_denied;
+        count = (int)(sizeof(depth1_denied) / sizeof(depth1_denied[0]));
+    }
+    for (int i = 0; i < count; i++)
+        if (strcmp(tool, denied[i]) == 0) return 1;
+    return 0;
+}
+
 /* Pre-hook: block escalation-prone tools inside subagents */
 static int spawn_depth_guard(const char *tool_name, const cJSON *args,
                               const char *channel, const char *chat_id,
                               void *userdata)
 {
     (void)args; (void)channel; (void)chat_id; (void)userdata;
-    if (spawn_depth < 1) return 0;  /* top-level: allow all */
-
-    const char **denied = (spawn_depth >= 2) ? depth2_denied : depth1_denied;
-    int count = (spawn_depth >= 2) ? 6 : 3;
-
-    for (int i = 0; i < count; i++) {
-        if (strcmp(tool_name, denied[i]) == 0)
-            return 1;  /* blocked */
-    }
-    return 0;
+    return sc_spawn_tool_denied_at_depth(tool_name, spawn_depth);
 }
 
 static sc_tool_result_t *spawn_execute(sc_tool_t *self, cJSON *args, void *ctx)

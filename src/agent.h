@@ -171,4 +171,9 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);
 void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                                    const char *workspace);
 
+/* Names of the read-only tools an external MCP client may use by default
+ * (no write/exec/escalation). Returns a static, NULL-free array; *count is
+ * set. Used to lock down `mcp-server` unless the operator opts out. */
+const char **sc_tools_readonly_names(int *count);
+
 #endif /* SC_AGENT_H */

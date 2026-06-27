@@ -207,6 +207,23 @@ static char **build_structured_output_allowlist(sc_tool_registry_t *reg, int *ou
 
 /* Register standalone tools (no agent dependency).
  * Used by both the full agent and the MCP server mode. */
+const char **sc_tools_readonly_names(int *count)
+{
+    /* Read-only / non-escalation tools. Names not actually registered are
+     * harmless (the allowlist just permits them); anything omitted is blocked,
+     * so the default posture is conservative. */
+    static const char *names[] = {
+        "read_file", "list_dir", "glob",
+        "memory_read", "memory_search", "context_search",
+        "code_graph", "symbol_lookup",
+        "host_status", "host_inventory", "host_trend",
+        "web_search", "web_fetch",
+        "x_get_tweet", "x_get_thread", "x_search", "x_get_user",
+    };
+    if (count) *count = (int)(sizeof(names) / sizeof(names[0]));
+    return names;
+}
+
 void sc_register_tools_standalone(sc_tool_registry_t *reg, sc_config_t *cfg,
                                    const char *workspace)
 {

@@ -230,8 +230,12 @@ static void print_help(void)
 }
 
 #if SC_ENABLE_MCP_SERVER
-static void cmd_mcp_server(void)
+static void cmd_mcp_server(int argc, char **argv)
 {
+    int all_tools = 0;
+    for (int i = 2; i < argc; i++)
+        if (strcmp(argv[i], "--all-tools") == 0) all_tools = 1;
+
     sc_config_t *cfg = load_config_or_exit();
     char *workspace = sc_config_workspace_path(cfg);
 
@@ -246,10 +250,18 @@ static void cmd_mcp_server(void)
 
     sc_register_tools_standalone(reg, cfg, workspace);
 
-    /* Apply allowlist if configured */
+    /* Tool exposure precedence: explicit config allowlist > read-only default
+     * (3.6: an external MCP client gets read-only tools unless the operator
+     * passes --all-tools or sets allowed_tools). */
     if (cfg->allowed_tools && cfg->allowed_tool_count > 0) {
         sc_tool_registry_set_allowed(reg, cfg->allowed_tools,
                                       cfg->allowed_tool_count);
+    } else if (!all_tools) {
+        int n = 0;
+        const char **ro = sc_tools_readonly_names(&n);
+        sc_tool_registry_set_allowed(reg, (char **)ro, n);
+        SC_LOG_INFO("main", "MCP server: read-only tools only "
+                    "(pass --all-tools to expose write/exec)");
     }
 
     SC_LOG_INFO("main", "Starting MCP server with %d tools",
@@ -1953,7 +1965,7 @@ int main(int argc, char **argv)
         cmd_gateway(argc, argv);
 #if SC_ENABLE_MCP_SERVER
     } else if (strcmp(command, "mcp-server") == 0) {
-        cmd_mcp_server();
+        cmd_mcp_server(argc, argv);
 #endif
     } else if (strcmp(command, "pairing") == 0) {
         cmd_pairing(argc, argv);
