@@ -720,6 +720,43 @@ int sc_session_reset(sc_session_manager_t *sm, const char *key)
     return 0;
 }
 
+long sc_session_get_updated(sc_session_manager_t *sm, const char *key)
+{
+    if (!sm || !key) return 0;
+    sc_session_t *s = find_session(sm, key);
+    return s ? s->updated : 0;
+}
+
+int sc_session_reset_due(int mode, int daily_reset_hour, int idle_minutes,
+                         long last_updated, long now)
+{
+    if (mode == SC_SESSION_RESET_NONE || last_updated <= 0 || now <= last_updated)
+        return 0;
+
+    int idle  = (mode == SC_SESSION_RESET_IDLE  || mode == SC_SESSION_RESET_BOTH);
+    int daily = (mode == SC_SESSION_RESET_DAILY || mode == SC_SESSION_RESET_BOTH);
+
+    if (idle && idle_minutes > 0 &&
+        (now - last_updated) >= (long)idle_minutes * 60)
+        return 1;
+
+    if (daily) {
+        if (daily_reset_hour < 0 || daily_reset_hour > 23) daily_reset_hour = 4;
+        /* Most recent local-time daily boundary at or before `now`. */
+        time_t nt = (time_t)now;
+        struct tm tmv;
+        localtime_r(&nt, &tmv);
+        tmv.tm_hour = daily_reset_hour;
+        tmv.tm_min = 0;
+        tmv.tm_sec = 0;
+        long boundary = (long)mktime(&tmv);
+        if (boundary > now) boundary -= 86400;  /* today's hour not reached yet */
+        /* A daily boundary fell between last activity and now. */
+        if (last_updated < boundary) return 1;
+    }
+    return 0;
+}
+
 int sc_session_branch(sc_session_manager_t *sm, const char *key, int node_id)
 {
     if (!sm || !key) return -1;

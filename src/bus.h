@@ -90,6 +90,16 @@ sc_inbound_msg_t *sc_bus_consume_inbound(sc_bus_t *bus);
 /* Try to consume inbound (non-blocking, returns NULL if no message) */
 sc_inbound_msg_t *sc_bus_try_consume_inbound(sc_bus_t *bus);
 
+/* Queue-mode coalescing (task 3.8): remove and return all pending inbound
+ * messages matching (channel, chat_id), preserving the relative order of the
+ * non-matching messages left in the queue. Returns a malloc'd array of message
+ * pointers (caller frees each via sc_inbound_msg_free, then frees the array);
+ * *out_count is set. Returns NULL / 0 when nothing matches. */
+sc_inbound_msg_t **sc_bus_drain_inbound_matching(sc_bus_t *bus,
+                                                 const char *channel,
+                                                 const char *chat_id,
+                                                 int *out_count);
+
 /* Set outbound handler (called by libevent when outbound messages arrive) */
 void sc_bus_set_outbound_handler(sc_bus_t *bus, sc_msg_handler_t handler, void *ctx);
 

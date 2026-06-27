@@ -509,6 +509,58 @@ static void test_session_jsonl_roundtrip(void)
     free(cmd);
 }
 
+/* Task 3.7: automatic session-reset policy. */
+static void test_session_reset_policy(void)
+{
+    long now = 1767225600L;  /* fixed reference */
+    long min = 60;
+
+    /* none → never */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_NONE, 4, 1440,
+                                       now - 100000, now), 0);
+    /* missing / future last-activity → never */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_IDLE, 4, 60, 0, now), 0);
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_IDLE, 4, 60,
+                                       now + 10, now), 0);
+
+    /* idle: 60-min threshold */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_IDLE, 4, 60,
+                                       now - 30 * min, now), 0);  /* 30 min idle */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_IDLE, 4, 60,
+                                       now - 90 * min, now), 1);  /* 90 min idle */
+
+    /* daily: last activity 3 days ago → a daily boundary has passed */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_DAILY, 4, 1440,
+                                       now - 3 * 86400, now), 1);
+    /* daily: activity seconds ago → no boundary crossed (idle disabled here) */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_DAILY, 4, 1440,
+                                       now - 5, now), 0);
+
+    /* both: idle path still fires even if daily wouldn't */
+    ASSERT_INT_EQ(sc_session_reset_due(SC_SESSION_RESET_BOTH, 4, 60,
+                                       now - 90 * min, now), 1);
+}
+
+static void test_session_get_updated(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+    sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+    ASSERT_NOT_NULL(sm);
+
+    ASSERT(sc_session_get_updated(sm, "nope") == 0, "unknown session → 0");
+    sc_session_add_message(sm, "u", "user", "hi");
+    ASSERT(sc_session_get_updated(sm, "u") > 0, "active session → nonzero");
+
+    sc_session_manager_free(sm);
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 int main(void)
 {
     printf("test_session\n");
@@ -524,6 +576,8 @@ int main(void)
     RUN_TEST(test_session_thinking_persistence);
     RUN_TEST(test_session_branching);
     RUN_TEST(test_session_jsonl_roundtrip);
+    RUN_TEST(test_session_reset_policy);
+    RUN_TEST(test_session_get_updated);
 
     TEST_REPORT();
 }

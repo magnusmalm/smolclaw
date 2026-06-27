@@ -138,11 +138,16 @@ documents the flag.
 
 **Files:** `src/config.c`, `src/session.c`, `src/channels/manager.c`
 
-- [ ] Config per channel: `reset_mode`: `none` | `daily` | `idle` | `both`
-- [ ] `daily_reset_hour` (default 4:00 local) and `idle_minutes` (default 1440)
-- [ ] On inbound message: check policy → start fresh session if triggered
-- [ ] Per-platform overrides under `channels.<name>.reset` (optional)
-- [ ] Document in `docs/CONFIGURATION.md`; no LLM call on reset
+- [x] Config `session_reset.mode`: `none` | `daily` | `idle` | `both` (top-level)
+- [x] `daily_reset_hour` (default 4 local) and `idle_minutes` (default 1440)
+- [x] On inbound gateway message: `sc_session_reset_due` → `sc_session_reset` if triggered
+- [~] Per-platform overrides under `channels.<name>.reset` — **deferred** (global
+  policy ships; per-channel override is the spec's "(optional)")
+- [x] Documented in `docs/CONFIGURATION.md`; no LLM call on reset
+
+**Status (2026-06-27):** ✅ done. Pure decision `sc_session_reset_due()` +
+`sc_session_get_updated()` (session.c), config + agent fields, gateway hook.
+Tests in `test_session.c` (idle/daily/both/none, getter).
 
 **Hermes parity:** automatic session hygiene without manual `/reset`.
 
@@ -154,11 +159,20 @@ documents the flag.
 
 **Ship in 3.8:**
 
-- [ ] `busy_input_mode`: `interrupt` (default, current behavior) | `queue`
-- [ ] **Interrupt:** new message cancels in-flight turn (existing behavior; document)
-- [ ] **Queue:** hold messages until current turn completes; combine into one follow-up prompt
-- [ ] Optional `busy_ack_enabled` — short ack line (`⏳ queued`) on async channels
-- [ ] Config under `agents.defaults` or `gateway.display`
+- [x] `busy_input_mode`: `interrupt` (default) | `queue` (top-level config)
+- [x] **Interrupt:** documented — smolclaw processes queued messages sequentially
+  in arrival order (it does **not** cancel a turn mid-flight; the spec's
+  "cancel in-flight" doesn't match the single-threaded gateway, so this is the
+  honest description of current behavior)
+- [x] **Queue:** coalesce all pending **same-chat** messages into one follow-up
+  turn (`sc_bus_drain_inbound_matching` + combine in the gateway loop)
+- [~] Optional `busy_ack_enabled` (`⏳ queued`) — **deferred**: needs a busy flag
+  visible to the channel publish threads; out of MVP
+- [x] Config top-level `busy_input_mode`
+
+**Status (2026-06-27):** ✅ done. New `sc_bus_drain_inbound_matching()` (bus.c,
+order-preserving, lock-held); gateway loop coalesces in queue mode; config +
+agent field. Tests in `test_bus.c`.
 
 **Defer to Phase 5:** `steer` mode (inject mid-turn without new session — higher complexity).
 
@@ -228,6 +242,14 @@ documents the flag.
   **Verification gates:** Release `-DSC_ENABLE_X_TOOLS=ON` build clean (KC-2
   `implicit`=0); `ctest` 48/48; `check_size_budget.sh` minimal-dynamic 269 KB ≤
   1024 KB (X_TOOLS off in minimal); `check_claude_md.sh` clean.
+- **Slice 3 — `task/3.7-3.8-gateway-behavior` (tasks 3.7 + 3.8)** — 2026-06-27.
+  Session reset policies (`sc_session_reset_due`/`sc_session_get_updated` +
+  config/agent/gateway hook) and busy-input queue mode
+  (`sc_bus_drain_inbound_matching` + gateway-loop coalesce). New
+  `tests/test_bus.c`; reset tests in `test_session.c`. CONFIGURATION.md updated.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
+  `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 

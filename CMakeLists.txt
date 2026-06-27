@@ -501,6 +501,7 @@ enable_testing()
 set(TEST_SOURCES
     tests/test_str.c
     tests/test_glob.c
+    tests/test_bus.c
     tests/test_port_diag.c
     tests/test_config.c
     tests/test_session.c

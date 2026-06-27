@@ -58,6 +58,25 @@ int sc_session_save(sc_session_manager_t *sm, const char *key);
  * when the key was never stored), -1 on error. */
 int sc_session_reset(sc_session_manager_t *sm, const char *key);
 
+/* Last-activity unix time of a session (its `updated` field), or 0 if the
+ * session isn't loaded. */
+long sc_session_get_updated(sc_session_manager_t *sm, const char *key);
+
+/* Automatic session-reset policy (task 3.7). */
+typedef enum {
+    SC_SESSION_RESET_NONE  = 0,
+    SC_SESSION_RESET_DAILY = 1,
+    SC_SESSION_RESET_IDLE  = 2,
+    SC_SESSION_RESET_BOTH  = 3,
+} sc_session_reset_mode_t;
+
+/* Decide whether a session whose last activity was `last_updated` should be
+ * reset at time `now`. `daily_reset_hour` is local-time hour [0,23];
+ * `idle_minutes` is the idle threshold. Pure (no I/O) — `now`/`last_updated`
+ * are passed in for testability. Returns 1 if a reset is due. */
+int sc_session_reset_due(int mode, int daily_reset_hour, int idle_minutes,
+                         long last_updated, long now);
+
 /* Branch: set the active parent to the given node id.
  * The next message appended will fork from that point.
  * Returns 0 on success, -1 if node_id not found. */

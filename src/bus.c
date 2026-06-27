@@ -235,6 +235,62 @@ sc_inbound_msg_t *sc_bus_try_consume_inbound(sc_bus_t *bus)
     return queue_pop(&bus->inbound);
 }
 
+sc_inbound_msg_t **sc_bus_drain_inbound_matching(sc_bus_t *bus,
+                                                 const char *channel,
+                                                 const char *chat_id,
+                                                 int *out_count)
+{
+    if (out_count) *out_count = 0;
+    if (!bus || !channel || !chat_id) return NULL;
+
+    sc_msg_queue_t *q = &bus->inbound;
+    pthread_mutex_lock(&q->lock);
+
+    sc_inbound_msg_t **matched = NULL;
+    int mcount = 0, mcap = 0;
+    sc_msg_node_t *keep_head = NULL, *keep_tail = NULL;
+    int keep_count = 0;
+
+    sc_msg_node_t *node = q->head;
+    while (node) {
+        sc_msg_node_t *next = node->next;
+        sc_inbound_msg_t *m = node->msg;
+        int is_match = m && m->channel && m->chat_id &&
+                       strcmp(m->channel, channel) == 0 &&
+                       strcmp(m->chat_id, chat_id) == 0;
+
+        if (is_match && mcount >= mcap) {
+            int nc = mcap ? mcap * 2 : 8;
+            sc_inbound_msg_t **na = realloc(matched, (size_t)nc * sizeof(*na));
+            if (!na) is_match = 0;          /* OOM → leave message in queue */
+            else { matched = na; mcap = nc; }
+        }
+
+        if (is_match) {
+            matched[mcount++] = m;          /* keep msg, free only the node */
+            free(node);
+        } else {
+            node->next = NULL;              /* re-link into the keep list */
+            if (keep_tail) keep_tail->next = node;
+            else           keep_head = node;
+            keep_tail = node;
+            keep_count++;
+        }
+        node = next;
+    }
+
+    q->head = keep_head;
+    q->tail = keep_tail;
+    q->count = keep_count;
+    pthread_mutex_unlock(&q->lock);
+
+    /* The matching messages' wakeup bytes stay in the pipe; they cause at most
+     * `mcount` harmless empty try_consume() reads (no message is starved). */
+
+    if (out_count) *out_count = mcount;
+    return matched;
+}
+
 void sc_bus_publish_outbound(sc_bus_t *bus, sc_outbound_msg_t *msg)
 {
     if (!bus || !msg) return;

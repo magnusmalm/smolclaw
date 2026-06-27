@@ -420,6 +420,35 @@ invalid expression disables the job (it never fires) and logs a warning.
 
 - [1] Used by the `notify` tool, e.g. `discord://id/token,tgram://bot/chat`.
 
+## `session_reset` — automatic session hygiene (top-level)
+
+Starts a fresh session for a chat when the prior one is stale, without a manual
+`/reset` and without an LLM call.
+
+| Key               | Type   | Default | Description                                       |
+|-------------------|--------|---------|---------------------------------------------------|
+| mode              | string | none    | `none` \| `daily` \| `idle` \| `both`             |
+| daily_reset_hour  | int    | 4       | Local hour [0–23] for the daily reset boundary    |
+| idle_minutes      | int    | 1440    | Idle threshold (minutes) for `idle`/`both`        |
+
+- `idle` resets when the gap since the chat's last message exceeds
+  `idle_minutes`. `daily` resets when a `daily_reset_hour` boundary has passed
+  since the last message. `both` resets on either. Checked on each inbound
+  gateway message; system/internal channels are exempt.
+
+## `busy_input_mode` — handling messages during a busy turn (top-level)
+
+| Key             | Type   | Default     | Description                                  |
+|-----------------|--------|-------------|----------------------------------------------|
+| busy_input_mode | string | interrupt   | `interrupt` \| `queue`                       |
+
+- `interrupt` (default): messages that arrive while the gateway is mid-turn are
+  processed one at a time in arrival order (smolclaw does not cancel a turn
+  mid-flight).
+- `queue`: when the gateway picks up the next message, any other pending
+  messages **from the same chat** are coalesced into that one follow-up turn —
+  so a burst of quick messages becomes a single prompt instead of N turns.
+
 ## Skills — reusable prompt templates
 
 Skills are not configured in `config.json`; they are markdown files

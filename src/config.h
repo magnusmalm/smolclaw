@@ -11,6 +11,14 @@ typedef struct {
     char *proxy;
 } sc_provider_config_t;
 
+/* Automatic session-reset policy (task 3.7). mode matches
+ * sc_session_reset_mode_t: 0 none, 1 daily, 2 idle, 3 both. */
+typedef struct {
+    int mode;
+    int daily_reset_hour;   /* local hour [0,23], default 4 */
+    int idle_minutes;       /* default 1440 (24h) */
+} sc_session_reset_config_t;
+
 #if SC_ENABLE_MOA
 /* Mixture of Agents (MoA-lite) — task 2.13. See docs/design/mixture-of-agents.md */
 #define SC_MOA_MAX_REFS    3
@@ -259,6 +267,13 @@ typedef struct {
 
     /* Gateway rate limiting */
     int rate_limit_per_minute;
+
+    /* Automatic session reset (task 3.7) */
+    sc_session_reset_config_t session_reset;
+
+    /* Busy-input mode (task 3.8): 0 = interrupt (sequential, default),
+     * 1 = queue (coalesce a burst of same-chat messages into one turn). */
+    int busy_input_mode;
 
     /* Security */
     char **allowed_tools;

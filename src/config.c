@@ -1421,6 +1421,26 @@ sc_config_t *sc_config_load(const char *path)
         cfg->notify_urls = sc_strdup(nu);
     }
 
+    /* Automatic session reset (task 3.7) */
+    cfg->session_reset.daily_reset_hour = 4;
+    cfg->session_reset.idle_minutes = 1440;
+    const cJSON *sreset = sc_json_get_object(root, "session_reset");
+    if (sreset) {
+        const char *m = sc_json_get_string(sreset, "mode", "none");
+        if (strcmp(m, "daily") == 0)      cfg->session_reset.mode = 1;
+        else if (strcmp(m, "idle") == 0)  cfg->session_reset.mode = 2;
+        else if (strcmp(m, "both") == 0)  cfg->session_reset.mode = 3;
+        else                              cfg->session_reset.mode = 0;
+        cfg->session_reset.daily_reset_hour =
+            sc_json_get_int(sreset, "daily_reset_hour", 4);
+        cfg->session_reset.idle_minutes =
+            sc_json_get_int(sreset, "idle_minutes", 1440);
+    }
+
+    /* Busy-input mode (task 3.8) */
+    const char *bim = sc_json_get_string(root, "busy_input_mode", "interrupt");
+    cfg->busy_input_mode = (strcmp(bim, "queue") == 0) ? 1 : 0;
+
     /* Apply environment variable overrides last */
     apply_env_overrides(cfg);
 

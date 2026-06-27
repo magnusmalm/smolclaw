@@ -29,6 +29,7 @@
 #include "tools/host.h"
 #include "tools/message.h"
 #include "audit.h"
+#include "session.h"
 #include "session_maint.h"
 #include "slash.h"
 #include "providers/factory.h"
@@ -1492,6 +1493,25 @@ static void gateway_process_message(sc_agent_t *agent,
                                      sc_channel_manager_t *ch_mgr,
                                      sc_inbound_msg_t *msg)
 {
+    /* Automatic session reset (task 3.7): if the policy says this chat's
+     * session is stale (idle/daily), clear it before processing — no LLM call.
+     * System/internal channels are exempt. */
+    if (agent->session_reset_mode != SC_SESSION_RESET_NONE && msg->session_key &&
+        !(msg->channel && strcmp(msg->channel, SC_CHANNEL_SYSTEM) == 0)) {
+        long last = sc_session_get_updated(agent->sessions, msg->session_key);
+        if (last > 0 &&
+            sc_session_reset_due(agent->session_reset_mode,
+                                 agent->session_reset_daily_hour,
+                                 agent->session_reset_idle_min,
+                                 last, time(NULL))) {
+            sc_session_reset(agent->sessions, msg->session_key);
+            SC_LOG_INFO("gateway", "Session '%s' reset by policy (mode=%d)",
+                        msg->session_key, agent->session_reset_mode);
+            sc_audit_log_ext("session", msg->session_key, 0, 0, msg->channel,
+                             msg->chat_id, "session_reset_policy");
+        }
+    }
+
     /* Slash commands (e.g. /reset, /model, /help): handle locally without an
      * LLM turn and reply on the same channel. System/internal channels are
      * never user chat input, so they bypass this. */
@@ -1788,6 +1808,31 @@ static void gateway_event_loop(struct event_base *base,
 
         sc_inbound_msg_t *msg = sc_bus_try_consume_inbound(bus);
         if (msg) {
+            /* Queue mode (3.8): coalesce any other messages from the same chat
+             * that piled up during the previous turn into one follow-up. */
+            if (agent->busy_input_mode == 1 && msg->channel && msg->chat_id) {
+                int extra = 0;
+                sc_inbound_msg_t **more = sc_bus_drain_inbound_matching(
+                    bus, msg->channel, msg->chat_id, &extra);
+                if (extra > 0) {
+                    sc_strbuf_t sb;
+                    sc_strbuf_init(&sb);
+                    sc_strbuf_append(&sb, msg->content ? msg->content : "");
+                    for (int i = 0; i < extra; i++) {
+                        if (more[i]->content && more[i]->content[0]) {
+                            sc_strbuf_append(&sb, "\n");
+                            sc_strbuf_append(&sb, more[i]->content);
+                        }
+                        sc_inbound_msg_free(more[i]);
+                    }
+                    free(msg->content);
+                    msg->content = sc_strbuf_finish(&sb);
+                    SC_LOG_INFO("gateway",
+                                "queue mode: coalesced %d message(s) for %s/%s",
+                                extra, msg->channel, msg->chat_id);
+                }
+                free(more);
+            }
             gateway_process_message(agent, ch_mgr, msg);
             sc_inbound_msg_free(msg);
         }
