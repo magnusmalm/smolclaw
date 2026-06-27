@@ -98,17 +98,21 @@ GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.
 
 ### Phase 3 — Optional surface area
 
+**Status (2026-06-27):** Most READY tasks **landed on `master`** (HEAD `98b1de9`).
+Still open: 3.9 silent tokens (READY, not yet done), 3.5 notify (optional), 3.1
+Signal (GATED-EXT).
+
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 3.1 Signal channel MVP | 🟠 GATED-EXT | Code + mock_http READY; **real `signal-cli` daemon + test number** for smoke test |
-| 3.2 operator mode presets | ✅ READY | |
-| 3.3 enhanced tool confirmation | ✅ READY | Q3 resolved: summary-only async confirm, fail-closed; full diff CLI/Web only |
-| 3.4 X `note_tweet` | ✅ READY | Premise verified (`format_tweet` already handles it) |
-| 3.5 notify Slack/ntfy | ✅ READY | "Ship only if trivial" |
-| 3.6 subagent deny matrices | ✅ READY | |
-| 3.7 session reset policies | ✅ READY | |
-| 3.8 busy-input queue mode | ✅ READY | `steer` mode is Phase 5 |
-| 3.9 silent delivery tokens | ✅ READY | |
+| 3.1 Signal channel MVP | 🟠 GATED-EXT | Not started; **real `signal-cli` daemon + test number** for smoke test |
+| 3.2 operator mode presets | 🔵 SHIPPED | `sc_config_apply_operator_mode`; `test_config` |
+| 3.3 enhanced tool confirmation | 🔵 SHIPPED / 🟡 | `approval_policy` + always-allow cache; diff-preview & async summary-confirm **deferred** |
+| 3.4 X `note_tweet` | 🔵 SHIPPED | `note_tweet` added to thread/search `tweet.fields` |
+| 3.5 notify Slack/ntfy | ✅ READY | Not yet done; "ship only if trivial" |
+| 3.6 subagent deny matrices | 🔵 SHIPPED | testable deny fn + MCP read-only default; `test_subagent_caps` |
+| 3.7 session reset policies | 🔵 SHIPPED | `sc_session_reset_due`; `test_session` |
+| 3.8 busy-input queue mode | 🔵 SHIPPED | `sc_bus_drain_inbound_matching`; `test_bus`. `steer` is Phase 5 |
+| 3.9 silent delivery tokens | ✅ READY | Not yet done |
 
 ### Phase 4 — Larger investments
 
