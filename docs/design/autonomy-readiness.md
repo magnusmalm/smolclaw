@@ -129,7 +129,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.7 prompt budget CLI | 🔵 SHIPPED | `smolclaw context`; pure `sc_context_estimate_tokens`/`sc_context_budget_warn` + `context_warn_pct`; `test_context_isolation` |
 | 4.8 remaining audit mediums | 🔵 SHIPPED | M-2 + M-4 fixed; M-5/6/7/10 verified already-closed (M-7 regression test); M-9 deferred (no repro). `test_session` + `test_subagent_caps` |
 | 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |
-| 4.10 updater split spike | ✅ READY | Q4 resolved: no split; measure under section-GC (0.4), revisit only if >50 KB proven |
+| 4.10 updater split spike | 🔵 SHIPPED | Measured: updater = 8.0 KB stripped (OpenSSL dynamic → no static weight) ≪ 50 KB → no split (confirms Q4) |
 | 4.11 global `session_search` | 🔵 SHIPPED | `session_search` tool (FTS5 over sessions); `SC_ENABLE_SESSION_SEARCH` default n; `test_session_search` |
 | 4.12 agent-initiated compact tool | 🔵 SHIPPED | `compact` tool + shared `sc_agent_compact_session` + cooldown/budget guards; `test_agent` |
 | 4.13 post-turn memory review | ✅ READY | Opt-in; acceptance mockable (aux provider optional) |

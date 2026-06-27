@@ -243,8 +243,32 @@ regression test); M-9 deferred with rationale.
 > to **measurement only**: record updater code size with section-GC (task 0.4)
 > on/off. See `autonomy-readiness.md` §3.
 
-- [ ] Measure updater code size with/without `--gc-sections` (task 0.4)
-- [ ] Revisit a split **only** if >50 KB savings is proven *and* the deps are not otherwise linked
+- [x] Measure updater code size with/without `--gc-sections` (task 0.4)
+- [x] Revisit a split **only** if >50 KB savings is proven *and* the deps are not
+  otherwise linked — **neither condition holds; no split.**
+
+**Measurement (2026-06-27, MinSizeRel = LTO + `--gc-sections`, stripped,
+dynamic build):**
+
+| Configuration | Stripped size | Updater delta |
+|---------------|---------------|---------------|
+| minimal baseline (updater off) | 282,872 B | — |
+| minimal + updater (sole OpenSSL user) | 291,128 B | **+8,256 B (8.0 KB)** |
+| minimal + vault (OpenSSL already linked) | 295,320 B | — |
+| minimal + vault + updater | 303,536 B | **+8,216 B (8.0 KB)** |
+
+The two updater deltas are within ~40 bytes of each other, confirming the
+updater's cost is **purely its own ~8 KB of code**: OpenSSL (its only notable
+dependency) is **dynamically linked** in the default dynamic build, so it adds
+no static binary weight, and curl/cJSON are linked unconditionally regardless.
+
+**Conclusion: DO NOT SPLIT (confirms Q4).** A separate updater binary would save
+at most ~8 KB — and only in builds that enable `SC_ENABLE_UPDATER` — while adding
+atomic-replace and version-sync complexity. The 50 KB bar is not met (8 KB), and
+the deps are otherwise linked / shared. Revisit only if a future change pushes
+the updater's *own* code past 50 KB.
+
+**Status (2026-06-27):** ✅ done (measurement spike; no code change).
 
 ### 4.11 Global session search
 
@@ -442,6 +466,13 @@ config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
   (KC-2 `implicit`=0); `ctest` 50/50 incl. `test_session_search`; minimal
   (flag off) 277 KB ≤ 1024 KB; KC-1 satisfied (genconfig disables it in minimal);
   `check_claude_md.sh` clean.
+- **Slice 7 — `task/4.10-updater-spike` (task 4.10)** — 2026-06-27. Measurement
+  spike (no code change). Measured the updater's binary-size contribution under
+  section-GC: **8.0 KB stripped**, near-identical whether or not OpenSSL is
+  otherwise linked (OpenSSL is dynamic → no static weight). 8 KB ≪ the 50 KB
+  split bar → **confirmed Q4: do not split.** Findings recorded in §2 task 4.10.
+  **Verification gates:** N/A (no source change); four MinSizeRel builds compiled
+  clean for the measurement.
 
 ---
 
