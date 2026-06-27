@@ -17,8 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
 
 /* Helper: create a temp workspace dir */
 static char *make_tmp_workspace(void)
@@ -187,6 +189,72 @@ static void test_sandbox_mandatory_workspace_missing(void)
     ASSERT_INT_EQ(WEXITSTATUS(status), 0);
 }
 
+/* ---- Task 4.2: per-server capability seccomp probes ------------------ *
+ * Each probe forks a child, applies the sandbox with the given caps, then
+ * exercises a syscall. The child exits 0 if the syscall was ALLOWED and 1 if
+ * BLOCKED (EPERM), so the parent can assert on the exit code. Runs only when
+ * seccomp is actually available. */
+
+/* Returns child exit status: 0 = syscall allowed, 1 = blocked. */
+static int run_cap_probe(int no_process, int no_network, int test_socket)
+{
+    char *ws = make_tmp_workspace();
+    if (!ws) return -1;
+
+    pid_t pid = fork();
+    if (pid < 0) { rmdir(ws); return -1; }
+    if (pid == 0) {
+        sc_sandbox_opts_t opts = {
+            .workspace = ws,
+            .tmpdir = "/tmp",
+            .cap_no_process = no_process,
+            .cap_no_network = no_network,
+        };
+        sc_sandbox_apply(&opts);
+
+        if (test_socket) {
+            int fd = socket(AF_INET, SOCK_STREAM, 0);
+            if (fd >= 0) { close(fd); _exit(0); }  /* allowed */
+            _exit(errno == EPERM ? 1 : 2);          /* blocked */
+        } else {
+            pid_t c = fork();                        /* -> clone syscall */
+            if (c == 0) _exit(0);                    /* child of child */
+            if (c < 0) _exit(errno == EPERM ? 1 : 2);/* blocked */
+            int st = 0; waitpid(c, &st, 0);
+            _exit(0);                                /* allowed */
+        }
+    }
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+    rmdir(ws);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+static void test_sandbox_no_network_blocks_socket(void)
+{
+    if (!(sc_sandbox_available() & SC_SANDBOX_SECCOMP)) return;  /* env w/o seccomp */
+    ASSERT_INT_EQ(run_cap_probe(0, 1, 1), 1);  /* cap_no_network -> socket blocked */
+}
+
+static void test_sandbox_network_allowed_by_default(void)
+{
+    if (!(sc_sandbox_available() & SC_SANDBOX_SECCOMP)) return;
+    ASSERT_INT_EQ(run_cap_probe(0, 0, 1), 0);  /* default -> socket allowed */
+}
+
+static void test_sandbox_no_process_blocks_fork(void)
+{
+    if (!(sc_sandbox_available() & SC_SANDBOX_SECCOMP)) return;
+    ASSERT_INT_EQ(run_cap_probe(1, 0, 0), 1);  /* cap_no_process -> fork blocked */
+}
+
+static void test_sandbox_process_allowed_by_default(void)
+{
+    if (!(sc_sandbox_available() & SC_SANDBOX_SECCOMP)) return;
+    ASSERT_INT_EQ(run_cap_probe(0, 0, 0), 0);  /* default -> fork allowed */
+}
+
 int main(void)
 {
     printf("test_sandbox\n");
@@ -201,6 +269,10 @@ int main(void)
     RUN_TEST(test_sandbox_blocks_mount);
     RUN_TEST(test_sandbox_disabled);
     RUN_TEST(test_sandbox_mandatory_workspace_missing);
+    RUN_TEST(test_sandbox_no_network_blocks_socket);
+    RUN_TEST(test_sandbox_network_allowed_by_default);
+    RUN_TEST(test_sandbox_no_process_blocks_fork);
+    RUN_TEST(test_sandbox_process_allowed_by_default);
     RUN_TEST(test_config_sandbox_default);
 
     sc_audit_shutdown();

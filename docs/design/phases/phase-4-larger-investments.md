@@ -74,9 +74,26 @@ auxiliary model path uses same provider factory).
 
 **Files:** `src/mcp/bridge.c`, `src/config.c`, `src/util/sandbox.c`
 
-- [ ] Config `capabilities` per MCP server (network, fs_read, fs_write, process)
-- [ ] Translate to per-server Landlock + seccomp rules
-- [ ] Missing capabilities → current blanket sandbox (backward compatible)
+- [x] Config `capabilities` per MCP server (network, fs_read, fs_write, process)
+  — fs_read/fs_write/process pre-existed; **network added this slice**
+- [x] Translate to per-server Landlock + seccomp rules — fs caps via Landlock
+  (pre-existing); **seccomp rewritten to be capability-aware** so `process` and
+  `network` are actually enforced
+- [x] Missing capabilities → current blanket sandbox (backward compatible) —
+  the runtime-built filter is equivalent in effect to the prior static denylist
+  when no caps are set
+
+**Recon (2026-06-27):** fs caps were already wired via Landlock, but
+`no_process` was **parsed-but-dead** (the seccomp filter was a static array that
+ignored `opts`) and `network` did not exist. This slice made the seccomp filter
+capability-aware (fixing the dead `no_process`) and added the `network` cap.
+
+**Status (2026-06-27):** ✅ done. `apply_seccomp(opts)` now builds the BPF
+denylist at runtime: base list (unchanged) + `execve/fork/clone` set when
+`process: []`, + `socket/connect` set when `network: []`/`false`.
+`sc_mcp_capabilities_t.no_network` + `sc_sandbox_opts_t.cap_no_network` + config
+parse + bridge/client wiring. Fork-based `test_sandbox` probes verify each cap
+blocks and that defaults still allow (×4).
 
 ### 4.3 Anthropic prompt caching
 
@@ -391,6 +408,19 @@ config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
   **Verification gates:** Release build clean (KC-2 `implicit`=0 after adding the
   `util/json_helpers.h` include); `ctest` 49/49; `check_size_budget.sh`
   minimal-dynamic 277 KB ≤ 1024 KB (+4 KB for the tool); `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 5 — `task/4.2-mcp-capabilities` (task 4.2)** — 2026-06-27. Made the MCP
+  per-server capability sandbox actually enforce process/network. Recon found fs
+  caps already wired (Landlock) but `no_process` parsed-but-dead and `network`
+  missing. Rewrote `apply_seccomp` to build the BPF denylist at runtime
+  (capability-aware): base list unchanged + `execve/execveat/fork/vfork/clone/
+  clone3` when `process: []`, + `socket/connect` (+`socketcall` on 32-bit) when
+  `network: []`/`false`. Added `no_network` to caps + sandbox opts + config parse
+  + bridge/client wiring. New fork-based `test_sandbox` probes (×4: each cap
+  blocks; defaults allow). CONFIGURATION.md updated.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49
+  incl. `test_sandbox` 30/30 (seccomp probes pass — caps block, defaults allow);
+  `check_size_budget.sh` minimal-dynamic 277 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
 
 ---

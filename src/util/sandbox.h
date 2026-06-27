@@ -10,7 +10,8 @@ typedef struct {
     int          cap_fs_read_count;
     const char **cap_fs_write;  /* paths with read-write access */
     int          cap_fs_write_count;
-    int          cap_no_process; /* 1 = block execve/fork in seccomp */
+    int          cap_no_process; /* 1 = block execve/fork/clone in seccomp */
+    int          cap_no_network; /* 1 = block socket/connect in seccomp */
 } sc_sandbox_opts_t;
 
 /* Apply Landlock + seccomp sandbox. Call in child between FD cleanup and exec.

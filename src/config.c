@@ -1274,6 +1274,11 @@ static void load_mcp_config(sc_config_t *cfg, const cJSON *root)
             const cJSON *proc = cJSON_GetObjectItem(caps, "process");
             if (proc && cJSON_IsArray(proc) && cJSON_GetArraySize(proc) == 0)
                 s->caps.no_process = 1;  /* empty array = deny */
+            /* network: [] (empty array) or false = deny outbound sockets. */
+            const cJSON *net = cJSON_GetObjectItem(caps, "network");
+            if ((cJSON_IsArray(net) && cJSON_GetArraySize(net) == 0) ||
+                (cJSON_IsBool(net) && !cJSON_IsTrue(net)))
+                s->caps.no_network = 1;
         }
 
         cfg->mcp.server_count++;

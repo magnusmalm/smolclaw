@@ -289,74 +289,108 @@ landlock_fail:
 
 #ifdef SC_AUDIT_ARCH
 
-/* 32-bit ARM: also block clock_settime64 (musl uses this, not clock_settime) */
-#if defined(__arm__)
-#define SC_SECCOMP_NSYSCALLS 27
-#else
-#define SC_SECCOMP_NSYSCALLS 26
-#endif
-
-/* Helper macro: JEQ for blocked syscall at position i (0-based among N checks) */
-#define SC_SECCOMP_JEQ(nr, i) \
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (nr), (SC_SECCOMP_NSYSCALLS - (i)), 0)
-
 /*
  * KNOWN LIMITATION: This is a denylist (block specific syscalls, allow all
  * others). New kernel syscalls are automatically allowed. For high-security
  * deployments, consider an allowlist-based seccomp policy instead. The
  * denylist approach is chosen here for broad compatibility — an allowlist
  * would break many common tools (git, compilers, package managers, etc.).
+ *
+ * The filter is built at runtime (task 4.2) so per-MCP-server capabilities can
+ * vary the denied set: the base list is always blocked; cap_no_process and
+ * cap_no_network append their syscall sets. With no capabilities set, the
+ * resulting filter is equivalent in effect to the historical static denylist.
  */
-static struct sock_filter sc_seccomp_filter[] = {
-    /* [0] Load architecture */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-    /* [1] If correct arch, skip to [3] */
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SC_AUDIT_ARCH, 1, 0),
-    /* [2] Wrong arch: allow (defense-in-depth) */
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    /* [3] Load syscall number */
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-    /* [4..4+N-1] Blocked syscalls (N = SC_SECCOMP_NSYSCALLS) */
-    SC_SECCOMP_JEQ(__NR_mount,              0),
-    SC_SECCOMP_JEQ(__NR_umount2,            1),
-    SC_SECCOMP_JEQ(__NR_pivot_root,         2),
-    SC_SECCOMP_JEQ(__NR_reboot,             3),
-    SC_SECCOMP_JEQ(__NR_kexec_load,         4),
-    SC_SECCOMP_JEQ(__NR_kexec_file_load,    5),
-    SC_SECCOMP_JEQ(__NR_init_module,        6),
-    SC_SECCOMP_JEQ(__NR_finit_module,       7),
-    SC_SECCOMP_JEQ(__NR_delete_module,      8),
-    SC_SECCOMP_JEQ(__NR_ptrace,             9),
-    SC_SECCOMP_JEQ(__NR_process_vm_readv,   10),
-    SC_SECCOMP_JEQ(__NR_process_vm_writev,  11),
-    SC_SECCOMP_JEQ(__NR_swapon,             12),
-    SC_SECCOMP_JEQ(__NR_swapoff,            13),
-    SC_SECCOMP_JEQ(__NR_settimeofday,       14),
-    SC_SECCOMP_JEQ(__NR_clock_settime,      15),
-    SC_SECCOMP_JEQ(__NR_sethostname,        16),
-    SC_SECCOMP_JEQ(__NR_setdomainname,      17),
-    SC_SECCOMP_JEQ(__NR_bpf,               18),
-    SC_SECCOMP_JEQ(__NR_perf_event_open,    19),
-    SC_SECCOMP_JEQ(__NR_userfaultfd,        20),
-    SC_SECCOMP_JEQ(__NR_move_pages,         21),
-    SC_SECCOMP_JEQ(__NR_migrate_pages,      22),
-    SC_SECCOMP_JEQ(__NR_keyctl,             23),
-    SC_SECCOMP_JEQ(__NR_request_key,        24),
-    SC_SECCOMP_JEQ(__NR_add_key,            25),
+
+/* Base denylist — blocked for every sandboxed child. clock_settime64 is added
+ * on 32-bit ARM (the syscall musl actually uses there). */
+static const int sc_seccomp_base[] = {
+    __NR_mount, __NR_umount2, __NR_pivot_root, __NR_reboot,
+    __NR_kexec_load, __NR_kexec_file_load, __NR_init_module,
+    __NR_finit_module, __NR_delete_module, __NR_ptrace,
+    __NR_process_vm_readv, __NR_process_vm_writev, __NR_swapon,
+    __NR_swapoff, __NR_settimeofday, __NR_clock_settime,
+    __NR_sethostname, __NR_setdomainname, __NR_bpf,
+    __NR_perf_event_open, __NR_userfaultfd, __NR_move_pages,
+    __NR_migrate_pages, __NR_keyctl, __NR_request_key, __NR_add_key,
 #if defined(__arm__)
-    SC_SECCOMP_JEQ(__NR_clock_settime64,    26),
+    __NR_clock_settime64,
 #endif
-    /* Default: ALLOW */
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    /* ERRNO(EPERM) for blocked syscalls */
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA)),
 };
 
-static int apply_seccomp(void)
+/* Process-creation syscalls — appended when cap_no_process is set.
+ * fork/vfork do not exist on aarch64 (it uses clone); clone3 is recent. */
+static const int sc_seccomp_no_process[] = {
+    __NR_execve,
+#ifdef __NR_execveat
+    __NR_execveat,
+#endif
+#ifdef __NR_fork
+    __NR_fork,
+#endif
+#ifdef __NR_vfork
+    __NR_vfork,
+#endif
+    __NR_clone,
+#ifdef __NR_clone3
+    __NR_clone3,
+#endif
+};
+
+/* Network syscalls — appended when cap_no_network is set. socketcall is the
+ * legacy multiplexer on 32-bit arches; absent on x86_64/aarch64. */
+static const int sc_seccomp_no_network[] = {
+    __NR_socket, __NR_connect,
+#ifdef __NR_socketcall
+    __NR_socketcall,
+#endif
+};
+
+#define SC_ARRLEN(a) ((int)(sizeof(a) / sizeof((a)[0])))
+
+/* Build and install a seccomp-bpf denylist tailored to `opts`.
+ *
+ * Filter layout (BPF):
+ *   [0] load arch; [1] if correct-arch skip to [3] else [2] ALLOW;
+ *   [3] load nr; [4..4+N-1] one JEQ per blocked syscall jumping to ERRNO;
+ *   [4+N] ALLOW (default); [4+N+1] ERRNO(EPERM).
+ * A matching syscall at index i jumps (N - i) forward to reach ERRNO. */
+static int apply_seccomp(const sc_sandbox_opts_t *opts)
 {
+    int blocked[SC_ARRLEN(sc_seccomp_base)
+                + SC_ARRLEN(sc_seccomp_no_process)
+                + SC_ARRLEN(sc_seccomp_no_network)];
+    int n = 0;
+    for (int i = 0; i < SC_ARRLEN(sc_seccomp_base); i++)
+        blocked[n++] = sc_seccomp_base[i];
+    if (opts && opts->cap_no_process)
+        for (int i = 0; i < SC_ARRLEN(sc_seccomp_no_process); i++)
+            blocked[n++] = sc_seccomp_no_process[i];
+    if (opts && opts->cap_no_network)
+        for (int i = 0; i < SC_ARRLEN(sc_seccomp_no_network); i++)
+            blocked[n++] = sc_seccomp_no_network[i];
+
+    struct sock_filter filter[6 + SC_ARRLEN(sc_seccomp_base)
+                              + SC_ARRLEN(sc_seccomp_no_process)
+                              + SC_ARRLEN(sc_seccomp_no_network)];
+    int k = 0;
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+                      offsetof(struct seccomp_data, arch));
+    filter[k++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                      SC_AUDIT_ARCH, 1, 0);
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+                      offsetof(struct seccomp_data, nr));
+    for (int i = 0; i < n; i++)
+        filter[k++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
+                          blocked[i], (n - i), 0);
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K,
+                      SECCOMP_RET_ERRNO | (EPERM & SECCOMP_RET_DATA));
+
     struct sock_fprog fprog = {
-        .len = (unsigned short)(sizeof(sc_seccomp_filter) / sizeof(sc_seccomp_filter[0])),
-        .filter = sc_seccomp_filter,
+        .len = (unsigned short)k,
+        .filter = filter,
     };
 
     if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &fprog) != 0) {
@@ -373,8 +407,9 @@ static int apply_seccomp(void)
 
 #else /* !SC_AUDIT_ARCH */
 
-static int apply_seccomp(void)
+static int apply_seccomp(const sc_sandbox_opts_t *opts)
 {
+    (void)opts;
     SC_LOG_WARN(LOG_TAG, "seccomp-bpf not supported on this architecture — skipping");
     return 0;
 }
@@ -405,7 +440,7 @@ int sc_sandbox_apply(const sc_sandbox_opts_t *opts)
     }
 
     /* Apply seccomp (syscall restrictions) */
-    if (apply_seccomp() != 0) {
+    if (apply_seccomp(opts) != 0) {
         SC_LOG_WARN(LOG_TAG, "seccomp setup failed — continuing without syscall sandbox");
         rc = -1;
     }

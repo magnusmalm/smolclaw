@@ -201,7 +201,8 @@ typedef struct {
     int    fs_read_count;
     char **fs_write;      /* paths with read-write access */
     int    fs_write_count;
-    int    no_process;    /* 1 = block execve/fork in seccomp */
+    int    no_process;    /* 1 = block execve/fork/clone in seccomp */
+    int    no_network;    /* 1 = block socket/connect in seccomp */
 } sc_mcp_capabilities_t;
 
 /* MCP server config */

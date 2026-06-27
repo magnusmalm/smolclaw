@@ -142,7 +142,8 @@ sc_mcp_bridge_t *sc_mcp_bridge_start(const sc_mcp_config_t *cfg,
         /* Pass per-server capabilities if configured */
         const void *caps = (srv->caps.fs_read_count > 0 ||
                             srv->caps.fs_write_count > 0 ||
-                            srv->caps.no_process) ? &srv->caps : NULL;
+                            srv->caps.no_process ||
+                            srv->caps.no_network) ? &srv->caps : NULL;
 
         sc_mcp_client_t *client = sc_mcp_client_start(
             srv->name, srv->command, srv->command_count,

@@ -363,6 +363,8 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             }
             if (mcaps && mcaps->no_process)
                 sandbox_opts.cap_no_process = 1;
+            if (mcaps && mcaps->no_network)
+                sandbox_opts.cap_no_network = 1;
 
             sc_sandbox_apply(&sandbox_opts);
             setenv("TMPDIR", tmpdir, 1);

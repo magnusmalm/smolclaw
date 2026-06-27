@@ -356,12 +356,17 @@ Each `servers.<name>`:
 
 | Key      | Type     | Default   | Description                         |
 |----------|----------|-----------|-------------------------------------|
-| fs_read  | string[] | []        | Paths granted read-only access.     |
-| fs_write | string[] | []        | Paths granted read-write access.    |
-| process  | array    | (allowed) | Set to [] to block execve/fork. [1] |
+| fs_read  | string[]      | []        | Paths granted read-only access.     |
+| fs_write | string[]      | []        | Paths granted read-write access.    |
+| process  | array         | (allowed) | Set to [] to block execve/fork/clone. [1] |
+| network  | array \| bool | (allowed) | Set to [] or false to block socket/connect. [2] |
 
 - [1] Only an empty array (`"process": []`) denies process creation in
-  seccomp; omitting the key leaves exec/fork allowed.
+  seccomp (blocks `execve`/`execveat`/`fork`/`vfork`/`clone`/`clone3`); omitting
+  the key leaves them allowed.
+- [2] `"network": []` or `"network": false` denies outbound sockets in seccomp
+  (blocks `socket`/`connect`); omitting the key leaves networking allowed. Useful
+  for MCP servers that should only touch the filesystem.
 
 ## `delegation` — remote agent delegation (`SC_ENABLE_DELEGATE`)
 
