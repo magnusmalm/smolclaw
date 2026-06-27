@@ -43,6 +43,13 @@ typedef struct sc_agent {
     int compress_tool_results;
     int compress_keep_recent;
     int compress_min_bytes;
+    /* Task 4.12: agent-initiated compact tool. active_session_key is the
+     * borrowed session key of the in-flight turn (set by run_agent_loop) so the
+     * tool can target it; last_compact_time + compact_cooldown_secs rate-limit
+     * agent-requested compactions. */
+    const char *active_session_key;
+    long last_compact_time;
+    int compact_cooldown_secs;
     /* Automatic session reset policy (task 3.7) */
     int session_reset_mode;        /* sc_session_reset_mode_t */
     int session_reset_daily_hour;
@@ -181,6 +188,18 @@ void sc_agent_add_transform(sc_agent_t *agent, const char *name,
  * `min_bytes`. Pure — unit-tested in test_agent.c. */
 int sc_mask_should_compress(int index, int count, int keep_recent,
                             size_t len, int min_bytes);
+
+/* Task 4.12: force-compact a session now (same path as the /compress slash
+ * command): lower the summary threshold for one call so summarization fires
+ * regardless of size, then restore it. Returns 0 if compaction was scheduled,
+ * -1 if the session is already at/below keep_last (nothing to compact). */
+int sc_agent_compact_session(sc_agent_t *agent, const char *session_key);
+
+/* Pure cooldown decision for the agent-initiated compact tool: returns 1 if a
+ * compaction is allowed at `now` given the `last` compaction time and the
+ * `cooldown_secs` minimum interval. A non-positive `last` (never compacted) or
+ * `cooldown_secs <= 0` always allows. Unit-tested. */
+int sc_compact_cooldown_ok(long now, long last, int cooldown_secs);
 
 /* Hot-reload safe config fields (limits, allowlist, rate limits) */
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg);

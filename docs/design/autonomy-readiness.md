@@ -131,7 +131,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |
 | 4.10 updater split spike | ✅ READY | Q4 resolved: no split; measure under section-GC (0.4), revisit only if >50 KB proven |
 | 4.11 global `session_search` | ✅ READY | Kconfig default n |
-| 4.12 agent-initiated compact tool | ✅ READY | After 2.10 slash `/compress` |
+| 4.12 agent-initiated compact tool | 🔵 SHIPPED | `compact` tool + shared `sc_agent_compact_session` + cooldown/budget guards; `test_agent` |
 | 4.13 post-turn memory review | ✅ READY | Opt-in; acceptance mockable (aux provider optional) |
 | 4.14 staged memory writes | ✅ READY | Pairs with 4.13 |
 

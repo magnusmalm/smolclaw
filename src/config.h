@@ -271,6 +271,9 @@ typedef struct {
     /* Task 4.7: `smolclaw context` warns when estimated prompt tokens reach
      * this percent of the model context window (0 = never warn). */
     int context_warn_pct;
+    /* Task 4.12: minimum seconds between agent-initiated `compact` tool calls
+     * (0 = no cooldown). Default 300 (5 min). */
+    int compact_cooldown_secs;
     int max_output_chars;
     int max_tool_result_chars;     /* spill a single tool result to disk above this (0 = default) */
     int tool_result_preview_chars; /* preview kept inline after spill */

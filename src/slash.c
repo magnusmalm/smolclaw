@@ -90,20 +90,11 @@ static char *cmd_model(sc_agent_t *agent, const char *arg)
 
 static char *cmd_compress(sc_agent_t *agent, const char *session_key)
 {
-    int count = 0;
-    sc_session_get_history(agent->sessions, session_key, &count);
-    if (count <= agent->session_keep_last)
+    /* Shared path with the agent-initiated compact tool (task 4.12). The slash
+     * command has no cooldown — a human asking to compress should not be
+     * rate-limited. */
+    if (sc_agent_compact_session(agent, session_key) != 0)
         return sc_strdup("Nothing to compress yet.");
-
-    /* Force summarization regardless of the normal threshold by lowering it
-     * for this call. sc_maybe_summarize() reads the threshold and builds the
-     * transcript synchronously before spawning the worker, so restoring it
-     * immediately is safe. */
-    int saved = agent->session_summary_threshold;
-    agent->session_summary_threshold = agent->session_keep_last;
-    sc_maybe_summarize(agent, session_key, 0, NULL);
-    agent->session_summary_threshold = saved;
-
     return sc_strdup("Compressing this session (summarization scheduled).");
 }
 

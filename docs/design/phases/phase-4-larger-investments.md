@@ -251,13 +251,25 @@ regression test); M-9 deferred with rationale.
 
 **Files:** `src/tools/` (new `compact_tool.c` or extend session tool), `src/agent_session.c`
 
-- [ ] Register `compact` tool (or `session_compact`) callable by agent mid-workflow
-- [ ] Triggers same summarization path as `/compress` slash command (2.10)
-- [ ] Cooldown guard: min interval between compactions (config, default 5 min)
-- [ ] Budget guard: refuse if session below threshold (avoid pointless compaction)
-- [ ] Scratchpad + action log reinjection preserved (existing compaction resilience)
+- [x] Register `compact` tool callable by agent mid-workflow (`src/tools/compact.c`,
+  registered next to spawn; always available)
+- [x] Triggers same summarization path as `/compress` — both now route through
+  the shared `sc_agent_compact_session()` (slash.c refactored to reuse it)
+- [x] Cooldown guard: `compact_cooldown_secs` (config, default 300); pure
+  decision `sc_compact_cooldown_ok()` (unit-tested). The slash command is
+  deliberately NOT rate-limited (human intent)
+- [x] Budget guard: refuses when session is at/below `keep_last` (returns a
+  "already compact" message)
+- [x] Scratchpad + action log reinjection preserved (reuses the existing
+  `sc_maybe_summarize` compaction path unchanged)
+- [x] Tool reaches the in-flight session via a new borrowed `agent->active_session_key`
+  set per-turn in `run_agent_loop` (save/restore handles spawn reentrancy)
 
 **Complements:** Phase 1 auto-compaction (proactive) vs agent-initiated (explicit).
+
+**Status (2026-06-27):** ✅ done. `compact` tool + shared
+`sc_agent_compact_session` + cooldown/budget guards + `compact_cooldown_secs`
+config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
 
 ### 4.13 Post-turn memory review (Tier 4)
 
@@ -367,6 +379,18 @@ regression test); M-9 deferred with rationale.
   README updated.
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 49/49;
   `check_size_budget.sh` minimal-dynamic 273 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 4 — `task/4.12-compact-tool` (task 4.12)** — 2026-06-27.
+  Agent-initiated `compact` tool (`src/tools/compact.{c,h}`) that summarizes the
+  current session mid-workflow. New shared `sc_agent_compact_session()` (slash
+  `/compress` refactored to reuse it), cooldown guard
+  (`compact_cooldown_secs`/`sc_compact_cooldown_ok`, default 300s) + budget
+  guard, and a per-turn borrowed `agent->active_session_key` (save/restore for
+  spawn reentrancy) so the tool can target the in-flight session. Test in
+  `test_agent.c`; CONFIGURATION.md updated.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0 after adding the
+  `util/json_helpers.h` include); `ctest` 49/49; `check_size_budget.sh`
+  minimal-dynamic 277 KB ≤ 1024 KB (+4 KB for the tool); `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
 
 ---

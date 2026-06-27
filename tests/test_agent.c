@@ -1461,6 +1461,21 @@ static void test_mask_should_compress(void)
     ASSERT_INT_EQ(sc_mask_should_compress(0, count, keep, 1, 0), 1);
 }
 
+/* Task 4.12: agent-initiated compact cooldown decision. */
+static void test_compact_cooldown_ok(void)
+{
+    /* Never compacted (last <= 0) → always allowed. */
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(1000, 0, 300), 1);
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(1000, -1, 300), 1);
+    /* No cooldown configured → always allowed. */
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(1000, 900, 0), 1);
+    /* Within the cooldown window → blocked. */
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(1000, 900, 300), 0);   /* 100s < 300s */
+    /* Exactly at / past the window → allowed. */
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(1200, 900, 300), 1);   /* 300s == 300s */
+    ASSERT_INT_EQ(sc_compact_cooldown_ok(2000, 900, 300), 1);
+}
+
 /* ======================================================================
  * Integration tests for pi-mono-inspired features
  * ====================================================================== */
@@ -2063,6 +2078,7 @@ int main(void)
     RUN_TEST(test_context_transform_stop_chain);
     RUN_TEST(test_no_transforms);
     RUN_TEST(test_mask_should_compress);
+    RUN_TEST(test_compact_cooldown_ok);
     /* Integration tests for pi-mono features */
     RUN_TEST(test_integ_parallel_read_only);
     RUN_TEST(test_integ_mixed_parallel_sequential);

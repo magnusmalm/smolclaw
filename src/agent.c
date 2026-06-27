@@ -28,6 +28,7 @@
 #include "tools/message.h"
 #include "tools/memory_tools.h"
 #include "tools/scratchpad.h"
+#include "tools/compact.h"
 #include "providers/factory.h"
 #include "memory.h"
 #include "util/str.h"
@@ -628,6 +629,9 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     sc_tool_registry_register(agent->tools, sc_tool_spawn_new(agent));
 #endif
 
+    /* Compact tool (task 4.12: agent-initiated session compaction) */
+    sc_tool_registry_register(agent->tools, sc_tool_compact_new(agent));
+
     /* Delegate + converse tools (agent-to-agent task routing) */
 #if SC_ENABLE_DELEGATE
     if (cfg->delegation.target_count > 0) {
@@ -1012,6 +1016,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->compress_tool_results = cfg->compress_tool_results;
     agent->compress_keep_recent = cfg->compress_keep_recent;
     agent->compress_min_bytes = cfg->compress_min_bytes;
+    agent->compact_cooldown_secs = cfg->compact_cooldown_secs;
     agent->session_reset_mode = cfg->session_reset.mode;
     agent->session_reset_daily_hour = cfg->session_reset.daily_reset_hour;
     agent->session_reset_idle_min = cfg->session_reset.idle_minutes;
@@ -1262,6 +1267,33 @@ void sc_agent_wait_summarize(sc_agent_t *agent)
     sc_drain_summarize(agent);
 }
 
+int sc_agent_compact_session(sc_agent_t *agent, const char *session_key)
+{
+    if (!agent || !session_key || !session_key[0]) return -1;
+
+    int count = 0;
+    sc_session_get_history(agent->sessions, session_key, &count);
+    if (count <= agent->session_keep_last)
+        return -1;  /* already small — nothing worth compacting */
+
+    /* Force summarization regardless of the normal threshold by lowering it
+     * for this call. sc_maybe_summarize() reads the threshold and builds the
+     * transcript synchronously before spawning the worker, so restoring it
+     * immediately is safe. Scratchpad + action-log reinjection is preserved by
+     * the existing compaction path. */
+    int saved = agent->session_summary_threshold;
+    agent->session_summary_threshold = agent->session_keep_last;
+    sc_maybe_summarize(agent, session_key, 0, NULL);
+    agent->session_summary_threshold = saved;
+    return 0;
+}
+
+int sc_compact_cooldown_ok(long now, long last, int cooldown_secs)
+{
+    if (last <= 0 || cooldown_secs <= 0) return 1;
+    return (now - last) >= (long)cooldown_secs;
+}
+
 void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
 {
     if (!agent || !cfg) return;
@@ -1279,6 +1311,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->compress_tool_results = cfg->compress_tool_results;
     agent->compress_keep_recent = cfg->compress_keep_recent;
     agent->compress_min_bytes = cfg->compress_min_bytes;
+    agent->compact_cooldown_secs = cfg->compact_cooldown_secs;
     agent_set_warmup(agent, cfg);
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
@@ -1764,6 +1797,13 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     /* Save user message to session (stripped of alias prefix) */
     sc_session_add_message(agent->sessions, session_key, "user", actual_message);
 
+    /* Task 4.12: expose the session being processed so an agent-initiated
+     * compact tool can target it (tools don't otherwise receive the key).
+     * Save/restore handles spawn reentrancy (a subagent's run_agent_loop runs
+     * here with a different key while a parent tool is mid-execution). */
+    const char *prev_active_session = agent->active_session_key;
+    agent->active_session_key = session_key;
+
     /* Run LLM iteration loop */
     int iterations = 0;
     char *failure_reason = NULL;
@@ -1871,6 +1911,7 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     SC_LOG_INFO("agent", "Response (%d iterations): %s", iterations, preview ? preview : "");
     free(preview);
 
+    agent->active_session_key = prev_active_session;
     return final_content;
 }
 
