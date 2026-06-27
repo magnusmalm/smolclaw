@@ -209,6 +209,9 @@ typedef struct {
     int max_tool_result_chars;     /* spill a single tool result to disk above this (0 = default) */
     int tool_result_preview_chars; /* preview kept inline after spill */
     int tool_selection;            /* 0 = fixed (all tools), 1 = auto (keyword heuristic) */
+    int warmup;                    /* prompt-prefix warmup for local providers (default 0) */
+    char **warmup_providers;       /* provider names eligible for warmup (default ollama, vllm) */
+    int warmup_provider_count;
     int max_fetch_chars;
     int max_background_procs;
     int summary_max_transcript;

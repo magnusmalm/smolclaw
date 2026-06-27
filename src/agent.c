@@ -928,6 +928,27 @@ static int mask_old_observations(sc_context_snap_t *snap, void *userdata)
     return 0;
 }
 
+/* Copy the warmup config from cfg into the agent, freeing any prior list. */
+static void agent_set_warmup(sc_agent_t *agent, const sc_config_t *cfg)
+{
+    agent->warmup = cfg->warmup;
+    for (int i = 0; i < agent->warmup_provider_count; i++)
+        free(agent->warmup_providers[i]);
+    free(agent->warmup_providers);
+    agent->warmup_providers = NULL;
+    agent->warmup_provider_count = 0;
+    if (cfg->warmup_provider_count > 0) {
+        agent->warmup_providers = calloc((size_t)cfg->warmup_provider_count,
+                                         sizeof(char *));
+        if (agent->warmup_providers) {
+            for (int i = 0; i < cfg->warmup_provider_count; i++) {
+                agent->warmup_providers[i] = sc_strdup(cfg->warmup_providers[i]);
+                agent->warmup_provider_count++;
+            }
+        }
+    }
+}
+
 /* ======================================================================
  * Public API
  * ====================================================================== */
@@ -957,6 +978,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->session_keep_last = cfg->session_keep_last;
     agent->max_output_chars = cfg->max_output_chars;
     agent->tool_selection = cfg->tool_selection;
+    agent_set_warmup(agent, cfg);
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->max_background_procs = cfg->max_background_procs;
     agent->summary_max_transcript = cfg->summary_max_transcript;
@@ -1101,6 +1123,9 @@ void sc_agent_free(sc_agent_t *agent)
             agent->fallback_providers[i]->destroy(agent->fallback_providers[i]);
         free(agent->fallback_models[i]);
     }
+    for (int i = 0; i < agent->warmup_provider_count; i++)
+        free(agent->warmup_providers[i]);
+    free(agent->warmup_providers);
     free(agent->fallback_providers);
     free(agent->fallback_models);
     /* Alias providers (owned) */
@@ -1208,6 +1233,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;
     agent->tool_selection = cfg->tool_selection;
+    agent_set_warmup(agent, cfg);
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
     cJSON_Delete(agent->response_format);

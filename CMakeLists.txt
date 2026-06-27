@@ -265,6 +265,7 @@ set(SC_SOURCES
     src/providers/http.c
     src/providers/claude.c
     src/providers/stream_buffer.c
+    src/providers/warmup.c
     src/providers/factory.c
     src/pairing.c
     src/rate_limit.c
@@ -504,6 +505,7 @@ set(TEST_SOURCES
     tests/test_tool_selection.c
     tests/test_json_compact.c
     tests/test_stream_buffer.c
+    tests/test_warmup.c
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_exec_safety.c

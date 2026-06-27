@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include "bus.h"
 #include "skill.h"
 #include "util/arena.h"
@@ -41,6 +42,10 @@ typedef struct sc_agent {
     int max_output_chars;
     int max_fetch_chars;
     int tool_selection;         /* 0 = fixed (all tools), 1 = auto (keyword heuristic) */
+    int warmup;                 /* prompt-prefix warmup for local providers (default 0) */
+    char **warmup_providers;    /* provider names eligible for warmup (owned) */
+    int warmup_provider_count;
+    uint32_t last_warmup_fingerprint;  /* skip warmup if (provider+model+sys+tools) unchanged */
     int max_background_procs;
     int summary_max_transcript;
     int exec_timeout_secs;

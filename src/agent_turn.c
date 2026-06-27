@@ -23,6 +23,7 @@
 #include "logger.h"
 #include "session.h"
 #include "providers/stream_buffer.h"
+#include "providers/warmup.h"
 #include "tools/tool_selection.h"
 #include "util/json_compact.h"
 #include "util/str.h"
@@ -1657,6 +1658,11 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     if (agent->tool_selection == SC_TOOL_SELECTION_AUTO)
         tool_count = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO,
                                              tc.user_intent, tool_defs, tool_count);
+
+    /* 1.8: prime a local model's prefix cache once per (provider, model, system
+     * prompt, tool set) fingerprint change. No-op unless warmup is enabled. */
+    sc_warmup_maybe(agent, provider, model, tc.msgs, tc.msgs_len,
+                    tool_defs, tool_count);
 
     while (iteration < agent->max_iterations) {
         iteration++;

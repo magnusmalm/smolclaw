@@ -484,6 +484,7 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     const char *tool_sel_env = getenv("SMOLCLAW_AGENTS_DEFAULTS_TOOL_SELECTION");
     if (tool_sel_env)
         cfg->tool_selection = (strcmp(tool_sel_env, "auto") == 0) ? 1 : 0;
+    env_override_bool(&cfg->warmup, "SMOLCLAW_AGENTS_DEFAULTS_WARMUP");
     env_override_int(&cfg->max_fetch_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_FETCH_CHARS");
     env_override_int(&cfg->max_background_procs, "SMOLCLAW_AGENTS_DEFAULTS_MAX_BACKGROUND_PROCS");
     env_override_int(&cfg->summary_max_transcript, "SMOLCLAW_AGENTS_DEFAULTS_SUMMARY_MAX_TRANSCRIPT");
@@ -720,6 +721,13 @@ sc_config_t *sc_config_default(void)
     cfg->max_tool_result_chars = SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
     cfg->tool_result_preview_chars = SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
     cfg->tool_selection = 0;  /* fixed (send all tools) */
+    cfg->warmup = 0;
+    cfg->warmup_providers = calloc(2, sizeof(char *));
+    if (cfg->warmup_providers) {
+        cfg->warmup_providers[0] = sc_strdup("ollama");
+        cfg->warmup_providers[1] = sc_strdup("vllm");
+        cfg->warmup_provider_count = 2;
+    }
     cfg->max_fetch_chars      = SC_MAX_FETCH_CHARS;
     cfg->max_background_procs = SC_BG_MAX_PROCS;
     cfg->summary_max_transcript = SC_SUMMARY_MAX_TRANSCRIPT;
@@ -873,6 +881,17 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     const char *tool_sel = sc_json_get_string(defaults, "tool_selection", NULL);
     if (tool_sel)
         cfg->tool_selection = (strcmp(tool_sel, "auto") == 0) ? 1 : 0;
+    const cJSON *local_opt = sc_json_get_object(defaults, "local_optimizations");
+    if (local_opt) {
+        cfg->warmup = sc_json_get_bool(local_opt, "warmup", cfg->warmup);
+        cJSON *wp = sc_json_get_array(local_opt, "warmup_providers");
+        if (wp) {
+            for (int i = 0; i < cfg->warmup_provider_count; i++)
+                free(cfg->warmup_providers[i]);
+            free(cfg->warmup_providers);
+            cfg->warmup_providers = sc_json_parse_string_list(wp, &cfg->warmup_provider_count);
+        }
+    }
     cfg->max_fetch_chars = sc_json_get_int(defaults,
         "max_fetch_chars", cfg->max_fetch_chars);
     cfg->max_background_procs = sc_json_get_int(defaults,
@@ -1505,6 +1524,14 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddNumberToObject(defaults, "max_tool_result_chars", cfg->max_tool_result_chars);
     cJSON_AddNumberToObject(defaults, "tool_result_preview_chars", cfg->tool_result_preview_chars);
     cJSON_AddStringToObject(defaults, "tool_selection", cfg->tool_selection == 1 ? "auto" : "fixed");
+    cJSON *local_opt_obj = cJSON_AddObjectToObject(defaults, "local_optimizations");
+    if (local_opt_obj) {
+        cJSON_AddBoolToObject(local_opt_obj, "warmup", cfg->warmup);
+        cJSON *wp_arr = cJSON_AddArrayToObject(local_opt_obj, "warmup_providers");
+        for (int i = 0; wp_arr && i < cfg->warmup_provider_count; i++)
+            if (cfg->warmup_providers[i])
+                cJSON_AddItemToArray(wp_arr, cJSON_CreateString(cfg->warmup_providers[i]));
+    }
     cJSON_AddNumberToObject(defaults, "max_fetch_chars", cfg->max_fetch_chars);
     cJSON_AddNumberToObject(defaults, "max_background_procs", cfg->max_background_procs);
     cJSON_AddNumberToObject(defaults, "summary_max_transcript", cfg->summary_max_transcript);
@@ -1815,6 +1842,9 @@ void sc_config_free(sc_config_t *cfg)
     for (int i = 0; i < cfg->fallback_model_count; i++)
         free(cfg->fallback_models[i]);
     free(cfg->fallback_models);
+    for (int i = 0; i < cfg->warmup_provider_count; i++)
+        free(cfg->warmup_providers[i]);
+    free(cfg->warmup_providers);
     for (int i = 0; i < cfg->allowed_tool_count; i++)
         free(cfg->allowed_tools[i]);
     free(cfg->allowed_tools);

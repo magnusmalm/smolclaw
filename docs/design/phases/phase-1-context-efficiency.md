@@ -1,6 +1,6 @@
 # Phase 1: Context Efficiency
 
-**Status**: Not started  
+**Status**: Complete (2026-06-27) — code landed on stacked `task/1.*` branches; 1.5/1.8 live-Ollama benchmarks are manual 🟠 acceptances  
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Prerequisite**: [Phase 0](phase-0-safety-and-stability.md) complete  
 **Goal**: Reduce token waste and improve local-model behavior without new channels.  
@@ -160,13 +160,26 @@ is a manual 🟠 check; the buffer logic is unit-tested.
 
 **Source:** smallharness-integration task 2
 
-**Files:** new `src/providers/warmup.c`, `src/providers/http.c`, `src/agent.c`
+**Files:** new `src/providers/warmup.{c,h}`, `src/agent.{c,h}`, `src/config.{c,h}`,
+`src/agent_turn.c`, `CMakeLists.txt`, new `tests/test_warmup.c`
 
-- [ ] Config: `local_optimizations.warmup` (default **false**)
-- [ ] Provider allowlist: ollama, vllm (configurable)
-- [ ] Non-streaming request, `max_tokens: 1`, full system + tools
-- [ ] Fingerprint: backend + model + system prompt + tool set; skip if unchanged
-- [ ] Once per agent session on fingerprint change (not every message)
+> **Status (2026-06-27): code done; live benefit is a manual 🟠 check.**
+> `sc_warmup_maybe` sends a non-streaming `max_tokens=1` request to prime the
+> local model's prefix cache, gated on a fingerprint so it fires once per
+> (provider, model, system prompt, tool set) change. Called before the turn
+> loop. The TTFT improvement can only be measured on a real Ollama/vLLM server.
+
+- [x] Config: `local_optimizations.warmup` (default **false**) + `warmup_providers`
+  (JSON nested object, env `SMOLCLAW_AGENTS_DEFAULTS_WARMUP`, serialization)
+- [x] Provider allowlist: ollama, vllm (configurable via `warmup_providers`)
+- [x] Non-streaming request, `max_tokens: 1`, full system + tools
+- [x] Fingerprint: provider + model + system prompt + tool names (FNV1a); skip if unchanged
+- [x] Once per agent session on fingerprint change (not every message)
+
+**Verification gates (2026-06-27):** KC-2 clean; `ctest --test-dir build` **43/43**;
+`test_warmup` 11/0 (enable / allowlist / fingerprint-skip / max_tokens=1), `test_config` 102/0,
+`test_agent` 177/0; minimal-dynamic **257 KB ≤ 1024 KB**. No new Kconfig flag. **Manual acceptance
+(deferred):** reduced time-to-first-token on a live Ollama/vLLM after warmup.
 
 ---
 
