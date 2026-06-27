@@ -22,6 +22,7 @@
 #include "audit.h"
 #include "logger.h"
 #include "session.h"
+#include "tools/tool_selection.h"
 #include "util/str.h"
 #include "util/secrets.h"
 #include "util/prompt_guard.h"
@@ -1632,6 +1633,12 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     int tool_count = 0;
     sc_tool_definition_t *tool_defs = sc_tool_registry_to_defs_filtered(
         agent->tools, &tool_count, ch_tools, ch_tool_count);
+
+    /* 1.5: adaptive tool selection — in "auto" mode, send only the tools
+     * relevant to the user's message (keyword heuristic), per turn. */
+    if (agent->tool_selection == SC_TOOL_SELECTION_AUTO)
+        tool_count = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO,
+                                             tc.user_intent, tool_defs, tool_count);
 
     while (iteration < agent->max_iterations) {
         iteration++;

@@ -208,6 +208,7 @@ typedef struct {
     int max_output_chars;
     int max_tool_result_chars;     /* spill a single tool result to disk above this (0 = default) */
     int tool_result_preview_chars; /* preview kept inline after spill */
+    int tool_selection;            /* 0 = fixed (all tools), 1 = auto (keyword heuristic) */
     int max_fetch_chars;
     int max_background_procs;
     int summary_max_transcript;

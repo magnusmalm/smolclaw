@@ -250,6 +250,7 @@ set(SC_SOURCES
     src/agent_session.c
     src/audit.c
     src/tools/registry.c
+    src/tools/tool_selection.c
     src/tools/host.c
     src/tools/schema_validate.c
     src/tools/exec_common.c
@@ -498,6 +499,7 @@ set(TEST_SOURCES
     tests/test_providers.c
     tests/test_pairing.c
     tests/test_channel_manager.c
+    tests/test_tool_selection.c
     tests/test_agent.c
     tests/test_sandbox.c
     tests/test_exec_safety.c

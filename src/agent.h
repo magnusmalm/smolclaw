@@ -40,6 +40,7 @@ typedef struct sc_agent {
     int session_keep_last;
     int max_output_chars;
     int max_fetch_chars;
+    int tool_selection;         /* 0 = fixed (all tools), 1 = auto (keyword heuristic) */
     int max_background_procs;
     int summary_max_transcript;
     int exec_timeout_secs;

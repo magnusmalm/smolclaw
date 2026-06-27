@@ -89,16 +89,28 @@
 
 **Source:** [`smallharness-integration.md`](../smallharness-integration.md) task 1, SmallHarness `tools/mod.rs`
 
-**Files:** new `src/tools/tool_selection.c`, `src/agent_turn.c`, `src/config.c`
+**Files:** new `src/tools/tool_selection.{c,h}`, `src/agent_turn.c`, `src/config.{c,h}`,
+`src/agent.{c,h}`, `CMakeLists.txt`, new `tests/test_tool_selection.c`
 
 > **Decision (Q1, 2026-06-26):** runtime config only — **no Kconfig flag**
-> (+5 KB is below the gating threshold and the default is no-op). See
+> (+~8 KB is below the gating threshold and the default is no-op). See
 > `autonomy-readiness.md` §3.
 
-- [ ] Config: `tool_selection`: `"fixed"` | `"auto"` (default **`fixed`**)
-- [ ] Keyword heuristics: chat → no tools; fileish → read/search; editish → write tools; shellish → exec
-- [ ] Ceiling = enabled tool pool (Kconfig + config allowlist)
-- [ ] Log selected tools at DEBUG
+> **Status (2026-06-27): done.** New `tool_selection` module classifies the
+> user message and compacts the tool-def array in place per turn when
+> `tool_selection: auto`. Default `fixed` = unchanged behavior.
+
+- [x] Config: `tool_selection`: `"fixed"` | `"auto"` (default **`fixed`**) — JSON, env override,
+  serialization; wired to the agent and applied at `agent_turn.c` after `to_defs`
+- [x] Keyword heuristics: greeting → only unknown tools; fileish → read/search/memory; editish →
+  +write/edit; shellish → +exec; webish → web; ambiguous → keep all (never starve the model)
+- [x] Ceiling = enabled tool pool (runs on the already-filtered `to_defs` output); **unknown/MCP/skill
+  tools always kept** (except pure greetings)
+- [x] Log selected tools at DEBUG (`SC_LOG_DEBUG`)
+
+**Verification gates (2026-06-27):** KC-2 clean; `ctest --test-dir build` **40/40**;
+new `test_tool_selection` 25/0 (greeting / fileish / editish / shellish / ambiguous / fixed paths),
+`test_config` 102/0, `test_agent` 177/0; minimal-dynamic **253 KB ≤ 1024 KB**. No new Kconfig flag.
 
 **Acceptance:** Ollama turn with "hello" sends zero tool schemas; "grep for config in src" sends read/search subset.
 

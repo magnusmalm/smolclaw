@@ -481,6 +481,9 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_int(&cfg->max_output_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_OUTPUT_CHARS");
     env_override_int(&cfg->max_tool_result_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_RESULT_CHARS");
     env_override_int(&cfg->tool_result_preview_chars, "SMOLCLAW_AGENTS_DEFAULTS_TOOL_RESULT_PREVIEW_CHARS");
+    const char *tool_sel_env = getenv("SMOLCLAW_AGENTS_DEFAULTS_TOOL_SELECTION");
+    if (tool_sel_env)
+        cfg->tool_selection = (strcmp(tool_sel_env, "auto") == 0) ? 1 : 0;
     env_override_int(&cfg->max_fetch_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_FETCH_CHARS");
     env_override_int(&cfg->max_background_procs, "SMOLCLAW_AGENTS_DEFAULTS_MAX_BACKGROUND_PROCS");
     env_override_int(&cfg->summary_max_transcript, "SMOLCLAW_AGENTS_DEFAULTS_SUMMARY_MAX_TRANSCRIPT");
@@ -716,6 +719,7 @@ sc_config_t *sc_config_default(void)
     cfg->max_output_chars     = SC_MAX_OUTPUT_CHARS;
     cfg->max_tool_result_chars = SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
     cfg->tool_result_preview_chars = SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
+    cfg->tool_selection = 0;  /* fixed (send all tools) */
     cfg->max_fetch_chars      = SC_MAX_FETCH_CHARS;
     cfg->max_background_procs = SC_BG_MAX_PROCS;
     cfg->summary_max_transcript = SC_SUMMARY_MAX_TRANSCRIPT;
@@ -866,6 +870,9 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
         "max_tool_result_chars", cfg->max_tool_result_chars);
     cfg->tool_result_preview_chars = sc_json_get_int(defaults,
         "tool_result_preview_chars", cfg->tool_result_preview_chars);
+    const char *tool_sel = sc_json_get_string(defaults, "tool_selection", NULL);
+    if (tool_sel)
+        cfg->tool_selection = (strcmp(tool_sel, "auto") == 0) ? 1 : 0;
     cfg->max_fetch_chars = sc_json_get_int(defaults,
         "max_fetch_chars", cfg->max_fetch_chars);
     cfg->max_background_procs = sc_json_get_int(defaults,
@@ -1497,6 +1504,7 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddNumberToObject(defaults, "max_output_chars", cfg->max_output_chars);
     cJSON_AddNumberToObject(defaults, "max_tool_result_chars", cfg->max_tool_result_chars);
     cJSON_AddNumberToObject(defaults, "tool_result_preview_chars", cfg->tool_result_preview_chars);
+    cJSON_AddStringToObject(defaults, "tool_selection", cfg->tool_selection == 1 ? "auto" : "fixed");
     cJSON_AddNumberToObject(defaults, "max_fetch_chars", cfg->max_fetch_chars);
     cJSON_AddNumberToObject(defaults, "max_background_procs", cfg->max_background_procs);
     cJSON_AddNumberToObject(defaults, "summary_max_transcript", cfg->summary_max_transcript);

@@ -956,6 +956,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->session_summary_threshold = cfg->session_summary_threshold;
     agent->session_keep_last = cfg->session_keep_last;
     agent->max_output_chars = cfg->max_output_chars;
+    agent->tool_selection = cfg->tool_selection;
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->max_background_procs = cfg->max_background_procs;
     agent->summary_max_transcript = cfg->summary_max_transcript;
@@ -1206,6 +1207,7 @@ void sc_agent_reload_config(sc_agent_t *agent, const sc_config_t *cfg)
     agent->verbose = cfg->verbose;
     agent->exec_timeout_secs = cfg->exec_timeout_secs;
     agent->max_output_chars = cfg->max_output_chars;
+    agent->tool_selection = cfg->tool_selection;
     agent->max_fetch_chars = cfg->max_fetch_chars;
     agent->temperature = cfg->temperature;
     cJSON_Delete(agent->response_format);
