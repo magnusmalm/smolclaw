@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include <event2/event.h>
 
@@ -28,6 +29,7 @@
 #include "tools/host.h"
 #include "tools/message.h"
 #include "audit.h"
+#include "session_maint.h"
 #include "providers/factory.h"
 #include "util/sandbox.h"
 #include "util/str.h"
@@ -220,6 +222,9 @@ static void print_help(void)
     printf("  backup      Backup and restore state\n");
     printf("              create [--config-only] [--include-sessions] [--name TAG]\n");
     printf("              verify [NAME]    list    restore NAME [--dry-run]\n");
+    printf("  session     Maintain stored sessions\n");
+    printf("              compact [--force] [--max-bytes N] [key...]\n");
+    printf("              prune [--keep N] [--yes]\n");
     printf("  version     Show version information\n");
 }
 
@@ -1125,6 +1130,202 @@ static void cmd_analytics(int argc, char **argv)
 }
 #endif /* SC_ENABLE_ANALYTICS */
 
+/* ---------- session maintenance ---------- */
+
+static void session_init_audit(const char *workspace)
+{
+    sc_strbuf_t ab;
+    sc_strbuf_init(&ab);
+    sc_strbuf_appendf(&ab, "%s/audit.log", workspace);
+    char *audit_path = sc_strbuf_finish(&ab);
+    sc_audit_init(audit_path);
+    free(audit_path);
+}
+
+static int session_compact(int argc, char **argv, const char *sessions_dir)
+{
+    int force = 0;
+    size_t max_bytes = SC_COMPACT_DEFAULT_MAX;
+    const char *keys[64];
+    int key_count = 0;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--force") == 0) {
+            force = 1;
+        } else if (strcmp(argv[i], "--max-bytes") == 0 && i + 1 < argc) {
+            long v = strtol(argv[++i], NULL, 10);
+            if (v >= 64) max_bytes = (size_t)v;
+        } else if (key_count < 64) {
+            keys[key_count++] = argv[i];
+        }
+    }
+
+    /* Build the list of files to compact. */
+    char *paths[64];
+    int n = 0;
+    if (key_count > 0) {
+        for (int i = 0; i < key_count; i++) {
+            char *safe = sc_sanitize_filename(keys[i]);
+            sc_strbuf_t sb;
+            sc_strbuf_init(&sb);
+            sc_strbuf_appendf(&sb, "%s/%s.jsonl", sessions_dir, safe);
+            paths[n++] = sc_strbuf_finish(&sb);
+            free(safe);
+        }
+    } else {
+        DIR *dir = opendir(sessions_dir);
+        if (dir) {
+            struct dirent *ent;
+            while ((ent = readdir(dir)) != NULL && n < 64) {
+                size_t len = strlen(ent->d_name);
+                if (len <= 6 || strcmp(ent->d_name + len - 6, ".jsonl") != 0)
+                    continue;
+                sc_strbuf_t sb;
+                sc_strbuf_init(&sb);
+                sc_strbuf_appendf(&sb, "%s/%s", sessions_dir, ent->d_name);
+                paths[n++] = sc_strbuf_finish(&sb);
+            }
+            closedir(dir);
+        }
+    }
+
+    if (n == 0) {
+        printf("No sessions to compact in %s\n", sessions_dir);
+        return 0;
+    }
+
+    int total_files = 0;
+    long total_saved = 0;
+    for (int i = 0; i < n; i++) {
+        int fields = 0;
+        long saved = 0;
+        int rc = sc_session_compact_file(paths[i], max_bytes, &fields, &saved);
+        if (rc == 0) {
+            printf("compacted %s: %d field(s), %ld bytes saved (.bak written)\n",
+                   paths[i], fields, saved);
+            sc_audit_log_ext("session", paths[i], 0, 0, NULL, NULL,
+                             "session_compact");
+            total_files++;
+            total_saved += saved;
+        } else if (rc == 1) {
+            printf("skipped %s: nothing oversized\n", paths[i]);
+        } else {
+            fprintf(stderr, "error compacting %s (original intact)\n", paths[i]);
+        }
+        free(paths[i]);
+    }
+
+    (void)force;
+    printf("\nCompacted %d file(s), %ld bytes saved. "
+           "Full tool output remains in the audit log.\n",
+           total_files, total_saved);
+    return 0;
+}
+
+static int session_prune(int argc, char **argv, const char *sessions_dir)
+{
+    int keep = 20;
+    int yes = 0;
+
+    for (int i = 3; i < argc; i++) {
+        if (strcmp(argv[i], "--keep") == 0 && i + 1 < argc) {
+            long v = strtol(argv[++i], NULL, 10);
+            if (v >= 0) keep = (int)v;
+        } else if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
+            yes = 1;
+        }
+    }
+
+    int count = 0;
+    char **cands = sc_session_prune_candidates(sessions_dir, keep, &count);
+    if (count == 0) {
+        printf("Nothing to prune (keeping newest %d).\n", keep);
+        free(cands);
+        return 0;
+    }
+
+    printf("The following %d session(s) older than the newest %d will be deleted:\n",
+           count, keep);
+    for (int i = 0; i < count; i++)
+        printf("  %s\n", cands[i]);
+
+    if (!yes) {
+        printf("Proceed? [y/N] ");
+        fflush(stdout);
+        int c = getchar();
+        if (c != 'y' && c != 'Y') {
+            printf("Aborted.\n");
+            for (int i = 0; i < count; i++) free(cands[i]);
+            free(cands);
+            return 0;
+        }
+    }
+
+    int removed = 0;
+    for (int i = 0; i < count; i++) {
+        if (unlink(cands[i]) == 0) {
+            sc_audit_log_ext("session", cands[i], 0, 0, NULL, NULL,
+                             "session_prune");
+            removed++;
+        } else {
+            fprintf(stderr, "failed to delete %s\n", cands[i]);
+        }
+        free(cands[i]);
+    }
+    free(cands);
+
+    printf("Pruned %d session(s).\n", removed);
+    return 0;
+}
+
+static int cmd_session(int argc, char **argv)
+{
+    const char *subcmd = (argc >= 3) ? argv[2] : "";
+
+    sc_config_t *cfg = load_config_or_exit();
+    char *workspace = sc_config_workspace_path(cfg);
+    session_init_audit(workspace);
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/sessions", workspace);
+    char *sessions_dir = sc_strbuf_finish(&sb);
+
+    int rc = 0;
+    if (strcmp(subcmd, "compact") == 0) {
+        /* Refuse while a gateway is live unless --force: it may be appending
+         * to a session we'd rewrite from under it. */
+        int force = 0;
+        for (int i = 3; i < argc; i++)
+            if (strcmp(argv[i], "--force") == 0) force = 1;
+        if (sc_gateway_is_running(workspace) && !force) {
+            fprintf(stderr, "Refusing: gateway appears to be running. "
+                    "Stop it or pass --force.\n");
+            rc = 1;
+        } else {
+            rc = session_compact(argc, argv, sessions_dir);
+        }
+    } else if (strcmp(subcmd, "prune") == 0) {
+        rc = session_prune(argc, argv, sessions_dir);
+    } else {
+        fprintf(stderr,
+                "Usage: %s session compact [--force] [--max-bytes N] [key...]\n"
+                "       %s session prune [--keep N] [--yes]\n"
+                "\n"
+                "compact truncates oversized tool-result bodies (head + tail +\n"
+                "marker), rewriting atomically with a .bak. The full output is\n"
+                "retained in the workspace audit log.\n",
+                SC_NAME, SC_NAME);
+        rc = 1;
+    }
+
+    free(sessions_dir);
+    free(workspace);
+    sc_config_free(cfg);
+    sc_audit_shutdown();
+    return rc;
+}
+
 #if SC_ENABLE_UPDATER
 static void cmd_update(int argc, char **argv)
 {
@@ -1673,6 +1874,13 @@ static void cmd_gateway(int argc, char **argv)
 
     char *workspace = sc_config_workspace_path(cfg);
 
+    /* Acquire the gateway run-lock so `session compact` can detect a live
+     * gateway and refuse to rewrite sessions under it without --force. */
+    int gw_lock_fd = sc_gateway_lock_acquire(workspace);
+    if (gw_lock_fd < 0)
+        SC_LOG_WARN("gateway", "Could not acquire run-lock; "
+                    "`session compact` will not detect this gateway");
+
     /* Start optional services */
     gateway_services_t svc = {0};
     gateway_start_services(&svc, agent, bus, base, cfg, workspace);
@@ -1687,6 +1895,7 @@ static void cmd_gateway(int argc, char **argv)
     printf("\nPress Ctrl+C to stop\n\n");
 
     gateway_event_loop(base, bus, agent, ch_mgr, &svc, &cfg, config_path);
+    if (gw_lock_fd >= 0) close(gw_lock_fd);
     gateway_shutdown(ch_mgr, &svc, agent, bus, base, cfg, config_path, workspace);
 }
 
@@ -1727,6 +1936,10 @@ int main(int argc, char **argv)
     } else if (strcmp(command, "analytics") == 0) {
         cmd_analytics(argc, argv);
 #endif
+    } else if (strcmp(command, "session") == 0) {
+        int rc = cmd_session(argc, argv);
+        sc_logger_shutdown();
+        return rc;
     } else if (strcmp(command, "backup") == 0) {
         return cmd_backup(argc, argv);
     } else if (strcmp(command, "doctor") == 0) {

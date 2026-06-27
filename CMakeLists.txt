@@ -241,6 +241,7 @@ set(SC_SOURCES
     src/backup.c
     src/bus.c
     src/session.c
+    src/session_maint.c
     src/state.c
     src/memory.c
     src/skill.c
@@ -497,6 +498,7 @@ set(TEST_SOURCES
     tests/test_glob.c
     tests/test_config.c
     tests/test_session.c
+    tests/test_session_maint.c
     tests/test_tools.c
     tests/test_schema_validate.c
     tests/test_providers.c

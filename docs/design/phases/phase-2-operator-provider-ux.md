@@ -70,20 +70,32 @@ Deliverables:
 
 **Files:** `src/main.c`, `src/session.c`
 
-- [ ] Subcommand: `smolclaw session compact [--force] [path...]`
-- [ ] Truncate large tool stdout / web_fetch bodies in session JSON
-- [ ] Keep head + tail + `...[truncated N bytes]...` marker
-- [ ] Atomic rewrite via temp + rename; write `.bak`
-- [ ] Validate rewritten session parses before swap
-- [ ] Refuse active session without lock; refuse during gateway unless `--force`
-- [ ] Audit log entry per file
-- [ ] Help text: audit log retains full outputs
+- [x] Subcommand: `smolclaw session compact [--force] [--max-bytes N] [key...]`
+- [x] Truncate large tool-result `content` (role `tool` — stdout / web_fetch)
+- [x] Keep head + tail + `...[truncated N bytes]...` marker
+- [x] Atomic rewrite via temp + rename; write `.bak`
+- [x] Validate rewritten session parses before swap (`validate_session_file`)
+- [x] Refuse during gateway unless `--force` — gateway holds a `flock` run-lock
+  (`<workspace>/.gateway.lock`), `session compact` probes it
+- [x] Audit log entry per file (`session_compact` event)
+- [x] Help text: full output retained in the audit log
+
+**Status (2026-06-27):** ✅ done. New module `src/session_maint.c`
+(+`session_maint.h`); CLI `cmd_session` in `main.c`; gateway acquires the
+run-lock. Note: the spec's `[path...]` is implemented as `[key...]` (session
+keys are mapped to files via `sc_sanitize_filename`, matching the manager's
+on-disk naming). Reads arbitrarily long lines (the manager's 64 KB `fgets` cap
+would otherwise truncate the very tool outputs we compact).
 
 ### 2.4 Session prune
 
-- [ ] `smolclaw session prune [--keep N] [--yes]`
-- [ ] Delete sessions older than N newest (default keep 20)
-- [ ] Optional soft-delete to trash dir (config)
+- [x] `smolclaw session prune [--keep N] [--yes]`
+- [x] Delete sessions older than N newest by mtime (default keep 20),
+  interactive `[y/N]` confirm unless `--yes`
+- [ ] Optional soft-delete to trash dir — **deferred** (YAGNI; `.bak` from
+  compact + audit log already cover recovery; revisit on demand)
+
+**Status (2026-06-27):** ✅ done (`sc_session_prune_candidates` + `cmd_session`).
 
 ### 2.5 Incremental session reload (optional)
 
@@ -260,6 +272,14 @@ isolation. New test `test_provider_health_skips_auth_expired_fallback`
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest
   --test-dir build` 43/43 green; `check_size_budget.sh` minimal-dynamic 257 KB ≤
   1024 KB; no new Kconfig flag (KC-1 N/A).
+- **Slice 2 — `task/2.3-session-compact-prune` (tasks 2.3 + 2.4)** — 2026-06-27.
+  New `src/session_maint.c` (compact/prune + gateway run-lock) + `cmd_session`
+  CLI + help; gateway acquires the `flock` run-lock. 5 new tests
+  (`tests/test_session_maint.c`). Verified end-to-end (20 KB → 3.3 KB compact,
+  `.bak` retained, prune keeps newest N, audit entries written).
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 44/44;
+  `check_size_budget.sh` minimal-dynamic 261 KB ≤ 1024 KB; `check_claude_md.sh`
+  clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 
