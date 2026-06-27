@@ -44,7 +44,7 @@ autonomous-to-implement but human-to-accept.
 
 ### Phase 0 — Safety & stability
 
-**Status (2026-06-27):** Complete on branch `task/0.8-deferred-init` — see
+**Status (2026-06-27):** Complete; **merged to `master`** — see
 [`phase-0-safety-and-stability.md`](phases/phase-0-safety-and-stability.md).
 
 | Task | Tag | Note / acceptance gate |
@@ -60,16 +60,20 @@ autonomous-to-implement but human-to-accept.
 
 ### Phase 1 — Context efficiency
 
-| Task | Tag | Note / acceptance gate |
-|------|-----|------------------------|
-| 1.1 tool-result spill-to-disk | ✅ READY | Mock-testable |
-| 1.2 per-turn aggregate cap | ✅ READY | |
-| 1.3 token-aware compaction | ✅ READY | Uses provider usage; mockable |
-| 1.4 reactive compaction on ctx error | ✅ READY | |
-| 1.5 adaptive tool selection (`auto`) | ✅/🟠 | Q1 resolved: runtime config, default `fixed`. Logic READY; acceptance benchmark wants live Ollama |
-| 1.6 streaming inline tool-call buffer | ✅ READY | Port SmallHarness `agent.rs` tests |
-| 1.7 JSON-aware compaction | ✅ READY | |
-| 1.8 prompt-prefix warmup | 🟠 GATED-EXT | Logic READY; TTFT benchmark needs live Ollama/vLLM |
+**Status (2026-06-27):** Complete; **merged to `master`** (`ctest` 43/43, minimal
+257 KB). Two manual 🟠 acceptances remain (live local model). See
+[`phase-1-context-efficiency.md`](phases/phase-1-context-efficiency.md).
+
+| Task | Tag | Note |
+|------|-----|------|
+| 1.1 tool-result spill-to-disk | 🔵 SHIPPED | core was shipped; thresholds now configurable |
+| 1.2 per-turn aggregate cap | 🔵 SHIPPED | already shipped (`max_output_total`); verified |
+| 1.3 token-aware compaction | 🔵 SHIPPED | already shipped (85% trigger + breaker); verified |
+| 1.4 reactive compaction on ctx error | 🔵 SHIPPED | **was dead-wired; fixed** + regression test |
+| 1.5 adaptive tool selection (`auto`) | 🔵 SHIPPED / 🟠 | new module + tests; **manual:** live-Ollama zero-tool-schema token count |
+| 1.6 streaming inline tool-call buffer | 🔵 SHIPPED | new `stream_buffer` wrapper + tests |
+| 1.7 JSON-aware compaction | 🔵 SHIPPED | new `json_compact` module + tests |
+| 1.8 prompt-prefix warmup | 🔵 SHIPPED / 🟠 | new module + tests; **manual:** live TTFT benefit on Ollama/vLLM |
 
 ### Phase 2 — Operator & provider UX
 

@@ -1,8 +1,8 @@
 # Master Plan: smolclaw Feature & Improvement Roadmap
 
-**Status**: Planning — Not yet executing  
+**Status**: Executing — **Phase 0 & Phase 1 complete (2026-06-27)**, landed on `master`; Phase 2 next  
 **Author**: Consolidated from cross-repo analyses (2026-03 through 2026-05)  
-**Last Updated**: 2026-06-26  
+**Last Updated**: 2026-06-27  
 **Related**: Individual phase plans in `docs/design/phases/`, source design docs listed below  
 **Hermes gap analysis**: Tier map in §4.3 (2026-06 comparative roadmap)  
 **Autonomy handoff**: per-task ready/gated matrix + open-question checklist in [`autonomy-readiness.md`](autonomy-readiness.md)
@@ -217,9 +217,9 @@ Task IDs: see phase plans — **0.8**, **2.9–2.12**, **3.7–3.9**, **4.11–4
 Phases are ordered to **minimize regression risk**: foundations first, agent-loop wins before new channels, architectural refactors last.
 
 ```text
-Phase 0 — Safety & stability          docs/design/phases/phase-0-safety-and-stability.md
-Phase 1 — Context efficiency          docs/design/phases/phase-1-context-efficiency.md
-Phase 2 — Operator & provider UX      docs/design/phases/phase-2-operator-provider-ux.md
+Phase 0 — Safety & stability     ✓ DONE  docs/design/phases/phase-0-safety-and-stability.md
+Phase 1 — Context efficiency     ✓ DONE  docs/design/phases/phase-1-context-efficiency.md
+Phase 2 — Operator & provider UX  ← next docs/design/phases/phase-2-operator-provider-ux.md
 Phase 3 — Optional surface area       docs/design/phases/phase-3-optional-surface-area.md
 Phase 4 — Larger investments          docs/design/phases/phase-4-larger-investments.md
 Phase 5 — Defer / reject              docs/design/phases/phase-5-defer-reject.md
@@ -333,4 +333,4 @@ docs/design/
 
 ---
 
-**Next step:** Phase 0 complete (2026-06-26). Begin [Phase 1](phases/phase-1-context-efficiency.md) — context efficiency.
+**Next step:** Phase 0 & Phase 1 complete (2026-06-27), landed on `master`. Begin [Phase 2](phases/phase-2-operator-provider-ux.md) — operator & provider UX. Two manual 🟠 acceptances remain from Phase 1: 1.5 (Ollama zero-tool-schema token count) and 1.8 (live TTFT after warmup).
