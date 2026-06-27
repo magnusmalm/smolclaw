@@ -479,6 +479,8 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_int(&cfg->session_summary_threshold, "SMOLCLAW_AGENTS_DEFAULTS_SESSION_SUMMARY_THRESHOLD");
     env_override_int(&cfg->session_keep_last, "SMOLCLAW_AGENTS_DEFAULTS_SESSION_KEEP_LAST");
     env_override_int(&cfg->max_output_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_OUTPUT_CHARS");
+    env_override_int(&cfg->max_tool_result_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_TOOL_RESULT_CHARS");
+    env_override_int(&cfg->tool_result_preview_chars, "SMOLCLAW_AGENTS_DEFAULTS_TOOL_RESULT_PREVIEW_CHARS");
     env_override_int(&cfg->max_fetch_chars, "SMOLCLAW_AGENTS_DEFAULTS_MAX_FETCH_CHARS");
     env_override_int(&cfg->max_background_procs, "SMOLCLAW_AGENTS_DEFAULTS_MAX_BACKGROUND_PROCS");
     env_override_int(&cfg->summary_max_transcript, "SMOLCLAW_AGENTS_DEFAULTS_SUMMARY_MAX_TRANSCRIPT");
@@ -712,6 +714,8 @@ sc_config_t *sc_config_default(void)
     cfg->session_summary_threshold = SC_SESSION_SUMMARY_THRESHOLD;
     cfg->session_keep_last    = SC_SESSION_KEEP_LAST;
     cfg->max_output_chars     = SC_MAX_OUTPUT_CHARS;
+    cfg->max_tool_result_chars = SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
+    cfg->tool_result_preview_chars = SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
     cfg->max_fetch_chars      = SC_MAX_FETCH_CHARS;
     cfg->max_background_procs = SC_BG_MAX_PROCS;
     cfg->summary_max_transcript = SC_SUMMARY_MAX_TRANSCRIPT;
@@ -858,6 +862,10 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
         "session_keep_last", cfg->session_keep_last);
     cfg->max_output_chars = sc_json_get_int(defaults,
         "max_output_chars", cfg->max_output_chars);
+    cfg->max_tool_result_chars = sc_json_get_int(defaults,
+        "max_tool_result_chars", cfg->max_tool_result_chars);
+    cfg->tool_result_preview_chars = sc_json_get_int(defaults,
+        "tool_result_preview_chars", cfg->tool_result_preview_chars);
     cfg->max_fetch_chars = sc_json_get_int(defaults,
         "max_fetch_chars", cfg->max_fetch_chars);
     cfg->max_background_procs = sc_json_get_int(defaults,
@@ -1349,6 +1357,11 @@ sc_config_t *sc_config_load(const char *path)
     if (cfg->max_tokens < 1) cfg->max_tokens = SC_DEFAULT_MAX_TOKENS;
     if (cfg->max_tool_iterations < 1) cfg->max_tool_iterations = SC_DEFAULT_MAX_ITERATIONS;
     if (cfg->max_output_chars < 1) cfg->max_output_chars = SC_MAX_OUTPUT_CHARS;
+    if (cfg->max_tool_result_chars < 1) cfg->max_tool_result_chars = SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
+    if (cfg->tool_result_preview_chars < 1) cfg->tool_result_preview_chars = SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
+    /* Preview must be smaller than the spill threshold, else nothing spills usefully. */
+    if (cfg->tool_result_preview_chars >= cfg->max_tool_result_chars)
+        cfg->tool_result_preview_chars = cfg->max_tool_result_chars / 2;
     if (cfg->max_fetch_chars < 1) cfg->max_fetch_chars = SC_MAX_FETCH_CHARS;
     if (cfg->exec_timeout_secs < 0) cfg->exec_timeout_secs = SC_DEFAULT_EXEC_TIMEOUT;
     if (cfg->max_tool_calls_per_turn < 1) cfg->max_tool_calls_per_turn = SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN;
@@ -1482,6 +1495,8 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddNumberToObject(defaults, "session_summary_threshold", cfg->session_summary_threshold);
     cJSON_AddNumberToObject(defaults, "session_keep_last", cfg->session_keep_last);
     cJSON_AddNumberToObject(defaults, "max_output_chars", cfg->max_output_chars);
+    cJSON_AddNumberToObject(defaults, "max_tool_result_chars", cfg->max_tool_result_chars);
+    cJSON_AddNumberToObject(defaults, "tool_result_preview_chars", cfg->tool_result_preview_chars);
     cJSON_AddNumberToObject(defaults, "max_fetch_chars", cfg->max_fetch_chars);
     cJSON_AddNumberToObject(defaults, "max_background_procs", cfg->max_background_procs);
     cJSON_AddNumberToObject(defaults, "summary_max_transcript", cfg->summary_max_transcript);

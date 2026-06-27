@@ -34,6 +34,8 @@
 #define SC_DEFAULT_MAX_TOOL_CALLS_PER_TURN 50
 #define SC_DEFAULT_MAX_TURN_SECS           300  /* 5 minutes */
 #define SC_DEFAULT_MAX_OUTPUT_TOTAL         500000  /* 500 KB cumulative tool output */
+#define SC_DEFAULT_MAX_TOOL_RESULT_CHARS    50000   /* spill single result to disk above this */
+#define SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS 2000   /* preview kept inline after spill */
 #define SC_DEFAULT_MAX_TOOL_CALLS_PER_HOUR 200
 #define SC_DEFAULT_MAX_TOKENS_PER_HOUR    0  /* 0 = unlimited */
 

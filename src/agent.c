@@ -984,6 +984,9 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
 
     /* Tool registry */
     agent->tools = sc_tool_registry_new();
+    sc_tool_registry_set_result_limits(agent->tools,
+                                       cfg->max_tool_result_chars,
+                                       cfg->tool_result_preview_chars);
     register_default_tools(agent, cfg);
 
     /* Context builder */

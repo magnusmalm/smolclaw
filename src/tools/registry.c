@@ -14,6 +14,7 @@
 #include "tools/registry.h"
 #include "tools/types.h"
 #include "tools/schema_validate.h"
+#include "constants_limits.h"
 #include "providers/types.h"
 #include "audit.h"
 #include "util/str.h"
@@ -203,6 +204,14 @@ void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspa
     }
 }
 
+void sc_tool_registry_set_result_limits(sc_tool_registry_t *reg,
+                                        int max_chars, int preview_chars)
+{
+    if (!reg) return;
+    reg->max_result_chars = max_chars;
+    reg->result_preview_chars = preview_chars;
+}
+
 int sc_tool_registry_is_allowed(sc_tool_registry_t *reg, const char *name)
 {
     if (!reg || !name) return 0;
@@ -364,11 +373,15 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
     }
 
     /* Persist oversized output to disk before sanitization truncates it.
-     * The LLM gets a preview + file path it can read with file_read. */
-#define SC_RESULT_PERSIST_THRESHOLD 50000
-#define SC_RESULT_PREVIEW_SIZE      2000
+     * The LLM gets a preview + file path it can read with file_read.
+     * Thresholds are configurable (config: max_tool_result_chars /
+     * tool_result_preview_chars); <=0 falls back to the built-in defaults. */
+    int persist_threshold = reg->max_result_chars > 0
+        ? reg->max_result_chars : SC_DEFAULT_MAX_TOOL_RESULT_CHARS;
+    int preview_size = reg->result_preview_chars > 0
+        ? reg->result_preview_chars : SC_DEFAULT_TOOL_RESULT_PREVIEW_CHARS;
     if (!result->is_error && result->for_llm && reg->workspace &&
-        strlen(result->for_llm) > SC_RESULT_PERSIST_THRESHOLD) {
+        strlen(result->for_llm) > (size_t)persist_threshold) {
         size_t full_len = strlen(result->for_llm);
 
         /* Ensure tool_outputs directory exists */
@@ -392,7 +405,7 @@ sc_tool_result_t *sc_tool_registry_execute(sc_tool_registry_t *reg,
                 "Use file_read to access specific sections.]\n",
                 full_len, path);
             sc_strbuf_appendf(&buf, "%.*s",
-                              SC_RESULT_PREVIEW_SIZE, result->for_llm);
+                              preview_size, result->for_llm);
             sc_strbuf_append(&buf, "\n...");
             free(result->for_llm);
             result->for_llm = sc_strbuf_finish(&buf);

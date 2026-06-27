@@ -38,15 +38,28 @@
 
 **Source:** [`docs/claude-code-improvements.md`](../../claude-code-improvements.md) P0 #1
 
-**Files:** `src/tools/registry.c`, `src/config.c`, `src/agent_turn.c`
+**Files:** `src/tools/registry.c`, `src/config.c`, `src/config.h`, `src/agent.c`, `tests/test_tools.c`
 
-- [ ] Config: `max_tool_result_chars` (default 50000), `tool_result_preview_chars` (2000)
-- [ ] Oversized `for_llm` → write `{workspace}/tool_outputs/{tool}_{ts}.txt`
-- [ ] Replace with preview + path hint for model
-- [ ] Per-turn cumulative cap (~200K); stop tool loop with message if exceeded
-- [ ] Full output remains in audit log / tee if enabled
+> **Status (2026-06-27):** the spill-to-disk core (1.1) and the per-turn
+> cumulative cap (1.2) were **already shipped** — spill in
+> `sc_tool_registry_execute`, the cap via `agents.defaults.max_output_total`
+> (default 500 KB; stop-loop at `agent_turn.c`). This slice made the spill
+> thresholds **configurable** (were hardcoded 50000/2000) and added a test.
+
+- [x] Config: `max_tool_result_chars` (default 50000), `tool_result_preview_chars` (2000) — runtime
+  config, env overrides, validation (preview clamped below threshold); wired via
+  `sc_tool_registry_set_result_limits()`
+- [x] Oversized `for_llm` → write `{workspace}/tool_outputs/{tool}_{ts}.txt` *(already shipped)*
+- [x] Replace with preview + path hint for model *(already shipped)*
+- [x] Per-turn cumulative cap → existing `max_output_total` (default 500 KB), stop-loop message *(verified)*
+- [x] Full output remains in audit log / tee if enabled *(unchanged)*
 
 **Acceptance:** `exec cat large_file` → preview in context, file on disk, `file_read` can recover.
+
+**Verification gates (2026-06-27):** KC-2 clean (0 implicit); `ctest --test-dir build` **39/39**
+(`configs/defconfig`); new `test_registry_result_spill_configurable` (spill + no-spill paths) and
+`test_config` round-trip pass; minimal-dynamic size **245 KB ≤ 1024 KB**. No new Kconfig flag
+(runtime config only).
 
 ### 1.3–1.4 Token-aware compaction
 

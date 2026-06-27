@@ -23,6 +23,7 @@
 
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 static void test_registry_create(void)
 {
@@ -234,6 +235,85 @@ static void test_registry_execute(void)
     char *cmd = sc_strbuf_finish(&p);
     system(cmd);
     free(cmd);
+}
+
+/* Test tool that returns a large for_llm payload (Phase 1.1 spill). */
+static cJSON *bigout_params(sc_tool_t *self) { (void)self; return cJSON_CreateObject(); }
+static sc_tool_result_t *bigout_execute(sc_tool_t *self, cJSON *args, void *ctx)
+{
+    (void)self; (void)args; (void)ctx;
+    size_t n = 5000;
+    char *big = malloc(n + 1);
+    memset(big, 'A', n);
+    big[n] = '\0';
+    sc_tool_result_t *r = sc_tool_result_new(big);
+    free(big);
+    return r;
+}
+
+static int tool_outputs_has_file(const char *workspace)
+{
+    char dir[600];
+    snprintf(dir, sizeof(dir), "%s/tool_outputs", workspace);
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    int found = 0;
+    struct dirent *ent;
+    while ((ent = readdir(d))) {
+        if (ent->d_name[0] != '.') { found = 1; break; }
+    }
+    closedir(d);
+    return found;
+}
+
+/* 1.1: configurable spill threshold. Output above max_tool_result_chars is
+ * written to {workspace}/tool_outputs and replaced with a preview; output
+ * below the threshold is left intact. */
+static void test_registry_result_spill_configurable(void)
+{
+    char tmpdir[] = "/tmp/sc_test_spill_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    /* Low threshold (100) -> the 5000-char result spills. */
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    sc_tool_registry_set_workspace(reg, tmpdir);
+    sc_tool_registry_set_result_limits(reg, 100, 20);
+    sc_tool_registry_register(reg, sc_tool_new_simple(
+        "bigout", "big output", bigout_params, bigout_execute, NULL, 0, NULL));
+
+    cJSON *args = cJSON_CreateObject();
+    sc_tool_result_t *r = sc_tool_registry_execute(reg, "bigout", args, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    ASSERT(strstr(r->for_llm, "Truncated:") != NULL, "spilled result has Truncated marker");
+    ASSERT(strstr(r->for_llm, "file_read") != NULL, "spilled result hints file_read");
+    ASSERT(strlen(r->for_llm) < 5000, "spilled for_llm shorter than full output");
+    ASSERT(tool_outputs_has_file(tmpdir), "spill wrote a file to tool_outputs/");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    sc_tool_registry_free(reg);
+
+    /* High threshold (100000) -> the same 5000-char result is NOT spilled. */
+    char tmpdir2[] = "/tmp/sc_test_nospill_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir2));
+    sc_tool_registry_t *reg2 = sc_tool_registry_new();
+    sc_tool_registry_set_workspace(reg2, tmpdir2);
+    sc_tool_registry_set_result_limits(reg2, 100000, 2000);
+    sc_tool_registry_register(reg2, sc_tool_new_simple(
+        "bigout", "big output", bigout_params, bigout_execute, NULL, 0, NULL));
+    cJSON *args2 = cJSON_CreateObject();
+    sc_tool_result_t *r2 = sc_tool_registry_execute(reg2, "bigout", args2, NULL, NULL, NULL);
+    ASSERT_NOT_NULL(r2);
+    ASSERT_INT_EQ((int)strlen(r2->for_llm), 5000);
+    ASSERT(strstr(r2->for_llm, "Truncated:") == NULL, "below-threshold result not spilled");
+    ASSERT_INT_EQ(tool_outputs_has_file(tmpdir2), 0);
+    sc_tool_result_free(r2);
+    cJSON_Delete(args2);
+    sc_tool_registry_free(reg2);
+
+    char cmd[800];
+    snprintf(cmd, sizeof(cmd), "rm -rf %s %s", tmpdir, tmpdir2);
+    system(cmd);
 }
 
 static void test_tool_result_constructors(void)
@@ -2142,6 +2222,7 @@ int main(void)
     RUN_TEST(test_pre_hook_allows_tool);
     RUN_TEST(test_post_hook_modifies_result);
     RUN_TEST(test_no_hooks);
+    RUN_TEST(test_registry_result_spill_configurable);
 
     TEST_REPORT();
 }

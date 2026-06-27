@@ -59,6 +59,9 @@ typedef struct sc_tool_registry {
     char **discovered_tools;  /* tools fetched via tool_search (owned names) */
     int    discovered_count;
     int    discovered_cap;
+    /* Oversized-result spill thresholds (<=0 = built-in defaults) */
+    int    max_result_chars;     /* spill a single result to disk above this */
+    int    result_preview_chars; /* preview kept inline after spill */
 } sc_tool_registry_t;
 
 /* Mark a tool as discovered (fetched via tool_search). */
@@ -131,6 +134,11 @@ void sc_tool_registry_set_denied(sc_tool_registry_t *reg,
 /* Switch workspace for all tools that support it.
  * Calls set_workspace on each tool in the registry. */
 void sc_tool_registry_set_workspace(sc_tool_registry_t *reg, const char *workspace);
+
+/* Configure oversized-result spill thresholds. Values <=0 keep the built-in
+ * defaults (SC_DEFAULT_MAX_TOOL_RESULT_CHARS / PREVIEW_CHARS). */
+void sc_tool_registry_set_result_limits(sc_tool_registry_t *reg,
+                                        int max_chars, int preview_chars);
 
 /* Register pre-tool hook (called before execute, return non-zero to block).
  * name is borrowed (not copied). */
