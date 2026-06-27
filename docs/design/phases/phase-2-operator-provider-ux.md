@@ -139,8 +139,15 @@ isolation. New test `test_provider_health_skips_auth_expired_fallback`
 
 **Files:** `src/channels/web.c` (and shared bind helper if exists)
 
-- [ ] On bind failure, log process holding port (parse `/proc/net/tcp` or `ss` equivalent)
-- [ ] Document that `auto_port` already exists
+- [x] On bind failure, log the process holding the port — new
+  `src/util/port_diag.c` (`sc_port_holder`) parses `/proc/net/tcp{,6}` for the
+  LISTEN inode then scans `/proc/<pid>/fd` for the owner; falls back to an
+  `ss -ltnp` hint when the PID is unresolvable
+- [x] Documented `auto_port` (CONFIGURATION.md `channels.web`)
+
+**Status (2026-06-27):** ✅ done. Wired into `web.c`'s bind-failure path; 3-case
+`tests/test_port_diag.c` (binds a real ephemeral listener and asserts its own
+pid is reported). Linux-only `/proc`; returns NULL elsewhere.
 
 ### 2.8 Backoff verification
 
@@ -322,6 +329,13 @@ tests.
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB (unchanged — cron not
   in minimal); `check_claude_md.sh` clean; existing `SC_ENABLE_CRON` flag (KC-1
   N/A).
+- **Slice 5 — `task/2.7-port-conflict` (task 2.7)** — 2026-06-27.
+  New `src/util/port_diag.c` (`sc_port_holder` via `/proc`); web.c bind-failure
+  log now names the holding process; `auto_port` documented. 3-case
+  `tests/test_port_diag.c`.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0, no new
+  warnings); `ctest` 46/46; `check_size_budget.sh` minimal-dynamic 269 KB ≤
+  1024 KB; `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A).
 
 ---
 

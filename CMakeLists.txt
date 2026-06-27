@@ -236,6 +236,7 @@ set(SC_SOURCES
     src/util/sandbox.c
     src/util/sha256.c
     src/util/glob.c
+    src/util/port_diag.c
     src/logger.c
     src/config.c
     src/backup.c
@@ -497,6 +498,7 @@ enable_testing()
 set(TEST_SOURCES
     tests/test_str.c
     tests/test_glob.c
+    tests/test_port_diag.c
     tests/test_config.c
     tests/test_session.c
     tests/test_session_maint.c

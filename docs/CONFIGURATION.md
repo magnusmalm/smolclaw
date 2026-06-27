@@ -235,7 +235,7 @@ All channels share these fields:
 |----------------------|--------|-----------|----------------------------------------|
 | bind_addr            | string | 127.0.0.1 | Listen address.                        |
 | port                 | int    | 8080      | Listen port.                           |
-| auto_port            | bool   | false     | Try next ports if bind fails.          |
+| auto_port            | bool   | false     | On bind failure, try the next 10 ports. [3] |
 | bearer_token         | string | (none)    | Required bearer token for auth.        |
 | tls_cert             | string | (none)    | PEM cert path (enables HTTPS).         |
 | tls_key              | string | (none)    | PEM private key path.                  |
@@ -246,6 +246,8 @@ All channels share these fields:
 - [1] `0` derives it from `max_turn_secs` + 30s grace; must be >= `max_turn_secs`.
 - [2] Requests whose `session` matches run in an isolated memory namespace;
   empty disables. See [session isolation](operations/session-isolation.md).
+- [3] When `false` and the port is taken, the bind error log names the process
+  holding the port (resolved via `/proc` on Linux).
 
 ### `channels.x` (X / Twitter)
 

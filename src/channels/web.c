@@ -48,6 +48,7 @@
 #include "memory_index.h"
 #endif
 #include "util/glob.h"
+#include "util/port_diag.h"
 #include "util/str.h"
 #include "util/uuid.h"
 #include "util/json_helpers.h"
@@ -1425,9 +1426,17 @@ static int web_start(sc_channel_t *self)
         }
     }
     if (!bound) {
-        SC_LOG_ERROR(WEB_TAG, "Failed to bind to %s:%d%s",
+        char *holder = sc_port_holder(wd->port);
+        SC_LOG_ERROR(WEB_TAG, "Failed to bind to %s:%d%s%s%s",
                      wd->bind_addr, wd->port,
-                     wd->auto_port ? " (tried +10)" : "");
+                     wd->auto_port ? " (tried +10)" : "",
+                     holder ? " — port held by " : "",
+                     holder ? holder : "");
+        if (!holder)
+            SC_LOG_INFO(WEB_TAG, "Run 'ss -ltnp' to see what holds port %d; "
+                        "set web.auto_port=true to bind the next free port",
+                        wd->port);
+        free(holder);
         evhttp_free(wd->http);
         event_base_free(wd->base);
         wd->http = NULL;
