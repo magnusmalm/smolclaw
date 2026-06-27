@@ -98,8 +98,13 @@ Each mode sets:
 
 **Files:** `src/tools/x_tools.c` or `src/util/x_api.c`
 
-- [ ] Add `note_tweet` to `tweet.fields` in `x_get_thread`, `x_search`
-- [ ] `format_tweet()` already handles field
+- [x] Add `note_tweet` to `tweet.fields` in `x_get_thread` (both requests) and
+  `x_search` (`x_get_tweet` already requested `note_tweet,article`)
+- [x] `format_tweet()` already prefers article > note_tweet > text (verified)
+
+**Status (2026-06-27):** ✅ done (request-param only; `format_tweet` already
+consumed the field — its preference just had no data on thread/search). Gated by
+`SC_ENABLE_X_TOOLS`; verified compiles with `-DSC_ENABLE_X_TOOLS=ON`.
 
 ### 3.5 Notify backends
 
@@ -216,6 +221,13 @@ documents the flag.
   **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 48/48;
   `check_size_budget.sh` minimal-dynamic 269 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 2 — `task/3.4-note-tweet` (task 3.4)** — 2026-06-27. Added `note_tweet`
+  to `tweet.fields` in `x_get_thread` (×2) and `x_search` so `format_tweet`'s
+  existing long-tweet preference has data. Request-param only; no test seam
+  (static `format_tweet`, live-API field).
+  **Verification gates:** Release `-DSC_ENABLE_X_TOOLS=ON` build clean (KC-2
+  `implicit`=0); `ctest` 48/48; `check_size_budget.sh` minimal-dynamic 269 KB ≤
+  1024 KB (X_TOOLS off in minimal); `check_claude_md.sh` clean.
 
 ---
 

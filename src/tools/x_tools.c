@@ -298,7 +298,7 @@ static sc_tool_result_t *get_thread_exec(sc_tool_t *self, cJSON *args, void *ctx
     char path[128];
     snprintf(path, sizeof(path), "/2/tweets/%s", tweet_id);
     sc_x_param_t tweet_params[] = {
-        { "tweet.fields", "conversation_id,author_id,created_at,text" },
+        { "tweet.fields", "conversation_id,author_id,created_at,text,note_tweet" },
         { "expansions", "author_id" },
         { "user.fields", "username,name" },
     };
@@ -344,7 +344,7 @@ static sc_tool_result_t *get_thread_exec(sc_tool_t *self, cJSON *args, void *ctx
     sc_x_param_t search_params[] = {
         { "query", query },
         { "max_results", max_str },
-        { "tweet.fields", "author_id,created_at,text,in_reply_to_user_id" },
+        { "tweet.fields", "author_id,created_at,text,in_reply_to_user_id,note_tweet" },
         { "expansions", "author_id" },
         { "user.fields", "username,name" },
     };
@@ -443,7 +443,7 @@ static sc_tool_result_t *search_exec(sc_tool_t *self, cJSON *args, void *ctx)
     sc_x_param_t params[] = {
         { "query", (char *)query },
         { "max_results", max_str },
-        { "tweet.fields", "author_id,created_at,text,public_metrics" },
+        { "tweet.fields", "author_id,created_at,text,public_metrics,note_tweet" },
         { "expansions", "author_id" },
         { "user.fields", "username,name" },
     };
