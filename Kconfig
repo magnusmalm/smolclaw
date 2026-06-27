@@ -221,6 +221,18 @@ config SC_ENABLE_MEMORY_SEARCH
 	  When disabled, the amalgamation is built without SQLITE_ENABLE_FTS5
 	  (smaller sqlite3 when host metrics or analytics still link SQLite).
 
+config SC_ENABLE_SESSION_SEARCH
+	bool "Global session search (FTS5 over stored sessions)"
+	default n
+	depends on SC_ENABLE_MEMORY_SEARCH
+	help
+	  Add the session_search tool: full-text search across all stored
+	  session transcripts under {SMOLCLAW_HOME}/sessions/ (e.g. "did we
+	  discuss X last week?") plus a recent-session list. Reuses the SQLite
+	  FTS5 index machinery from memory search; the index is built on first
+	  search (deferred). Distinct from memory_search (long-term facts vs
+	  conversation recall).
+
 endmenu
 
 menu "Integration"

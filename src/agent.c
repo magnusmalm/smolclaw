@@ -83,6 +83,9 @@
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #include "tools/memory_search.h"
+#if SC_ENABLE_SESSION_SEARCH
+#include "tools/session_search.h"
+#endif
 #include "tools/context_tools.h"
 
 static void memory_index_cb(const char *source, const char *content, void *ctx)
@@ -568,6 +571,20 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                 free(ctx_dir);
             }
         }
+    }
+#endif
+
+#if SC_ENABLE_SESSION_SEARCH
+    /* Task 4.11: global session search over the stored transcripts. The tool
+     * builds its own FTS5 index lazily on first search. */
+    {
+        sc_strbuf_t ss_sb;
+        sc_strbuf_init(&ss_sb);
+        sc_strbuf_appendf(&ss_sb, "%s/sessions", workspace);
+        char *ss_dir = sc_strbuf_finish(&ss_sb);
+        sc_tool_registry_register(agent->tools,
+                                  sc_tool_session_search_new(ss_dir));
+        free(ss_dir);
     }
 #endif
 

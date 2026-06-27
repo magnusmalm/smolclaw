@@ -253,12 +253,21 @@ regression test); M-9 deferred with rationale.
 **Files:** new `src/tools/session_search.c`, `src/session_index.c` (or extend `memory_index.c`),
 `tests/test_session_search.c`
 
-- [ ] Kconfig `SC_ENABLE_SESSION_SEARCH` (default **n**)
-- [ ] Index session JSON files under `{SMOLCLAW_HOME}/sessions/` with FTS5 (reuse SQLite amalgamation)
-- [ ] Tool actions: `search` (query → matching turns/snippets), `list` (recent sessions)
-- [ ] On-demand indexing — defer full rebuild until first search (align with 0.8 deferred init)
-- [ ] Does not replace `memory_search` (long-term facts vs conversation recall)
-- [ ] Cap result payload size (reuse `output_filter` patterns)
+- [x] Kconfig `SC_ENABLE_SESSION_SEARCH` (default **n**, `depends on
+  SC_ENABLE_MEMORY_SEARCH` for the FTS5 build); KC-1 wired
+- [x] Index session `.jsonl`/`.json` files under `{workspace}/sessions/` with
+  FTS5 via the existing `sc_memory_index_rebuild_dir` (source prefix `session:`)
+- [x] Tool actions: `search` (query → matching sessions + snippets), `list`
+  (recent sessions by mtime)
+- [x] On-demand indexing — the tool builds its index lazily on the first
+  `search` (own mutex-guarded lazy init; `list` needs no index)
+- [x] Does not replace `memory_search` (separate tool + separate index DB at
+  `sessions/.session_search.db`)
+- [x] Cap result payload size — `max_results` clamped to 50; FTS5 snippets bounded
+
+**Status (2026-06-27):** ✅ done. New `src/tools/session_search.{c,h}` reusing
+`memory_index` FTS5; registered behind `#if SC_ENABLE_SESSION_SEARCH`. Tests in
+`test_session_search.c` (construct/list/match/no-match/requires-query).
 
 **Hermes parity:** "did we discuss X last week?" without loading full session into context.
 
@@ -422,6 +431,17 @@ config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
   incl. `test_sandbox` 30/30 (seccomp probes pass — caps block, defaults allow);
   `check_size_budget.sh` minimal-dynamic 277 KB ≤ 1024 KB; `check_claude_md.sh`
   clean; no new Kconfig flag (KC-1 N/A).
+- **Slice 6 — `task/4.11-session-search` (task 4.11)** — 2026-06-27. New
+  `session_search` tool (FTS5 over stored transcripts), gated by
+  `SC_ENABLE_SESSION_SEARCH` (default n, `depends on SC_ENABLE_MEMORY_SEARCH`).
+  Reuses `sc_memory_index_rebuild_dir` (prefix `session:`) over `.jsonl`/`.json`
+  under `sessions/`; index built lazily on first search (own mutex). Actions
+  `search` + `list`. New `src/tools/session_search.{c,h}`, agent registration,
+  KC-1 wiring, `test_session_search.c` (5 cases). README + phase doc updated.
+  **Verification gates:** Release `-DSC_ENABLE_SESSION_SEARCH=ON` build clean
+  (KC-2 `implicit`=0); `ctest` 50/50 incl. `test_session_search`; minimal
+  (flag off) 277 KB ≤ 1024 KB; KC-1 satisfied (genconfig disables it in minimal);
+  `check_claude_md.sh` clean.
 
 ---
 
