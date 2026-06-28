@@ -20,11 +20,11 @@ Signal offers strong end-to-end encryption and privacy properties, making it an 
 
 ---
 
-## Planned Architecture
+## Architecture
 
 - You run and maintain the `signal-cli` daemon yourself (or via Docker).
-- smolclaw communicates with it over HTTP.
-- Full support for the existing security model is planned:
+- smolclaw communicates with it over HTTP JSON-RPC.
+- Full support for the existing security model:
   - `dm_policy` (`pairing`, `allowlist`, `open`)
   - `allow_from` lists (supporting both phone numbers and `uuid:...` entries)
   - Automatic pairing challenge flow
@@ -32,7 +32,7 @@ Signal offers strong end-to-end encryption and privacy properties, making it an 
 
 ---
 
-## Recommended Setup (Planned)
+## Recommended Setup
 
 ### 1. Use a Dedicated Bot Number
 
@@ -140,4 +140,7 @@ See [Security](../SECURITY.md) and the [design document](../design/signal-channe
 
 ---
 
-**Note**: This page describes planned functionality. The Signal channel is not yet available in smolclaw. Implementation will follow the design in `docs/design/signal-channel.md`, with particular attention to security and testability.
+**Note**: The Signal channel is implemented (MVP — text DMs + groups, polling
+receive) behind `SC_ENABLE_SIGNAL` (**default off**). A live `signal-cli` smoke
+test is the remaining acceptance step before production use — see the
+[acceptance runbook](signal-acceptance.md).
