@@ -521,6 +521,10 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
     /* Memory tools */
     sc_tool_t *mem_write_tool = sc_tool_memory_write_new(workspace);
     sc_tool_t *mem_log_tool = sc_tool_memory_log_new(workspace);
+    /* Task 4.14: when approval mode is on, the memory_write tool stages to
+     * pending/ instead of committing. */
+    if (cfg->memory_write_approval)
+        sc_tool_memory_set_write_approval(mem_write_tool, 1);
     sc_tool_registry_register(agent->tools, sc_tool_memory_read_new(workspace));
     sc_tool_registry_register(agent->tools, mem_write_tool);
     sc_tool_registry_register(agent->tools, mem_log_tool);
@@ -1057,6 +1061,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->memory_review_model = cfg->memory_review_model
         ? sc_strdup(cfg->memory_review_model) : NULL;
     agent->memory_notifications = cfg->memory_notifications;
+    agent->memory_write_approval = cfg->memory_write_approval;
     agent->workspace_per_session = cfg->workspace_per_session;
     agent->verbose = cfg->verbose;
     agent->running = 0;

@@ -580,6 +580,7 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->memory_consolidation, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_CONSOLIDATION");
     env_override_bool(&cfg->memory_background_review, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_BACKGROUND_REVIEW");
     env_override_str(&cfg->memory_review_model, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_REVIEW_MODEL");
+    env_override_bool(&cfg->memory_write_approval, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_WRITE_APPROVAL");
     env_override_bool(&cfg->announce_on_join, "SMOLCLAW_ANNOUNCE_ON_JOIN");
     env_override_bool(&cfg->verbose, "SMOLCLAW_AGENTS_DEFAULTS_VERBOSE");
     env_override_bool(&cfg->auto_confirm, "SMOLCLAW_AGENTS_DEFAULTS_AUTO_CONFIRM");
@@ -839,6 +840,7 @@ sc_config_t *sc_config_default(void)
     cfg->memory_consolidation = 1;
     cfg->memory_background_review = 0;
     cfg->memory_notifications = 0;
+    cfg->memory_write_approval = 0;
     cfg->tee_enabled          = 1;
     cfg->tee_max_files        = 50;
     cfg->tee_max_file_size    = 10 * 1024 * 1024;
@@ -1054,6 +1056,7 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->memory_background_review = sc_json_get_bool(defaults,
         "memory_background_review", cfg->memory_background_review);
     override_str_field(&cfg->memory_review_model, defaults, "memory_review_model");
+    cfg->memory_write_approval = sc_json_get_bool(defaults, "memory_write_approval", cfg->memory_write_approval);
     {
         const char *mn = sc_json_get_string(defaults, "memory_notifications", "off");
         if (strcmp(mn, "verbose") == 0)   cfg->memory_notifications = 2;
@@ -1748,6 +1751,7 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     cJSON_AddBoolToObject(defaults, "sandbox", cfg->sandbox_enabled);
     cJSON_AddBoolToObject(defaults, "memory_consolidation", cfg->memory_consolidation);
     cJSON_AddBoolToObject(defaults, "memory_background_review", cfg->memory_background_review);
+    cJSON_AddBoolToObject(defaults, "memory_write_approval", cfg->memory_write_approval);
     if (cfg->memory_review_model)
         cJSON_AddStringToObject(defaults, "memory_review_model", cfg->memory_review_model);
     cJSON_AddStringToObject(defaults, "memory_notifications",

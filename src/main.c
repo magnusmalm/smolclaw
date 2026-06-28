@@ -20,6 +20,7 @@
 #include "config.h"
 #include "logger.h"
 #include "agent.h"
+#include "memory.h"
 #include "bus.h"
 #include "gateway_route.h"
 #include "pairing.h"
@@ -212,6 +213,7 @@ static void print_help(void)
     printf("  pairing     Manage channel pairing requests\n");
     printf("  cost        View token usage and costs\n");
     printf("  context     Show prompt budget breakdown for a session\n");
+    printf("  memory      Review staged memory writes (pending|approve <id>|reject <id>)\n");
     printf("  doctor      Validate configuration and dependencies\n");
     printf("  selftest    Run doctor checks + LLM round-trip, exit 0/1\n");
     printf("              --config <path>  Use a specific config file\n");
@@ -1400,6 +1402,98 @@ static int cmd_context(int argc, char **argv)
     return 0;
 }
 
+/* Read a whole file into a malloc'd string (NUL-terminated), or NULL. */
+static char *slurp_file(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    char chunk[4097];
+    size_t r;
+    while ((r = fread(chunk, 1, sizeof(chunk) - 1, f)) > 0) {
+        chunk[r] = '\0';
+        sc_strbuf_append(&sb, chunk);
+    }
+    fclose(f);
+    return sc_strbuf_finish(&sb);
+}
+
+/* Task 4.14: review staged memory writes. */
+static int cmd_memory(int argc, char **argv)
+{
+    const char *sub = (argc >= 3) ? argv[2] : "";
+    const char *id  = (argc >= 4) ? argv[3] : NULL;
+
+    sc_config_t *cfg = load_config_or_exit();
+    char *workspace = sc_config_workspace_path(cfg);
+    sc_memory_t *mem = sc_memory_new(workspace);
+    char *pdir = mem ? sc_memory_pending_dir_dup(mem) : NULL;
+    int rc = 0;
+
+    if (!pdir) {
+        fprintf(stderr, "Error: could not resolve pending memory dir\n");
+        rc = 1;
+    } else if (strcmp(sub, "pending") == 0) {
+        DIR *d = opendir(pdir);
+        int n = 0;
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d)) != NULL) {
+                size_t l = strlen(e->d_name);
+                if (l < 4 || strcmp(e->d_name + l - 3, ".md") != 0) continue;
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", pdir, e->d_name);
+                char *content = slurp_file(path);
+                char *prev = content ? sc_truncate(content, 100) : NULL;
+                printf("  %s\n      %s\n", e->d_name, prev ? prev : "");
+                free(prev); free(content);
+                n++;
+            }
+            closedir(d);
+        }
+        printf("%d pending memory entr%s.\n", n, n == 1 ? "y" : "ies");
+    } else if (strcmp(sub, "approve") == 0 && id) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", pdir, id);
+        char *content = slurp_file(path);
+        if (!content) { fprintf(stderr, "No such pending entry: %s\n", id); rc = 1; }
+        else {
+            char *existing = sc_memory_read_long_term(mem);
+            sc_strbuf_t sb; sc_strbuf_init(&sb);
+            if (existing && existing[0]) {
+                sc_strbuf_append(&sb, existing);
+                if (existing[strlen(existing) - 1] != '\n') sc_strbuf_append(&sb, "\n");
+            }
+            sc_strbuf_append(&sb, content);
+            char *full = sc_strbuf_finish(&sb);
+            if (full && sc_memory_write_long_term(mem, full) == 0) {
+                remove(path);
+                printf("Approved %s.\n", id);
+            } else { fprintf(stderr, "Failed to commit %s\n", id); rc = 1; }
+            free(full); free(existing); free(content);
+        }
+    } else if (strcmp(sub, "reject") == 0 && id) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", pdir, id);
+        if (remove(path) == 0) printf("Rejected %s.\n", id);
+        else { fprintf(stderr, "No such pending entry: %s\n", id); rc = 1; }
+    } else {
+        fprintf(stderr,
+            "Usage: %s memory pending\n"
+            "       %s memory approve <id>\n"
+            "       %s memory reject <id>\n",
+            SC_NAME, SC_NAME, SC_NAME);
+        rc = 1;
+    }
+
+    free(pdir);
+    if (mem) sc_memory_free(mem);
+    free(workspace);
+    sc_config_free(cfg);
+    return rc;
+}
+
 static int cmd_session(int argc, char **argv)
 {
     const char *subcmd = (argc >= 3) ? argv[2] : "";
@@ -2139,6 +2233,10 @@ int main(int argc, char **argv)
         return rc;
     } else if (strcmp(command, "context") == 0) {
         int rc = cmd_context(argc, argv);
+        sc_logger_shutdown();
+        return rc;
+    } else if (strcmp(command, "memory") == 0) {
+        int rc = cmd_memory(argc, argv);
         sc_logger_shutdown();
         return rc;
     } else if (strcmp(command, "backup") == 0) {

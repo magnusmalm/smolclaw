@@ -1,6 +1,8 @@
 #ifndef SC_MEMORY_H
 #define SC_MEMORY_H
 
+#include <stddef.h>  /* size_t */
+
 /* Index update callback: called after successful writes */
 typedef void (*sc_memory_index_cb)(const char *source, const char *content,
                                    void *ctx);
@@ -24,7 +26,11 @@ typedef struct sc_memory {
     char *session_dir;      /* {workspace}/memory/_sessions/<ns>/ (namespaced only) */
     sc_memory_index_cb index_cb;
     void *index_ctx;
+    int write_approval;     /* task 4.14: 1 = stage writes to pending/ */
 } sc_memory_t;
+
+/* Task 4.14: soft cap used for the system-prompt memory capacity header. */
+#define SC_MEMORY_SOFT_MAX_BYTES 8192
 
 /* Create/destroy */
 sc_memory_t *sc_memory_new(const char *workspace);
@@ -45,8 +51,28 @@ char *sc_memory_read_long_term(const sc_memory_t *mem);
 int sc_memory_write_long_term(const sc_memory_t *mem, const char *content);
 /* Append a single entry as a bullet to MEMORY.md (read-modify-write; never
  * overwrites existing content). Returns 0 on success, -1 on error, and 0 as a
- * silent no-op in namespaced/isolated mode. */
+ * silent no-op in namespaced/isolated mode. When write_approval is set, the
+ * entry is staged to pending/ instead (see sc_memory_stage). Duplicate entries
+ * (already present in MEMORY.md) are skipped as a success no-op. */
 int sc_memory_append_long_term(const sc_memory_t *mem, const char *entry);
+
+/* Task 4.14: staged writes + capacity + dedup. */
+
+/* Enable/disable write-approval (staging) mode on this handle. */
+void sc_memory_set_write_approval(sc_memory_t *mem, int enabled);
+
+/* Stage `content` as a new pending entry under {memory_dir}/pending/. Returns 0
+ * on success. Used internally when write_approval is on; also callable directly. */
+int sc_memory_stage(const sc_memory_t *mem, const char *content);
+
+/* Return a malloc'd path to the pending dir ({memory_dir}/pending), or NULL. */
+char *sc_memory_pending_dir_dup(const sc_memory_t *mem);
+
+/* Pure: 1 if `entry` (trimmed) already appears as a line in `existing`. */
+int sc_memory_is_duplicate(const char *existing, const char *entry);
+
+/* Pure: percent of `max` used by `used`, clamped to [0,100]; 0 when max <= 0. */
+int sc_memory_capacity_pct(size_t used, size_t max);
 
 /* Daily notes.
  * Namespaced mode writes to a single today.md per session (no date suffix). */

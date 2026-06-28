@@ -12,6 +12,8 @@
 
 #include <unistd.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <string.h>
 #include <stdio.h>
 
 /* Helper: create temp workspace dir */
@@ -411,9 +413,94 @@ static void test_memory_write_rejects_injection(void)
     cleanup_tmpdir(dir);
 }
 
+/* ---- Task 4.14: dedup, capacity, append, staging ---- */
+
+static void test_capacity_pct(void)
+{
+    ASSERT_INT_EQ(sc_memory_capacity_pct(0, 100), 0);
+    ASSERT_INT_EQ(sc_memory_capacity_pct(50, 100), 50);
+    ASSERT_INT_EQ(sc_memory_capacity_pct(100, 100), 100);
+    ASSERT_INT_EQ(sc_memory_capacity_pct(250, 100), 100);  /* clamped */
+    ASSERT_INT_EQ(sc_memory_capacity_pct(10, 0), 0);       /* max 0 */
+}
+
+static void test_is_duplicate(void)
+{
+    const char *existing = "# Memory\n- likes tea\n- uses vim\n";
+    ASSERT_INT_EQ(sc_memory_is_duplicate(existing, "likes tea"), 1);
+    ASSERT_INT_EQ(sc_memory_is_duplicate(existing, "- likes tea"), 1);  /* bullet */
+    ASSERT_INT_EQ(sc_memory_is_duplicate(existing, "  uses vim  "), 1); /* trimmed */
+    ASSERT_INT_EQ(sc_memory_is_duplicate(existing, "likes coffee"), 0);
+    ASSERT_INT_EQ(sc_memory_is_duplicate(NULL, "x"), 0);
+    ASSERT_INT_EQ(sc_memory_is_duplicate(existing, ""), 0);
+}
+
+static void test_append_long_term_and_dedup(void)
+{
+    char *dir = make_tmpdir();
+    ASSERT_NOT_NULL(dir);
+    sc_memory_t *mem = sc_memory_new(dir);
+    ASSERT_NOT_NULL(mem);
+
+    ASSERT_INT_EQ(sc_memory_append_long_term(mem, "fact one"), 0);
+    ASSERT_INT_EQ(sc_memory_append_long_term(mem, "fact two"), 0);
+    ASSERT_INT_EQ(sc_memory_append_long_term(mem, "fact one"), 0);  /* dup no-op */
+
+    char *lt = sc_memory_read_long_term(mem);
+    ASSERT_NOT_NULL(lt);
+    ASSERT(strstr(lt, "- fact one") != NULL, "fact one present");
+    ASSERT(strstr(lt, "- fact two") != NULL, "fact two present");
+    /* "fact one" must appear exactly once (dedup worked). */
+    char *first = strstr(lt, "fact one");
+    ASSERT(first && !strstr(first + 1, "fact one"), "fact one not duplicated");
+    free(lt);
+
+    sc_memory_free(mem);
+    cleanup_tmpdir(dir);
+}
+
+static void test_write_approval_staging(void)
+{
+    char *dir = make_tmpdir();
+    ASSERT_NOT_NULL(dir);
+    sc_memory_t *mem = sc_memory_new(dir);
+    ASSERT_NOT_NULL(mem);
+    sc_memory_set_write_approval(mem, 1);
+
+    /* With approval on, an append stages instead of committing. */
+    ASSERT_INT_EQ(sc_memory_append_long_term(mem, "staged fact"), 0);
+
+    char *lt = sc_memory_read_long_term(mem);
+    ASSERT(lt == NULL || strstr(lt, "staged fact") == NULL,
+           "approval mode must not commit to MEMORY.md");
+    free(lt);
+
+    /* A pending file should now exist. */
+    char *pdir = sc_memory_pending_dir_dup(mem);
+    ASSERT_NOT_NULL(pdir);
+    DIR *d = opendir(pdir);
+    ASSERT_NOT_NULL(d);
+    int found = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        size_t l = strlen(e->d_name);
+        if (l > 3 && strcmp(e->d_name + l - 3, ".md") == 0) found = 1;
+    }
+    closedir(d);
+    ASSERT_INT_EQ(found, 1);
+    free(pdir);
+
+    sc_memory_free(mem);
+    cleanup_tmpdir(dir);
+}
+
 int main(void)
 {
     printf("test_memory_tools\n");
+    RUN_TEST(test_capacity_pct);
+    RUN_TEST(test_is_duplicate);
+    RUN_TEST(test_append_long_term_and_dedup);
+    RUN_TEST(test_write_approval_staging);
     RUN_TEST(test_memory_read_empty);
     RUN_TEST(test_memory_write);
     RUN_TEST(test_memory_read_long_term);

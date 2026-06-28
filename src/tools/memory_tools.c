@@ -248,3 +248,10 @@ void sc_tool_memory_set_index_cb(sc_tool_t *tool, sc_memory_index_cb cb,
     mem_tool_data_t *d = tool->data;
     sc_memory_set_index_cb(d->mem, cb, ctx);
 }
+
+void sc_tool_memory_set_write_approval(sc_tool_t *tool, int enabled)
+{
+    if (!tool || !tool->data) return;
+    mem_tool_data_t *d = tool->data;
+    sc_memory_set_write_approval(d->mem, enabled);
+}

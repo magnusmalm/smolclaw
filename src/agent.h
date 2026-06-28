@@ -55,6 +55,7 @@ typedef struct sc_agent {
     char *memory_review_model;      /* optional cheaper model; NULL = summary/main */
     int memory_notifications;       /* 0 off, 1 on, 2 verbose */
     sc_task_t *review_task;         /* in-flight async review, or NULL */
+    int memory_write_approval;      /* task 4.14: stage memory writes to pending/ */
     /* Automatic session reset policy (task 3.7) */
     int session_reset_mode;        /* sc_session_reset_mode_t */
     int session_reset_daily_hour;

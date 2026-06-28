@@ -4,6 +4,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,6 +263,8 @@ int sc_memory_write_long_term(const sc_memory_t *mem, const char *content)
 {
     if (!mem || !content) return -1;
     if (is_namespaced(mem)) return 0;  /* isolated: silently drop */
+    /* Task 4.14: in approval mode, a write is staged rather than committed. */
+    if (mem->write_approval) return sc_memory_stage(mem, content);
     int rc = write_file(mem->memory_file, content);
     if (rc == 0 && mem->index_cb)
         mem->index_cb("long_term", content, mem->index_ctx);
@@ -272,8 +275,15 @@ int sc_memory_append_long_term(const sc_memory_t *mem, const char *entry)
 {
     if (!mem || !entry || !entry[0]) return -1;
     if (is_namespaced(mem)) return 0;  /* isolated: silently drop */
+    if (mem->write_approval) return sc_memory_stage(mem, entry);
 
     char *existing = read_file(mem->memory_file);
+
+    /* Task 4.14: skip entries already present (success no-op). */
+    if (sc_memory_is_duplicate(existing, entry)) {
+        free(existing);
+        return 0;
+    }
 
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
@@ -291,6 +301,91 @@ int sc_memory_append_long_term(const sc_memory_t *mem, const char *entry)
     if (rc == 0 && mem->index_cb)
         mem->index_cb("long_term", full, mem->index_ctx);
     free(full);
+    return rc;
+}
+
+/* ---- Task 4.14: staged writes, capacity, dedup ---- */
+
+void sc_memory_set_write_approval(sc_memory_t *mem, int enabled)
+{
+    if (mem) mem->write_approval = enabled ? 1 : 0;
+}
+
+int sc_memory_capacity_pct(size_t used, size_t max)
+{
+    if (max == 0) return 0;
+    unsigned long pct = (unsigned long)used * 100 / (unsigned long)max;
+    return pct > 100 ? 100 : (int)pct;
+}
+
+/* Trim leading/trailing ASCII whitespace and a leading "- " bullet marker. */
+static const char *trim_entry(const char *s, size_t *len)
+{
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    if (s[0] == '-' && s[1] == ' ') s += 2;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t n = strlen(s);
+    while (n > 0 && (s[n-1] == ' ' || s[n-1] == '\t' ||
+                     s[n-1] == '\r' || s[n-1] == '\n')) n--;
+    *len = n;
+    return s;
+}
+
+int sc_memory_is_duplicate(const char *existing, const char *entry)
+{
+    if (!existing || !entry) return 0;
+    size_t elen = 0;
+    const char *e = trim_entry(entry, &elen);
+    if (elen == 0) return 0;
+
+    const char *line = existing;
+    while (*line) {
+        const char *nl = strchr(line, '\n');
+        size_t raw = nl ? (size_t)(nl - line) : strlen(line);
+        /* Copy the line, trim it, compare. */
+        char buf[1024];
+        size_t cp = raw < sizeof(buf) - 1 ? raw : sizeof(buf) - 1;
+        memcpy(buf, line, cp);
+        buf[cp] = '\0';
+        size_t llen = 0;
+        const char *l = trim_entry(buf, &llen);
+        if (llen == elen && memcmp(l, e, elen) == 0) return 1;
+        if (!nl) break;
+        line = nl + 1;
+    }
+    return 0;
+}
+
+char *sc_memory_pending_dir_dup(const sc_memory_t *mem)
+{
+    if (!mem || !mem->memory_dir) return NULL;
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/pending", mem->memory_dir);
+    return sc_strbuf_finish(&sb);
+}
+
+int sc_memory_stage(const sc_memory_t *mem, const char *content)
+{
+    if (!mem || !content || !content[0]) return -1;
+    if (is_namespaced(mem)) return 0;
+
+    static atomic_int seq = 0;
+    char *dir = sc_memory_pending_dir_dup(mem);
+    if (!dir) return -1;
+    mkdir(mem->memory_dir, 0700);
+    mkdir(dir, 0700);
+
+    sc_strbuf_t pb;
+    sc_strbuf_init(&pb);
+    sc_strbuf_appendf(&pb, "%s/%ld_%d.md", dir,
+                      (long)time(NULL), atomic_fetch_add(&seq, 1));
+    char *path = sc_strbuf_finish(&pb);
+    free(dir);
+    if (!path) return -1;
+
+    int rc = write_file(path, content);
+    free(path);
     return rc;
 }
 

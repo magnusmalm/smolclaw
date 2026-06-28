@@ -18,4 +18,7 @@ sc_tool_t *sc_tool_memory_log_new(const char *workspace);
 void sc_tool_memory_set_index_cb(sc_tool_t *tool, sc_memory_index_cb cb,
                                   void *ctx);
 
+/* Task 4.14: enable write-approval staging on a memory tool's sc_memory_t. */
+void sc_tool_memory_set_write_approval(sc_tool_t *tool, int enabled);
+
 #endif /* SC_TOOL_MEMORY_H */

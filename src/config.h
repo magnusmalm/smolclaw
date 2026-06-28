@@ -348,6 +348,9 @@ typedef struct {
     char *memory_review_model;   /* optional cheaper model override (NULL = summary/main) */
     int memory_notifications;    /* 0 off, 1 on, 2 verbose */
 
+    /* Task 4.14: stage memory writes to pending/ for approval (default off). */
+    int memory_write_approval;
+
     /* Send version/feature info to channels on join */
     int announce_on_join;
 

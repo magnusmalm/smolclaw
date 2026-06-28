@@ -1122,6 +1122,154 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     evbuffer_free(buf);
 }
 
+/* Read a whole file into a malloc'd NUL-terminated string, or NULL. */
+static char *web_slurp(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    char chunk[4097];
+    size_t r;
+    while ((r = fread(chunk, 1, sizeof(chunk) - 1, f)) > 0) {
+        chunk[r] = '\0';
+        sc_strbuf_append(&sb, chunk);
+    }
+    fclose(f);
+    return sc_strbuf_finish(&sb);
+}
+
+/* GET  /api/memory/pending           — list staged memory entries (task 4.14)
+ * POST /api/memory/pending {action,id} — approve|reject a staged entry */
+static void handle_memory_pending(struct evhttp_request *req, void *arg)
+{
+    sc_channel_t *ch = arg;
+    web_data_t *wd = ch->data;
+
+    if (!check_auth(req, wd)) {
+        send_json_error(req, 401, "Unauthorized");
+        return;
+    }
+    if (!wd->workspace) {
+        send_json_error(req, 500, "Workspace not configured");
+        return;
+    }
+
+    sc_memory_t *mem = sc_memory_new(wd->workspace);
+    char *pdir = mem ? sc_memory_pending_dir_dup(mem) : NULL;
+    if (!pdir) {
+        if (mem) sc_memory_free(mem);
+        send_json_error(req, 500, "Failed to open memory store");
+        return;
+    }
+
+    enum evhttp_cmd_type cmd = evhttp_request_get_command(req);
+
+    if (cmd == EVHTTP_REQ_GET) {
+        cJSON *resp = cJSON_CreateObject();
+        cJSON *arr = cJSON_AddArrayToObject(resp, "pending");
+        DIR *d = opendir(pdir);
+        if (d) {
+            struct dirent *e;
+            while ((e = readdir(d)) != NULL) {
+                size_t l = strlen(e->d_name);
+                if (l < 4 || strcmp(e->d_name + l - 3, ".md") != 0) continue;
+                char path[1024];
+                snprintf(path, sizeof(path), "%s/%s", pdir, e->d_name);
+                char *content = web_slurp(path);
+                cJSON *item = cJSON_CreateObject();
+                cJSON_AddStringToObject(item, "id", e->d_name);
+                cJSON_AddStringToObject(item, "content", content ? content : "");
+                cJSON_AddItemToArray(arr, item);
+                free(content);
+            }
+            closedir(d);
+        }
+        char *str = cJSON_PrintUnformatted(resp);
+        cJSON_Delete(resp);
+        struct evbuffer *buf = evbuffer_new();
+        if (str) evbuffer_add(buf, str, strlen(str));
+        free(str);
+        evhttp_add_header(evhttp_request_get_output_headers(req),
+                          "Content-Type", "application/json");
+        evhttp_send_reply(req, 200, "OK", buf);
+        evbuffer_free(buf);
+        free(pdir); sc_memory_free(mem);
+        return;
+    }
+
+    if (cmd != EVHTTP_REQ_POST) {
+        send_json_error(req, 405, "Method not allowed");
+        free(pdir); sc_memory_free(mem);
+        return;
+    }
+
+    /* POST approve/reject */
+    struct evbuffer *input = evhttp_request_get_input_buffer(req);
+    size_t len = evbuffer_get_length(input);
+    char *body = (len > 0 && len < 4096) ? malloc(len + 1) : NULL;
+    if (!body) {
+        send_json_error(req, 400, "Invalid request body");
+        free(pdir); sc_memory_free(mem);
+        return;
+    }
+    evbuffer_copyout(input, body, len);
+    body[len] = '\0';
+    cJSON *json = cJSON_Parse(body);
+    free(body);
+
+    const char *action = json ? sc_json_get_string(json, "action", NULL) : NULL;
+    const char *id     = json ? sc_json_get_string(json, "id", NULL) : NULL;
+    /* Reject path traversal in id. */
+    int bad_id = !id || !id[0] || strchr(id, '/') || strstr(id, "..");
+    if (!action || bad_id) {
+        cJSON_Delete(json);
+        send_json_error(req, 400, "Missing/invalid 'action' or 'id'");
+        free(pdir); sc_memory_free(mem);
+        return;
+    }
+
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s", pdir, id);
+    int ok = 0;
+    if (strcmp(action, "reject") == 0) {
+        ok = (remove(path) == 0);
+    } else if (strcmp(action, "approve") == 0) {
+        char *content = web_slurp(path);
+        if (content) {
+            char *existing = sc_memory_read_long_term(mem);
+            sc_strbuf_t sb; sc_strbuf_init(&sb);
+            if (existing && existing[0]) {
+                sc_strbuf_append(&sb, existing);
+                if (existing[strlen(existing) - 1] != '\n') sc_strbuf_append(&sb, "\n");
+            }
+            sc_strbuf_append(&sb, content);
+            char *full = sc_strbuf_finish(&sb);
+            if (full && sc_memory_write_long_term(mem, full) == 0) {
+                remove(path);
+                ok = 1;
+            }
+            free(full); free(existing); free(content);
+        }
+    }
+    cJSON_Delete(json);
+    free(pdir); sc_memory_free(mem);
+
+    if (!ok) { send_json_error(req, 404, "No such pending entry or action failed"); return; }
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp, "status", "ok");
+    char *str = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    struct evbuffer *buf = evbuffer_new();
+    if (str) evbuffer_add(buf, str, strlen(str));
+    free(str);
+    evhttp_add_header(evhttp_request_get_output_headers(req),
+                      "Content-Type", "application/json");
+    evhttp_send_reply(req, 200, "OK", buf);
+    evbuffer_free(buf);
+}
+
 #if SC_ENABLE_MEMORY_SEARCH
 /* Handle POST /api/memory/search — query agent's FTS5 memory index */
 static void handle_memory_search(struct evhttp_request *req, void *arg)
@@ -1409,6 +1557,7 @@ static int web_start(sc_channel_t *self)
     /* Set up routes */
     evhttp_set_cb(wd->http, "/api/message", handle_message, self);
     evhttp_set_cb(wd->http, "/api/memory/log", handle_memory_log, self);
+    evhttp_set_cb(wd->http, "/api/memory/pending", handle_memory_pending, self);
 #if SC_ENABLE_MEMORY_SEARCH
     evhttp_set_cb(wd->http, "/api/memory/search", handle_memory_search, self);
 #endif

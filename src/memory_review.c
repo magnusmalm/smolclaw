@@ -110,6 +110,7 @@ typedef struct {
     char *workspace;           /* copied */
     char *digest;              /* owned */
     int notifications;
+    int write_approval;        /* task 4.14: stage instead of commit */
 } review_args_t;
 
 static void review_args_free(review_args_t *a)
@@ -161,6 +162,7 @@ static void *review_task_fn(void *arg, volatile atomic_int *cancel)
     if (entries && n > 0) {
         sc_memory_t *mem = sc_memory_new(a->workspace);
         if (mem) {
+            sc_memory_set_write_approval(mem, a->write_approval);
             for (int i = 0; i < n; i++) {
                 char *clean = sc_redact_secrets(entries[i]);
                 const char *txt = clean ? clean : entries[i];
@@ -228,6 +230,7 @@ void sc_memory_review_maybe_spawn(sc_agent_t *agent, const char *user_msg,
         ? agent->memory_review_model
         : (agent->summary_model ? agent->summary_model : agent->model));
     a->notifications = agent->memory_notifications;
+    a->write_approval = agent->memory_write_approval;
     a->provider = agent->provider->clone(agent->provider);
 
     if (!a->provider || !a->workspace || !a->digest) {

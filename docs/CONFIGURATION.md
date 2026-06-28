@@ -110,6 +110,13 @@ definitions.
 | memory_background_review  | bool | false   | After each successful turn, an async LLM pass proposes 0–2 durable memory entries (task 4.13). Opt-in. |
 | memory_review_model       | string | (summary/main) | Optional cheaper model for the background review. |
 | memory_notifications      | string | off     | Background-review logging: `off` \| `on` \| `verbose`. |
+| memory_write_approval     | bool | false   | Stage memory writes (foreground tool + background review) to `memory/pending/` for review instead of committing (task 4.14). |
+
+When `memory_write_approval` is true, review staged entries with the CLI
+(`smolclaw memory pending` / `approve <id>` / `reject <id>`) or the Web API
+(`GET`/`POST /api/memory/pending`, behind bearer auth). The system-prompt memory
+block also shows a capacity header (chars used vs soft cap). Duplicate entries
+are skipped on add.
 | compress_tool_results     | bool | true    | Replace old large tool results with a metadata placeholder before each LLM call (token saver). |
 | compress_keep_recent      | int  | 6       | Most-recent messages kept verbatim (never compressed). |
 | compress_min_bytes        | int  | 200     | Only tool results larger than this are compressed; smaller ones are kept. |

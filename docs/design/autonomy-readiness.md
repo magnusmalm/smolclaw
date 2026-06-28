@@ -133,7 +133,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.11 global `session_search` | 🔵 SHIPPED | `session_search` tool (FTS5 over sessions); `SC_ENABLE_SESSION_SEARCH` default n; `test_session_search` |
 | 4.12 agent-initiated compact tool | 🔵 SHIPPED | `compact` tool + shared `sc_agent_compact_session` + cooldown/budget guards; `test_agent` |
 | 4.13 post-turn memory review | 🔵/🟠 | Code-complete + mock-accepted (`memory_review.c`, pure parser tested); live LLM review = human gate |
-| 4.14 staged memory writes | ✅ READY | Pairs with 4.13 |
+| 4.14 staged memory writes | 🔵 SHIPPED | `memory_write_approval` staging + CLI `memory pending/approve/reject` + `/api/memory/pending` + capacity header + dedup; `test_memory_tools` |
 
 ### Phase 5 — Defer / reject
 

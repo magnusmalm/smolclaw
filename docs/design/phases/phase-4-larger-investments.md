@@ -352,14 +352,28 @@ worker mirroring consolidation. Isolated turns skipped (no shared-memory leak).
 
 **Files:** `src/memory.c`, `src/tools/memory_tools.c`, `src/context.c`, `src/main.c`
 
-- [ ] Config: `memory.write_approval`: `false` (default) | `true`
-- [ ] When `true`: foreground and background review writes stage to `{SMOLCLAW_HOME}/pending/memory/`
-- [ ] CLI: `smolclaw memory pending|approve|reject` (mirror Hermes `/memory pending`)
-- [ ] Web API: optional `GET/POST /api/memory/pending` (if `SC_ENABLE_WEB`)
-- [ ] System prompt: show memory capacity usage % and char counts in memory block header
-- [ ] Duplicate detection on add (existing entries rejected with success/no-op message)
+- [x] Config: `memory_write_approval` (default false, flat under `agents.defaults`)
+- [x] When `true`: foreground (`memory_write` tool) and background-review writes
+  stage to `{workspace}/memory/pending/` (workspace-relative — the memory
+  subsystem is workspace-scoped; documented deviation from the spec's
+  SMOLCLAW_HOME path)
+- [x] CLI: `smolclaw memory pending | approve <id> | reject <id>`
+- [x] Web API: `GET`/`POST /api/memory/pending` (behind `SC_ENABLE_WEB` + bearer
+  auth; POST `{action,id}`, path-traversal-guarded)
+- [x] System prompt: memory block header shows char count + % of soft cap
+  (`SC_MEMORY_SOFT_MAX_BYTES`); pure `sc_memory_capacity_pct`
+- [x] Duplicate detection on add — pure `sc_memory_is_duplicate`; dupes are a
+  success no-op in `sc_memory_append_long_term`
 
 **Explicitly not in 4.14:** `skill_manage`, skill write approval, external memory providers.
+
+**Status (2026-06-27):** ✅ done. `sc_memory_append_long_term` (safe RMW append)
+now honors dedup + staging; `sc_memory_stage`/`sc_memory_pending_dir_dup`/
+`sc_memory_is_duplicate`/`sc_memory_capacity_pct` added. Staging wired to the
+`memory_write` tool + background review; CLI `cmd_memory`; Web
+`/api/memory/pending`; capacity header in `context.c`. Note: in approval mode the
+foreground `memory_write` (which normally replaces the whole file) is treated as
+a staged addition. Tests in `test_memory_tools.c` (capacity/dedup/append/staging).
 
 ---
 
@@ -495,6 +509,18 @@ worker mirroring consolidation. Isolated turns skipped (no shared-memory leak).
   moving the include out of the `#if SC_ENABLE_MEMORY_SEARCH` guard); `ctest`
   50/50 incl. `test_memory_review`; `check_size_budget.sh` minimal-dynamic 281 KB
   ≤ 1024 KB (+4 KB always-compiled); `check_claude_md.sh` clean; no Kconfig flag.
+- **Slice 9 — `task/4.14-staged-memory` (task 4.14)** — 2026-06-27. Staged memory
+  writes + capacity + dedup. `sc_memory_append_long_term` gains dedup + staging;
+  new `sc_memory_stage`/`sc_memory_pending_dir_dup`/`sc_memory_is_duplicate`/
+  `sc_memory_capacity_pct` + `write_approval` flag. Wired to the `memory_write`
+  tool and the 4.13 review worker; CLI `smolclaw memory pending|approve|reject`;
+  Web `GET/POST /api/memory/pending` (bearer auth, traversal-guarded); capacity
+  header in the system-prompt memory block. Config `memory_write_approval`
+  (default off). Tests in `test_memory_tools.c`; CLI smoke-tested (stage→list→
+  approve→committed).
+  **Verification gates:** Release `-DSC_ENABLE_WEB=ON` + minimal builds clean
+  (KC-2 `implicit`=0); `ctest` 50/50; `check_size_budget.sh` minimal-dynamic
+  285 KB ≤ 1024 KB; `check_claude_md.sh` clean; no Kconfig flag (config-gated).
 
 ---
 
