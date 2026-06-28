@@ -58,6 +58,9 @@
 #include "cost.h"
 #include "backup.h"
 #include "doctor.h"
+#if SC_ENABLE_XAI_OAUTH
+#include "util/xai_oauth.h"
+#endif
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
@@ -224,6 +227,10 @@ static void print_help(void)
 #endif
 #if SC_ENABLE_UPDATER
     printf("  update      Check for and apply updates\n");
+#endif
+#if SC_ENABLE_XAI_OAUTH
+    printf("  auth        xAI Grok OAuth: login|status|logout|refresh xai\n");
+    printf("              login xai [--no-browser] [--timeout N]\n");
 #endif
     printf("  backup      Backup and restore state\n");
     printf("              create [--config-only] [--include-sessions] [--name TAG]\n");
@@ -2257,6 +2264,10 @@ int main(int argc, char **argv)
 #if SC_ENABLE_UPDATER
     } else if (strcmp(command, "update") == 0) {
         cmd_update(argc, argv);
+#endif
+#if SC_ENABLE_XAI_OAUTH
+    } else if (strcmp(command, "auth") == 0) {
+        return sc_cmd_auth(argc, argv);
 #endif
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);

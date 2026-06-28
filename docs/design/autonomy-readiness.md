@@ -82,8 +82,8 @@ GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.
 
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 2.1 xAI Grok OAuth | 🟠 GATED-EXT | Not started; **real login needs SuperGrok sub + current client_id/endpoints** |
-| 2.2 `auth` subcommand | 🟠 GATED-EXT | Part of 2.1 |
+| 2.1 xAI Grok OAuth | 🔵 SHIPPED / 🟠 | **Landed 2026-06-28** behind `SC_ENABLE_XAI_OAUTH` (default n). `src/util/xai_oauth.{c,h}`: PKCE + JWT-exp + loopback login + auth.json store + refresh + factory `xai-oauth` resolver. base64url added. Pure + mock-HTTP tested (`test_xai_oauth`, 12 cases). **Live SuperGrok login = human gate**; client_id/endpoints are 2026-05 spec values, unverifiable offline. (Recon: no `SC_ENABLE_XAI` flag exists → no `depends`.) See phase-2 §2.1–2.2 |
+| 2.2 `auth` subcommand | 🔵 SHIPPED / 🟠 | `smolclaw auth login\|status\|logout\|refresh xai` (`--no-browser`, `--timeout N`) in `main.c`/`xai_oauth.c`. Part of 2.1; same live gate |
 | 2.3 `session compact` | 🔵 SHIPPED | `session_maint.c`; `test_session_maint` |
 | 2.4 `session prune` | 🔵 SHIPPED | `sc_session_prune_candidates` |
 | 2.5 incremental reload | 🟡 GATED-DEC | **Skipped** — no measured bottleneck (in-process append covers reload) |

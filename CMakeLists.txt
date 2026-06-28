@@ -230,6 +230,7 @@ set(SC_SOURCES
     src/util/task.c
     src/util/arena.c
     src/util/base64.c
+    src/util/xai_oauth.c
     src/util/secrets.c
     src/util/curl_common.c
     src/util/prompt_guard.c
@@ -568,6 +569,10 @@ if(SC_ENABLE_SIGNAL)
     list(APPEND TEST_SOURCES tests/test_signal.c)
 endif()
 
+if(SC_ENABLE_XAI_OAUTH)
+    list(APPEND TEST_SOURCES tests/test_xai_oauth.c)
+endif()
+
 if(SC_ENABLE_VOICE)
     list(APPEND TEST_SOURCES tests/test_voice.c)
 endif()
@@ -698,6 +703,9 @@ if(EVENT_PTHREADS_LIB)
     endif()
     if(SC_ENABLE_SIGNAL)
         target_link_libraries(test_signal PRIVATE ${EVENT_PTHREADS_LIB})
+    endif()
+    if(SC_ENABLE_XAI_OAUTH)
+        target_link_libraries(test_xai_oauth PRIVATE ${EVENT_PTHREADS_LIB})
     endif()
     if(SC_ENABLE_VOICE)
         target_link_libraries(test_voice PRIVATE ${EVENT_PTHREADS_LIB})

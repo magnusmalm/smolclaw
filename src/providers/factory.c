@@ -17,8 +17,50 @@
 #if SC_ENABLE_MOA
 #include "providers/moa.h"
 #endif
+#if SC_ENABLE_XAI_OAUTH
+#include "util/xai_oauth.h"
+#endif
 
 #define LOG_TAG "provider-factory"
+
+#if SC_ENABLE_XAI_OAUTH
+/* Task 2.1: the `xai-oauth`/`grok-oauth` providers pull a fresh bearer token
+ * from the OAuth store instead of a static api_key, then reuse the ordinary
+ * OpenAI-compatible xAI HTTP provider. */
+static int is_xai_oauth_name(const char *n)
+{
+    return n && (strcasecmp(n, "xai-oauth") == 0 ||
+                 strcasecmp(n, "grok-oauth") == 0 ||
+                 strcasecmp(n, "grok-sub") == 0);
+}
+
+static sc_provider_t *build_xai_oauth(const sc_config_t *cfg)
+{
+    char *token = sc_xai_oauth_ensure_fresh_token();
+    if (!token) {
+        SC_LOG_ERROR(LOG_TAG, "xai-oauth: no valid token "
+                              "— run `smolclaw auth login xai`");
+        return NULL;
+    }
+    const char *base = (cfg->xai.api_base && cfg->xai.api_base[0])
+                           ? cfg->xai.api_base : "https://api.x.ai/v1";
+    sc_provider_t *p = sc_provider_http_new(token, base, cfg->xai.proxy);
+    free(token); /* sc_provider_http_new strdups it */
+    if (p) p->name = "xai-oauth";
+    return p;
+}
+
+/* True if `model` carries an "xai-oauth/"/"grok-oauth/"/"grok-sub/" prefix. */
+static int model_has_xai_oauth_prefix(const char *model)
+{
+    const char *slash = model ? strchr(model, '/') : NULL;
+    if (!slash || slash == model) return 0;
+    size_t pl = (size_t)(slash - model);
+    return (pl == 9 && strncasecmp(model, "xai-oauth", 9) == 0) ||
+           (pl == 10 && strncasecmp(model, "grok-oauth", 10) == 0) ||
+           (pl == 8 && strncasecmp(model, "grok-sub", 8) == 0);
+}
+#endif /* SC_ENABLE_XAI_OAUTH */
 
 /* Check if a string contains a substring (case-insensitive) */
 static int contains_ci(const char *haystack, const char *needle)
@@ -238,6 +280,11 @@ sc_provider_t *sc_provider_create(const sc_config_t *cfg)
         return sc_provider_moa_new(cfg, model + 4);
 #endif
 
+#if SC_ENABLE_XAI_OAUTH
+    if (is_xai_oauth_name(provider_name) || model_has_xai_oauth_prefix(model))
+        return build_xai_oauth(cfg);
+#endif
+
     const char *api_key = NULL;
     const char *api_base = NULL;
     const char *proxy = NULL;
@@ -318,6 +365,11 @@ sc_provider_t *sc_provider_create_for_model(const sc_config_t *cfg, const char *
         SC_LOG_ERROR(LOG_TAG, "Invalid args for create_for_model");
         return NULL;
     }
+
+#if SC_ENABLE_XAI_OAUTH
+    if (model_has_xai_oauth_prefix(model) || is_xai_oauth_name(cfg->provider))
+        return build_xai_oauth(cfg);
+#endif
 
     const char *api_key = NULL;
     const char *api_base = NULL;

@@ -311,6 +311,16 @@ config SC_ENABLE_VAULT
 	  Config references secrets as vault://key_name.
 	  Adds the 'vault' CLI subcommand.
 
+config SC_ENABLE_XAI_OAUTH
+	bool "xAI Grok OAuth (SuperGrok subscription support)"
+	default n
+	help
+	  Browser-based OAuth 2.0 PKCE login for users with a Grok
+	  subscription. Adds the `auth` CLI subcommand and the
+	  `xai-oauth`/`grok-oauth` providers, which pull a short-lived bearer
+	  token (auto-refreshed) instead of an XAI_API_KEY. Reuses libevent
+	  (already linked) for the one-shot loopback callback server. ~40-60 KB.
+
 endmenu
 
 menu "Updates"

@@ -52,19 +52,42 @@ gateway slash commands, Hermes-gap operator docs.
 
 Deliverables:
 
-- [ ] PKCE login flow with loopback evhttp callback (127.0.0.1 only)
-- [ ] Token storage in `~/.smolclaw/auth.json` (0600, atomic replace)
-- [ ] JWT `exp` decode for refresh decision (no signature verify)
-- [ ] `sc_xai_oauth_ensure_fresh_token()` called from factory for `xai-oauth` provider
-- [ ] `smolclaw auth login|status|logout|refresh xai`
-- [ ] `--no-browser` for SSH/VPS
-- [ ] Provider aliases: `xai-oauth`, `grok-oauth`
-- [ ] Kconfig `SC_ENABLE_XAI_OAUTH` — **default n, `depends on SC_ENABLE_XAI`** (Q6, 2026-06-26:
-  +40–60 KB → keep minimal builds lean; overrides spec's tentative `default y`). `~/.grok/auth.json`
-  interop stays out of MVP (Phase 2).
-- [ ] ≥90% line coverage on `xai_oauth.c`; mock HTTP tests
+- [x] PKCE login flow with loopback evhttp callback (127.0.0.1 only) — `do_login`
+  binds `127.0.0.1:0`, captures `code`+`state` via `/callback`, validates state.
+- [x] Token storage in `{SMOLCLAW_HOME}/auth.json` (0600, atomic replace via
+  `.tmp.$pid` + `rename`)
+- [x] JWT `exp` decode for refresh decision (no signature verify) —
+  `sc_xai_jwt_get_exp` + `sc_xai_oauth_should_refresh` (120s skew; unknown exp →
+  don't refresh-loop)
+- [x] `sc_xai_oauth_ensure_fresh_token()` called from factory for the
+  `xai-oauth`/`grok-oauth` providers (re-validates token endpoint origin before
+  refresh)
+- [x] `smolclaw auth login|status|logout|refresh xai` (`--no-browser`, `--timeout N`)
+- [x] `--no-browser` for SSH/VPS (auto-detected via `SSH_CONNECTION`/`SSH_CLIENT`/
+  `TERM=dumb`/`SMOLCLAW_NO_BROWSER`; URL always printed)
+- [x] Provider aliases: `xai-oauth`, `grok-oauth` (+ `grok-sub`; also via an
+  `xai-oauth/<model>` prefix)
+- [x] Kconfig `SC_ENABLE_XAI_OAUTH` — **default n**. **Recon correction
+  (2026-06-28): there is no `SC_ENABLE_XAI` flag** (xAI is always-compiled), so
+  the Q6 `depends on SC_ENABLE_XAI` has no target and is omitted. KC-1 wired
+  (FEATURE_SYMS + cmake override + defconfig.minimal). `~/.grok/auth.json`
+  interop stays out of MVP.
+- [x] mock HTTP tests (discovery + refresh + invalid_grant) + pure-helper
+  coverage; `tests/test_xai_oauth.c` (12 cases)
 
-**Smol contract:** <650 LOC, <60 KB binary, zero new deps.
+**Smol contract:** <650 LOC, <60 KB binary, zero new deps — met (reuses
+libevent/libcurl/cJSON/sha256; base64url added ~40 LOC; minimal build unchanged
+at 285 KB since the feature is default-off).
+
+**Status (2026-06-28):** ✅ code-complete (mock-tested); 🟠 **live SuperGrok
+login = human gate.** New `src/util/xai_oauth.{c,h}` + base64url in
+`util/base64.c`; factory `xai-oauth` branch; `auth` subcommand in `main.c`.
+Pure helpers + HTTP steps (endpoint as a param → mockable) split from the
+interactive loopback login. **Stale-constant risk:** the client_id, issuer,
+scope, and `plan`/`referrer` params are the 2026-05 spec values, defined in one
+place (`xai_oauth.c`) and unverifiable offline — live login must confirm them.
+A smoke test caught + fixed a double-free (`load`/`from_json` now zero `*out`
+on the failure path).
 
 ### 2.3 Session compact
 

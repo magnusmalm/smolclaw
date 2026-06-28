@@ -147,3 +147,37 @@ unsigned char *sc_base64_decode(const char *b64, size_t *out_len)
     *out_len = decoded_len;
     return out;
 }
+
+char *sc_base64url_encode(const unsigned char *data, size_t len)
+{
+    char *b64 = sc_base64_encode(data, len);
+    if (!b64) return NULL;
+    /* In-place: map chars and drop padding (output never grows). */
+    char *w = b64;
+    for (const char *p = b64; *p; p++) {
+        if (*p == '=') break;          /* '=' only ever appears as trailing pad */
+        else if (*p == '+') *w++ = '-';
+        else if (*p == '/') *w++ = '_';
+        else *w++ = *p;
+    }
+    *w = '\0';
+    return b64;
+}
+
+unsigned char *sc_base64url_decode(const char *b64url, size_t *out_len)
+{
+    if (!b64url || !out_len) return NULL;
+    size_t n = strlen(b64url);
+    size_t padded = (n + 3) & ~(size_t)3;  /* round up to multiple of 4 */
+    char *tmp = malloc(padded + 1);
+    if (!tmp) return NULL;
+    for (size_t i = 0; i < n; i++) {
+        char c = b64url[i];
+        tmp[i] = (c == '-') ? '+' : (c == '_') ? '/' : c;
+    }
+    for (size_t i = n; i < padded; i++) tmp[i] = '=';
+    tmp[padded] = '\0';
+    unsigned char *out = sc_base64_decode(tmp, out_len);
+    free(tmp);
+    return out;
+}
