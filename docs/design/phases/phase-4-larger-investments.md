@@ -1,6 +1,7 @@
 # Phase 4: Larger Investments
 
-**Status**: In progress (4.8 audit mediums landed)  
+**Status**: Phase 4 complete — all 11 tasks resolved (4.1 closed 2026-06-28; the
+GATED-EXT items 4.3/4.6/4.9 are code-ready, pending external/human acceptance)  
 **Master plan**: [`../master-plan.md`](../master-plan.md)  
 **Prerequisite**: [Phase 3](phase-3-optional-surface-area.md) complete (or parallel if demand-driven)  
 **Goal**: Optional subsystems and architectural improvements with higher complexity.  
@@ -11,8 +12,8 @@
 
 ## 1. Scope
 
-- **4.1** — Task: Arena allocator per turn — **allocator shipped + per-turn wired; only
-  provider-parse conversion remains**; Source: zed-patterns T1; LOC: 80–150; Binary: ~0; Gate: always
+- **4.1** — Task: Arena allocator per turn — **done: allocator shipped + per-turn wired;
+  provider-parse conversion rejected after recon** (see §2); Source: zed-patterns T1; LOC: 80–150; Binary: ~0; Gate: always
 - **4.2** — Task: MCP capability-based sandbox; Source: zed-patterns T3; LOC: 300–500; Binary:
   +10–20 KB; Gate: per-server config
 - **4.3** — Task: Anthropic prompt caching; Source: claude-code P1 #4; LOC: 60–100; Binary: ~5 KB;
@@ -53,20 +54,53 @@ auxiliary model path uses same provider factory).
 
 **Source:** zed-patterns Task 1
 
-> **Status (2026-06-26):** `src/util/arena.c` + `arena.h` already exist
-> (`sc_arena_new/alloc/reset/free`) and the arena is already created, reset
-> per turn, and threaded into the transform/context path in `src/agent.c`
-> (see `agent->arena`, `sc_arena_reset` at turn start, `snap->arena`).
-> **Remaining work:** convert provider SSE/response parsing
-> (`src/providers/http.c`, `src/providers/provider_common.c`) to allocate from
-> the arena so the unchecked-alloc class collapses to one OOM check point.
+> **Status (2026-06-28):** ✅ done. The allocator (`src/util/arena.c` + `arena.h`:
+> `sc_arena_new/alloc/reset/free`) ships and is created per agent, reset per turn,
+> and threaded into the transform/context path in `src/agent.c` (see
+> `agent->arena`, `sc_arena_reset` at turn start, `snap->arena`). The remaining
+> "convert provider SSE/response parsing to the arena" deliverable was **rejected
+> after recon** (see below) — the same recon-first outcome as 4.10 (reduced to a
+> measurement) and 4.4 (reduced to a config gate).
 
-**Files:** `src/providers/http.c`, `src/providers/provider_common.c` (arena adoption)
+**Files:** `src/util/arena.{c,h}`, `src/agent.c` (allocator + per-turn reset, shipped)
 
 - [x] Bump allocator with reset per turn *(shipped)*
-- [ ] Provider SSE parsing uses arena *(remaining)*
-- [ ] Single OOM check point per turn *(remaining — depends on above)*
-- [x] Long-lived data stays on heap *(by design)*
+- [x] Long-lived data stays on heap *(by design — and the reason the parse
+  conversion is rejected; see below)*
+- [~] Provider SSE parsing uses arena — **rejected after recon (2026-06-28)**
+- [~] Single OOM check point per turn — **rejected** (depends on the above)
+
+**Recon (2026-06-28) — why the provider-parse conversion was rejected.** A close
+read of `src/providers/http.c` + `src/providers/provider_common.c` against the
+arena contract found the literal task does not map onto this code:
+
+1. **Ownership / free mismatch (the decisive blocker).** Every allocation in the
+   parse path that matters is **long-lived**: the parsed `sc_llm_response_t` and
+   its fields (`content`, `thinking`, `finish_reason`, `tool_calls[]`,
+   `tc->id/name`) are returned to the caller, appended to **session history that
+   persists across turns**, and freed individually with `free()` via
+   `sc_llm_response_free` / `sc_llm_message_free_fields`. The arena is
+   `sc_arena_reset()` **once per turn** (`agent.c` `run_agent_loop`), so anything
+   stored in cross-turn history *cannot* be arena-backed — and `free()` on an
+   arena interior pointer would corrupt the heap. The spec's own rule
+   ("long-lived data stays on heap") rules these sites out — and that is ~all of
+   them.
+2. **Reachability + wrong allocator for the genuinely-transient rest.** `arena`
+   is referenced **nowhere** under `src/providers/`, and the `chat`/`chat_stream`
+   vtable signatures (`providers/types.h`) carry no arena — threading one in
+   would change the provider API across every provider. The only truly transient
+   allocations (curl write-cb scratch in `provider_common.c`; the streaming
+   `tool_arg_bufs` / `args_str`) live inside curl write callbacks or are
+   `realloc`-grown accumulation buffers. `sc_arena_alloc` grows via `realloc`
+   (`arena.c`), which can **move the block and invalidate all previously-returned
+   arena pointers** — exactly the wrong allocator for accumulation buffers, and
+   those sites are already cleanly owned/freed (not an unchecked-alloc hazard).
+
+**Conclusion: the allocator + per-turn reset deliverable is shipped; the
+provider-parse conversion is rejected.** Doing it would require reworking the
+provider vtable API *and* the `sc_llm_response_t`/`sc_llm_message_t` ownership
+model across every consumer — far beyond the 80–150 LOC budget, on the hottest
+path, and in direct conflict with the cross-turn lifetime of session history.
 
 ### 4.2 MCP capability sandbox
 
@@ -543,6 +577,26 @@ a staged addition. Tests in `test_memory_tools.c` (capacity/dedup/append/staging
   (KC-2 `implicit`=0 after adding `<stdio.h>` to repo_search.c); `ctest` 51/51
   incl. `test_project_memory`; minimal (flag off) 285 KB ≤ 1024 KB; KC-1
   satisfied; `check_claude_md.sh` clean.
+
+- **Slice 11 — `task/4.1-arena` (task 4.1)** — 2026-06-28. Recon-only outcome: the
+  arena allocator + per-turn reset already ship (`util/arena.{c,h}`, `agent->arena`,
+  `sc_arena_reset` at turn start, `snap->arena` in `mask_old_observations`); the
+  remaining "convert provider SSE/response parsing to the arena" deliverable was
+  **rejected after recon**. Decisive blocker: every parse allocation that matters
+  is long-lived (`sc_llm_response_t`/`sc_llm_message_t` fields returned to the
+  caller, stored in **cross-turn session history**, freed individually via
+  `sc_llm_response_free`/`sc_llm_message_free_fields` → `free()`), while the arena
+  resets every turn — so it cannot back that data, and `free()` on an arena
+  pointer would corrupt the heap. The spec's own "long-lived stays on heap" rules
+  out ~all 9 sites. The genuinely transient allocations live in curl write
+  callbacks / are `realloc`-grown accumulation buffers (arena grow moves the block,
+  invalidating live pointers — wrong allocator), and `arena` is referenced nowhere
+  under `src/providers/`. The full conversion would require reworking the provider
+  vtable API + message/response ownership across every consumer — far beyond the
+  80–150 LOC budget, on the hottest path. Mirrors the recon-first outcomes of 4.10
+  (measurement) and 4.4 (config gate). **This closes Phase 4.**
+  **Verification gates:** N/A — docs-only, no source change (no build/ctest/size
+  impact); KC-1 N/A (no Kconfig flag).
 
 ---
 

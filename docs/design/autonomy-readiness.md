@@ -120,7 +120,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 4.1 arena allocator | 🔵/✅ | Allocator shipped + per-turn wired; finish provider-parse adoption |
+| 4.1 arena allocator | 🔵 SHIPPED | Allocator shipped + per-turn wired. Provider-parse adoption **rejected after recon (2026-06-28)**: parse output is long-lived (returned + stored in cross-turn session history, freed via `free()`) while the arena resets per turn → cannot back it without reworking the provider vtable + message/response ownership (out of budget, hot path). See phase-4 §2 / Slice 11 |
 | 4.2 MCP capability sandbox | 🔵 SHIPPED | fs caps pre-existed; capability-aware seccomp (fixed dead `no_process` + added `network`); `test_sandbox` fork probes |
 | 4.3 Anthropic prompt caching | 🟠 GATED-EXT | Logic READY; real verification needs an Anthropic key |
 | 4.4 old result compression | 🔵 SHIPPED | Core already shipped (`mask_old_observations`); added config gate (`compress_*`) + `sc_mask_should_compress` test |
