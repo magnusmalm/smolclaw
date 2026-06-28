@@ -234,10 +234,35 @@ in `test_project_memory.c`. System-prompt injection deferred.
 
 **Source:** smallharness-integration task 8
 
-- [ ] `smolclaw doctor` or `smolclaw agent doctor --local`
-- [ ] Probe: models list, streaming, tool calls, inline JSON fallback
-- [ ] Cache under `.smolclaw/capabilities/`
-- [ ] Explicit invocation only (no startup probe)
+**Files:** new `src/doctor_local.{c,h}`, `src/doctor.c` (CLI wiring), `src/main.c` (help)
+
+> **Recon (2026-06-28):** `smolclaw doctor` already existed (`src/doctor.{c,h}`)
+> as **static** config/dependency validation (workspace, provider key,
+> connectivity, fallbacks, channels, vault). 4.6 adds the **`--local` live
+> capability probe** on top.
+
+- [x] `smolclaw doctor --local [--model M]` — probes the configured (or named)
+  model after the static checks. Explicit invocation only.
+- [x] Probe: **streaming, tool calls, inline JSON** + basic chat round-trip.
+  **"models list" omitted** (owner-noted scope): the provider vtable has no
+  models-list method and `--local` targets one configured model, so a models
+  probe would mean provider-specific `/v1/models` HTTP for little value. The four
+  probed capabilities are the ones the agent actually depends on.
+- [x] Cache under `{SMOLCLAW_HOME}/capabilities/<model>.json` (model name
+  sanitized to a safe filename; dir created on demand).
+- [x] Explicit invocation only (no startup probe) — it's a CLI subcommand.
+
+**Design:** pure helpers (`sc_capabilities_to_json`/`_from_json`/`_cache_path`/
+`_response_is_json`) + a mockable `sc_doctor_probe_provider(provider, model,
+report)` are split from the live `sc_provider_create_for_model` + filesystem
+wiring (`sc_doctor_local`), so the probe is unit-tested with a mock provider and
+no network. Tri-state results (`SC_CAP_YES`/`NO`/`SKIPPED`) so streaming reports
+"skipped" when compiled out. `test_doctor_local.c` (5 cases: JSON detection,
+report round-trip, cache-path sanitization, mock-provider probe, null guard).
+
+**Status (2026-06-28):** ✅ code-complete (mock-tested); 🟠 **live probe against
+a real provider = human gate** (needs an API key / reachable Ollama/vLLM). With
+no live provider, the command degrades gracefully ("could not create provider").
 
 ### 4.7 Prompt budget CLI
 
@@ -613,6 +638,25 @@ a staged addition. Tests in `test_memory_tools.c` (capacity/dedup/append/staging
   incl. `test_project_memory`; minimal (flag off) 285 KB ≤ 1024 KB; KC-1
   satisfied; `check_claude_md.sh` clean.
 
+- **Slice 13 — `task/4.6-doctor-local` (task 4.6)** — 2026-06-28. Added a live
+  capability probe to the existing static `doctor`. New `src/doctor_local.{c,h}`:
+  `smolclaw doctor --local [--model M]` builds the provider for the configured (or
+  named) model and probes basic chat, streaming, tool calls, and inline-JSON
+  output, caching the report at `{SMOLCLAW_HOME}/capabilities/<model>.json`. Pure
+  helpers (`sc_capabilities_to_json`/`_from_json`/`_cache_path`/`_response_is_json`)
+  + a mockable `sc_doctor_probe_provider(provider, model, report)` are split from
+  the live `sc_provider_create_for_model` + filesystem wiring, so the probe is
+  unit-tested with a mock provider and no network (tri-state SC_CAP_YES/NO/SKIPPED;
+  streaming → "skipped" when compiled out). Wired `--local`/`--model` into
+  `sc_cmd_doctor`; doctor_local.c lives in `smolclaw_lib` so both the binary and
+  the test link it. **"models list" probe omitted** (owner-noted: no vtable
+  support, single-model target). `test_doctor_local.c` (5 cases). 🟠 Live probe
+  against a real provider = human gate; degrades gracefully without one.
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 51/51
+  incl. `test_doctor_local`; `check_size_budget.sh` minimal-dynamic 285 KB ≤
+  1024 KB; `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A, CLI). CLI
+  smoke: `--help` shows `--local`; `doctor --local` runs the probe section and
+  reports "could not create provider" when none is configured.
 - **Slice 12 — `task/4.3-prompt-caching` (task 4.3)** — 2026-06-28. Made
   Anthropic prompt caching actually hit. Recon found the `cache_control:
   ephemeral` emission already shipped in `providers/claude.c` (first system block

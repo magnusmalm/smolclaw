@@ -125,7 +125,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.3 Anthropic prompt caching | 🔵 SHIPPED / 🟠 | **Static/dynamic system-prompt split landed (2026-06-28)** — `cache_control: ephemeral` was already emitted in `claude.c` but silently invalidated by a top-of-prompt timestamp; `context.c` now emits a cached static block + uncached dynamic block. Live `cache_read_input_tokens > 0` verification = human gate (Anthropic key). See phase-4 §2 / Slice 12 |
 | 4.4 old result compression | 🔵 SHIPPED | Core already shipped (`mask_old_observations`); added config gate (`compress_*`) + `sc_mask_should_compress` test |
 | 4.5 project memory + repo_search | 🔵 SHIPPED | `project_memory.c` + `repo_search` tool (`SC_ENABLE_PROJECT_MEMORY` default n); build→search tested. System-prompt injection deferred |
-| 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |
+| 4.6 `doctor --local` | 🔵 SHIPPED / 🟠 | **Landed 2026-06-28** — `src/doctor_local.{c,h}`: `doctor --local [--model M]` probes chat/streaming/tool-calls/inline-JSON, caches `{SMOLCLAW_HOME}/capabilities/<model>.json`. Pure helpers + mockable `sc_doctor_probe_provider` (`test_doctor_local`, 5 cases). Live probe against a real provider = human gate. "models list" omitted (no vtable support). See phase-4 §2 / Slice 13 |
 | 4.7 prompt budget CLI | 🔵 SHIPPED | `smolclaw context`; pure `sc_context_estimate_tokens`/`sc_context_budget_warn` + `context_warn_pct`; `test_context_isolation` |
 | 4.8 remaining audit mediums | 🔵 SHIPPED | M-2 + M-4 fixed; M-5/6/7/10 verified already-closed (M-7 regression test); M-9 deferred (no repro). `test_session` + `test_subagent_caps` |
 | 4.9 microsandbox exec | 🟠 GATED-EXT | **KVM host + microsandbox-server**; ops-heavy |

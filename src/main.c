@@ -215,6 +215,7 @@ static void print_help(void)
     printf("  context     Show prompt budget breakdown for a session\n");
     printf("  memory      Review staged memory writes (pending|approve <id>|reject <id>)\n");
     printf("  doctor      Validate configuration and dependencies\n");
+    printf("              --local [--model M]  Probe live provider capabilities\n");
     printf("  selftest    Run doctor checks + LLM round-trip, exit 0/1\n");
     printf("              --config <path>  Use a specific config file\n");
     printf("  host-refresh Refresh host inventory and retained metrics\n");

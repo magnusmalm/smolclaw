@@ -16,6 +16,7 @@
 #include "constants.h"
 #include "config.h"
 #include "doctor.h"
+#include "doctor_local.h"
 #include "util/str.h"
 #include "util/curl_common.h"
 #if SC_ENABLE_VAULT
@@ -516,10 +517,27 @@ sc_config_t *sc_run_doctor_checks(int argc, char **argv,
 int sc_cmd_doctor(int argc, char **argv)
 {
     int pass = 0, fail = 0;
+
+    /* Task 4.6: `--local` adds a live capability probe of the configured (or
+     * --model <m>) provider after the static checks. Explicit invocation only. */
+    int local = 0;
+    const char *model = NULL;
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--local") == 0) local = 1;
+        else if (strcmp(argv[i], "--model") == 0 && i + 1 < argc) model = argv[++i];
+    }
+
     printf("%s doctor\n", SC_NAME);
 
     sc_config_t *cfg = sc_run_doctor_checks(argc, argv, &pass, &fail);
     printf("\n  %d passed, %d failed\n", pass, fail);
+
+    int rc = fail > 0 ? 1 : 0;
+    if (local) {
+        printf("\n");
+        if (sc_doctor_local(cfg, model) != 0) rc = 1;
+    }
+
     sc_config_free(cfg);
-    return fail > 0 ? 1 : 0;
+    return rc;
 }

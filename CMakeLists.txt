@@ -249,6 +249,7 @@ set(SC_SOURCES
     src/skill.c
     src/tools/skill_tool.c
     src/context.c
+    src/doctor_local.c
     src/agent.c
     src/agent_turn.c
     src/agent_session.c
@@ -539,6 +540,7 @@ set(TEST_SOURCES
     tests/test_memory_namespaced.c
     tests/test_context_isolation.c
     tests/test_session_isolation.c
+    tests/test_doctor_local.c
     tests/test_gateway_routing.c
     tests/test_curl_common.c
     tests/test_cost.c
