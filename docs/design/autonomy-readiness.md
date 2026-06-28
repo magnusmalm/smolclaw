@@ -124,7 +124,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 | 4.2 MCP capability sandbox | 🔵 SHIPPED | fs caps pre-existed; capability-aware seccomp (fixed dead `no_process` + added `network`); `test_sandbox` fork probes |
 | 4.3 Anthropic prompt caching | 🟠 GATED-EXT | Logic READY; real verification needs an Anthropic key |
 | 4.4 old result compression | 🔵 SHIPPED | Core already shipped (`mask_old_observations`); added config gate (`compress_*`) + `sc_mask_should_compress` test |
-| 4.5 project memory + repo_search | ✅ READY | Q2 resolved: `{SMOLCLAW_HOME}/indexes/<hash>.json`; Q7: v1 own extraction. Large (800–1,200 LOC) |
+| 4.5 project memory + repo_search | 🔵 SHIPPED | `project_memory.c` + `repo_search` tool (`SC_ENABLE_PROJECT_MEMORY` default n); build→search tested. System-prompt injection deferred |
 | 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |
 | 4.7 prompt budget CLI | 🔵 SHIPPED | `smolclaw context`; pure `sc_context_estimate_tokens`/`sc_context_budget_warn` + `context_warn_pct`; `test_context_isolation` |
 | 4.8 remaining audit mediums | 🔵 SHIPPED | M-2 + M-4 fixed; M-5/6/7/10 verified already-closed (M-7 regression test); M-9 deferred (no repro). `test_session` + `test_subagent_caps` |

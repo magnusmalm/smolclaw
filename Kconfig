@@ -221,6 +221,16 @@ config SC_ENABLE_MEMORY_SEARCH
 	  When disabled, the amalgamation is built without SQLITE_ENABLE_FTS5
 	  (smaller sqlite3 when host metrics or analytics still link SQLite).
 
+config SC_ENABLE_PROJECT_MEMORY
+	bool "Project memory + repo_search (workspace code index)"
+	default n
+	help
+	  Add the repo_search tool: a per-workspace code index
+	  ({SMOLCLAW_HOME}/indexes/<hash>.json) over source files with
+	  lightweight term/symbol/import extraction, plus ranked search.
+	  Distinct from memory_search (facts) and session_search (chats).
+	  Index lives under SMOLCLAW_HOME, never inside the user's repo.
+
 config SC_ENABLE_SESSION_SEARCH
 	bool "Global session search (FTS5 over stored sessions)"
 	default n

@@ -13,6 +13,7 @@
 # CONFIG_SC_ENABLE_MCP is not set
 # CONFIG_SC_ENABLE_MEMORY_SEARCH is not set  # SQLite built without FTS5
 # CONFIG_SC_ENABLE_SESSION_SEARCH is not set  # depends on MEMORY_SEARCH
+# CONFIG_SC_ENABLE_PROJECT_MEMORY is not set
 # CONFIG_SC_ENABLE_VAULT is not set
 # CONFIG_SC_ENABLE_GIT is not set
 # CONFIG_SC_ENABLE_SLACK is not set

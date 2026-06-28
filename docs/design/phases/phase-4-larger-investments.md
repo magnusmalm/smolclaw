@@ -144,13 +144,22 @@ plumbing + `test_agent.c` test; default behavior unchanged.
 > marker; the shared `sc_symbols` helper with `code_graph` lands in v2. See
 > `autonomy-readiness.md` §3.
 
-- [ ] Index: path, language, size, mtime, SHA-256, symbols, imports, terms
-- [ ] Storage: `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json` (Q2 resolved)
-- [ ] `/index` equivalent via CLI or tool actions: build, refresh, status
-- [ ] `repo_search` tool for ranked hits
-- [ ] Optional system prompt injection for code questions (local providers only by default)
-- [ ] v1 own extraction (`TODO(shared-symbols)`); share with `code_graph` in v2 (Q7)
-- [ ] Kconfig **default n**
+- [x] Index: path, language, size, mtime, SHA-256, symbols, imports, terms
+- [x] Storage: `{SMOLCLAW_HOME}/indexes/{workspace-hash}.json` (Q2:
+  workspace-hash = first 16 hex of `sha256(realpath(workspace))`)
+- [x] Tool actions: build, refresh (incremental), status
+- [x] `repo_search` tool for ranked hits (term + symbol + import + path match)
+- [~] Optional system-prompt injection for code questions — **deferred**
+  (owner-chosen scope; the tool covers retrieval). Documented follow-up.
+- [x] v1 own extraction (`TODO(shared-symbols)` in `project_memory.c`); share
+  with `code_graph` in v2 (Q7)
+- [x] Kconfig `SC_ENABLE_PROJECT_MEMORY` **default n**; KC-1 wired
+
+**Status (2026-06-27):** ✅ done. New `src/project_memory.{c,h}` (workspace-hash,
+language-by-ext, tokenizer, ranking, recursive walk with ignore-dirs +
+incremental reuse, JSON index under SMOLCLAW_HOME) + `src/tools/repo_search.c`
+(build/refresh/status/search). Pure helpers + a build→search round-trip tested
+in `test_project_memory.c`. System-prompt injection deferred.
 
 ### 4.6 Local provider doctor
 
@@ -521,6 +530,19 @@ a staged addition. Tests in `test_memory_tools.c` (capacity/dedup/append/staging
   **Verification gates:** Release `-DSC_ENABLE_WEB=ON` + minimal builds clean
   (KC-2 `implicit`=0); `ctest` 50/50; `check_size_budget.sh` minimal-dynamic
   285 KB ≤ 1024 KB; `check_claude_md.sh` clean; no Kconfig flag (config-gated).
+- **Slice 10 — `task/4.5-project-memory` (task 4.5)** — 2026-06-27. Project
+  memory + repo_search behind `SC_ENABLE_PROJECT_MEMORY` (default n). New
+  `src/project_memory.{c,h}` (per-workspace JSON code index at
+  `{SMOLCLAW_HOME}/indexes/<hash>.json`; per-file path/lang/size/mtime/sha256/
+  terms/symbols/imports; recursive walk with ignore-dirs + incremental reuse;
+  pure hash/language/tokenize/rank seams) + `src/tools/repo_search.c`
+  (build/refresh/status/search). Q7 v1 own extraction with `TODO(shared-symbols)`.
+  System-prompt injection deferred (owner-chosen scope). KC-1 wired;
+  `test_project_memory.c` (build→search round-trip + pure helpers).
+  **Verification gates:** Release `-DSC_ENABLE_PROJECT_MEMORY=ON` build clean
+  (KC-2 `implicit`=0 after adding `<stdio.h>` to repo_search.c); `ctest` 51/51
+  incl. `test_project_memory`; minimal (flag off) 285 KB ≤ 1024 KB; KC-1
+  satisfied; `check_claude_md.sh` clean.
 
 ---
 

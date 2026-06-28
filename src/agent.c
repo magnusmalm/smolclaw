@@ -81,6 +81,9 @@
 #include "analytics.h"
 #endif
 #include "memory_review.h"
+#if SC_ENABLE_PROJECT_MEMORY
+#include "tools/repo_search.h"
+#endif
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #include "tools/memory_search.h"
@@ -591,6 +594,11 @@ static void register_default_tools(sc_agent_t *agent, sc_config_t *cfg)
                                   sc_tool_session_search_new(ss_dir));
         free(ss_dir);
     }
+#endif
+
+#if SC_ENABLE_PROJECT_MEMORY
+    /* Task 4.5: repo_search over the workspace code index. */
+    sc_tool_registry_register(agent->tools, sc_tool_repo_search_new(workspace));
 #endif
 
     sc_host_record_sample(workspace, 1);
