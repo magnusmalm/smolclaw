@@ -343,6 +343,11 @@ typedef struct {
     /* Auto-extract facts from session summaries into daily notes */
     int memory_consolidation;
 
+    /* Task 4.13: post-turn memory review (opt-in, default off). */
+    int memory_background_review;
+    char *memory_review_model;   /* optional cheaper model override (NULL = summary/main) */
+    int memory_notifications;    /* 0 off, 1 on, 2 verbose */
+
     /* Send version/feature info to channels on join */
     int announce_on_join;
 

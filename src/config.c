@@ -578,6 +578,8 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->restrict_message_tool, "SMOLCLAW_AGENTS_DEFAULTS_RESTRICT_MESSAGE_TOOL");
     env_override_bool(&cfg->sandbox_enabled, "SMOLCLAW_AGENTS_DEFAULTS_SANDBOX");
     env_override_bool(&cfg->memory_consolidation, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_CONSOLIDATION");
+    env_override_bool(&cfg->memory_background_review, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_BACKGROUND_REVIEW");
+    env_override_str(&cfg->memory_review_model, "SMOLCLAW_AGENTS_DEFAULTS_MEMORY_REVIEW_MODEL");
     env_override_bool(&cfg->announce_on_join, "SMOLCLAW_ANNOUNCE_ON_JOIN");
     env_override_bool(&cfg->verbose, "SMOLCLAW_AGENTS_DEFAULTS_VERBOSE");
     env_override_bool(&cfg->auto_confirm, "SMOLCLAW_AGENTS_DEFAULTS_AUTO_CONFIRM");
@@ -835,6 +837,8 @@ sc_config_t *sc_config_default(void)
     cfg->silent_tokens_enabled = 1; /* task 3.9: suppress [SILENT]/NO_REPLY */
     cfg->sandbox_enabled      = 1;
     cfg->memory_consolidation = 1;
+    cfg->memory_background_review = 0;
+    cfg->memory_notifications = 0;
     cfg->tee_enabled          = 1;
     cfg->tee_max_files        = 50;
     cfg->tee_max_file_size    = 10 * 1024 * 1024;
@@ -1047,6 +1051,15 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
                                              cfg->sandbox_enabled);
     cfg->memory_consolidation = sc_json_get_bool(defaults, "memory_consolidation",
                                                   cfg->memory_consolidation);
+    cfg->memory_background_review = sc_json_get_bool(defaults,
+        "memory_background_review", cfg->memory_background_review);
+    override_str_field(&cfg->memory_review_model, defaults, "memory_review_model");
+    {
+        const char *mn = sc_json_get_string(defaults, "memory_notifications", "off");
+        if (strcmp(mn, "verbose") == 0)   cfg->memory_notifications = 2;
+        else if (strcmp(mn, "on") == 0)   cfg->memory_notifications = 1;
+        else                              cfg->memory_notifications = 0;
+    }
     cfg->announce_on_join = sc_json_get_bool(defaults, "announce_on_join",
                                               cfg->announce_on_join);
     cfg->verbose = sc_json_get_bool(defaults, "verbose", cfg->verbose);
@@ -1734,6 +1747,12 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
     }
     cJSON_AddBoolToObject(defaults, "sandbox", cfg->sandbox_enabled);
     cJSON_AddBoolToObject(defaults, "memory_consolidation", cfg->memory_consolidation);
+    cJSON_AddBoolToObject(defaults, "memory_background_review", cfg->memory_background_review);
+    if (cfg->memory_review_model)
+        cJSON_AddStringToObject(defaults, "memory_review_model", cfg->memory_review_model);
+    cJSON_AddStringToObject(defaults, "memory_notifications",
+        cfg->memory_notifications == 2 ? "verbose" :
+        cfg->memory_notifications == 1 ? "on" : "off");
 
     /* Tee config */
     {
@@ -2031,6 +2050,7 @@ void sc_config_free(sc_config_t *cfg)
     free(cfg->workspace);
     free(cfg->provider);
     free(cfg->model);
+    free(cfg->memory_review_model);
     free(cfg->log_path);
     for (int i = 0; i < cfg->fallback_model_count; i++)
         free(cfg->fallback_models[i]);

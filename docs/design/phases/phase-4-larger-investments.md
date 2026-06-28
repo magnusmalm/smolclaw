@@ -327,12 +327,22 @@ config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
 
 **Files:** `src/agent_session.c`, `src/memory.c`, `src/sc_task_t` (from 0.7)
 
-- [ ] Config: `memory.background_review.enabled` (default **false**)
-- [ ] After successful turn: async task (reuse summarization thread pattern) with compact turn digest
-- [ ] Propose 0–2 memory entries via existing `memory_write` paths
-- [ ] Optional: run on cheaper/auxiliary provider (`memory.background_review.provider` / `model`)
-- [ ] Optional gateway notification: `memory_notifications`: `off` | `on` | `verbose` (config)
-- [ ] **Out of scope:** autonomous skill creation, `/learn`, Skills Hub, Honcho (use MCP Tier 2)
+- [x] Config: `memory_background_review` (default **false**, flat under
+  `agents.defaults`)
+- [x] After successful turn: async `sc_task_t` (reuses the summarization task
+  pattern) with a compact turn digest (user msg + final response, bounded)
+- [x] Propose 0–2 memory entries → written via `sc_memory_write_long_term`
+- [x] Optional cheaper model: `memory_review_model` (provider override deferred;
+  model override on the same provider covers the "cheaper aux" intent)
+- [~] `memory_notifications` (`off`|`on`|`verbose`) — implemented as **log
+  verbosity** for now; cross-thread gateway *publish* deferred (the background
+  task has no channel/chat context)
+- [x] **Out of scope:** skill creation / `/learn` / Honcho — not built
+
+**Status (2026-06-27):** ✅ done (mock-accepted). New `src/memory_review.{c,h}`:
+pure `sc_memory_review_should_run` + `sc_memory_review_parse` (tested) + async
+worker mirroring consolidation. Isolated turns skipped (no shared-memory leak).
+🟠 **Live LLM acceptance is a human gate** (needs a provider).
 
 **Smol contract:** opt-in; no extra runtime deps; uses existing memory + sc_task_t infrastructure.
 
@@ -473,6 +483,18 @@ config. Pure `sc_compact_cooldown_ok` tested in `test_agent.c`.
   split bar → **confirmed Q4: do not split.** Findings recorded in §2 task 4.10.
   **Verification gates:** N/A (no source change); four MinSizeRel builds compiled
   clean for the measurement.
+- **Slice 8 — `task/4.13-memory-review` (task 4.13)** — 2026-06-27. Opt-in
+  post-turn memory review (default off). New `src/memory_review.{c,h}`: pure
+  `sc_memory_review_should_run` + `sc_memory_review_parse` (JSON array, fence
+  strip, cap, blank-skip) and an async `sc_task_t` worker mirroring the
+  consolidation LLM call → writes 0–2 entries via `sc_memory_write_long_term`.
+  Config `memory_background_review`/`memory_review_model`/`memory_notifications`;
+  run_agent_loop hook (skips isolated turns); agent-destroy drains the task.
+  `test_memory_review.c` (7 cases). **Live LLM acceptance = human gate.**
+  **Verification gates:** Release + minimal builds clean (KC-2 `implicit`=0 after
+  moving the include out of the `#if SC_ENABLE_MEMORY_SEARCH` guard); `ctest`
+  50/50 incl. `test_memory_review`; `check_size_budget.sh` minimal-dynamic 281 KB
+  ≤ 1024 KB (+4 KB always-compiled); `check_claude_md.sh` clean; no Kconfig flag.
 
 ---
 

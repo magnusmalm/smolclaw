@@ -50,6 +50,11 @@ typedef struct sc_agent {
     const char *active_session_key;
     long last_compact_time;
     int compact_cooldown_secs;
+    /* Task 4.13: post-turn memory review (opt-in, default off). */
+    int memory_background_review;
+    char *memory_review_model;      /* optional cheaper model; NULL = summary/main */
+    int memory_notifications;       /* 0 off, 1 on, 2 verbose */
+    sc_task_t *review_task;         /* in-flight async review, or NULL */
     /* Automatic session reset policy (task 3.7) */
     int session_reset_mode;        /* sc_session_reset_mode_t */
     int session_reset_daily_hour;

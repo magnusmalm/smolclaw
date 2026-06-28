@@ -80,6 +80,7 @@
 #if SC_ENABLE_ANALYTICS
 #include "analytics.h"
 #endif
+#include "memory_review.h"
 #if SC_ENABLE_MEMORY_SEARCH
 #include "memory_index.h"
 #include "tools/memory_search.h"
@@ -1052,6 +1053,10 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->max_tool_calls_per_hour = cfg->max_tool_calls_per_hour;
     agent->max_tokens_per_hour = cfg->max_tokens_per_hour;
     agent->memory_consolidation = cfg->memory_consolidation;
+    agent->memory_background_review = cfg->memory_background_review;
+    agent->memory_review_model = cfg->memory_review_model
+        ? sc_strdup(cfg->memory_review_model) : NULL;
+    agent->memory_notifications = cfg->memory_notifications;
     agent->workspace_per_session = cfg->workspace_per_session;
     agent->verbose = cfg->verbose;
     agent->running = 0;
@@ -1149,6 +1154,14 @@ void sc_agent_free(sc_agent_t *agent)
     if (agent->summarize_task)
         sc_task_cancel(agent->summarize_task);
     sc_drain_summarize(agent);
+    /* Task 4.13: drain any in-flight post-turn memory review. */
+    if (agent->review_task) {
+        sc_task_cancel(agent->review_task);
+        sc_task_join(agent->review_task, 10000);
+        sc_task_free(agent->review_task);
+        agent->review_task = NULL;
+    }
+    free(agent->memory_review_model);
     sc_arena_free(agent->arena);
     sc_skill_registry_free(agent->skills);
     sc_cost_tracker_free(agent->cost_tracker);
@@ -1919,6 +1932,11 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
 
     if (!no_history)
         sc_maybe_summarize(agent, session_key, isolated, namespace_id);
+
+    /* Task 4.13: opt-in post-turn memory review (default off). Skip isolated
+     * turns so per-session context never leaks into shared workspace memory. */
+    if (!no_history && !isolated)
+        sc_memory_review_maybe_spawn(agent, user_message, final_content);
 
     /* Per-turn isolated builder (if any) owns memory + namespace allocs;
      * release before returning. */

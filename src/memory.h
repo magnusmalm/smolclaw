@@ -41,7 +41,12 @@ void sc_memory_free(sc_memory_t *mem);
 /* Long-term memory.
  * In namespaced mode read returns NULL and write is a no-op (returns 0). */
 char *sc_memory_read_long_term(const sc_memory_t *mem);
+/* Replace the whole MEMORY.md with `content` (caller supplies full file). */
 int sc_memory_write_long_term(const sc_memory_t *mem, const char *content);
+/* Append a single entry as a bullet to MEMORY.md (read-modify-write; never
+ * overwrites existing content). Returns 0 on success, -1 on error, and 0 as a
+ * silent no-op in namespaced/isolated mode. */
+int sc_memory_append_long_term(const sc_memory_t *mem, const char *entry);
 
 /* Daily notes.
  * Namespaced mode writes to a single today.md per session (no date suffix). */

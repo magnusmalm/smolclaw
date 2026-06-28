@@ -264,6 +264,7 @@ set(SC_SOURCES
     src/tools/memory_tools.c
     src/tools/scratchpad.c
     src/tools/compact.c
+    src/memory_review.c
     src/tools/notify.c
     src/providers/provider_common.c
     src/providers/http.c
@@ -538,6 +539,7 @@ set(TEST_SOURCES
     tests/test_curl_common.c
     tests/test_cost.c
     tests/test_notify.c
+    tests/test_memory_review.c
 )
 
 if(SC_ENABLE_WEB)

@@ -268,6 +268,32 @@ int sc_memory_write_long_term(const sc_memory_t *mem, const char *content)
     return rc;
 }
 
+int sc_memory_append_long_term(const sc_memory_t *mem, const char *entry)
+{
+    if (!mem || !entry || !entry[0]) return -1;
+    if (is_namespaced(mem)) return 0;  /* isolated: silently drop */
+
+    char *existing = read_file(mem->memory_file);
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    if (existing && existing[0]) {
+        sc_strbuf_append(&sb, existing);
+        size_t n = strlen(existing);
+        if (existing[n - 1] != '\n') sc_strbuf_append(&sb, "\n");
+    }
+    sc_strbuf_appendf(&sb, "- %s\n", entry);
+    free(existing);
+
+    char *full = sc_strbuf_finish(&sb);
+    if (!full) return -1;
+    int rc = write_file(mem->memory_file, full);
+    if (rc == 0 && mem->index_cb)
+        mem->index_cb("long_term", full, mem->index_ctx);
+    free(full);
+    return rc;
+}
+
 char *sc_memory_read_today(const sc_memory_t *mem)
 {
     if (!mem) return NULL;

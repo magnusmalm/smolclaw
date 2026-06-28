@@ -107,6 +107,9 @@ definitions.
 | session_keep_last         | int  | 4       | Recent messages kept verbatim.         |
 | summary_max_transcript    | int  | 4000    | Max transcript chars to summarizer.    |
 | memory_consolidation      | bool | true    | Extract facts from summaries to notes. |
+| memory_background_review  | bool | false   | After each successful turn, an async LLM pass proposes 0–2 durable memory entries (task 4.13). Opt-in. |
+| memory_review_model       | string | (summary/main) | Optional cheaper model for the background review. |
+| memory_notifications      | string | off     | Background-review logging: `off` \| `on` \| `verbose`. |
 | compress_tool_results     | bool | true    | Replace old large tool results with a metadata placeholder before each LLM call (token saver). |
 | compress_keep_recent      | int  | 6       | Most-recent messages kept verbatim (never compressed). |
 | compress_min_bytes        | int  | 200     | Only tool results larger than this are compressed; smaller ones are kept. |
