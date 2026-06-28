@@ -122,7 +122,7 @@ left). Deferred follow-ups: 3.3 interactive diff-preview / async summary-confirm
 |------|-----|------------------------|
 | 4.1 arena allocator | 🔵 SHIPPED | Allocator shipped + per-turn wired. Provider-parse adoption **rejected after recon (2026-06-28)**: parse output is long-lived (returned + stored in cross-turn session history, freed via `free()`) while the arena resets per turn → cannot back it without reworking the provider vtable + message/response ownership (out of budget, hot path). See phase-4 §2 / Slice 11 |
 | 4.2 MCP capability sandbox | 🔵 SHIPPED | fs caps pre-existed; capability-aware seccomp (fixed dead `no_process` + added `network`); `test_sandbox` fork probes |
-| 4.3 Anthropic prompt caching | 🟠 GATED-EXT | Logic READY; real verification needs an Anthropic key |
+| 4.3 Anthropic prompt caching | 🔵 SHIPPED / 🟠 | **Static/dynamic system-prompt split landed (2026-06-28)** — `cache_control: ephemeral` was already emitted in `claude.c` but silently invalidated by a top-of-prompt timestamp; `context.c` now emits a cached static block + uncached dynamic block. Live `cache_read_input_tokens > 0` verification = human gate (Anthropic key). See phase-4 §2 / Slice 12 |
 | 4.4 old result compression | 🔵 SHIPPED | Core already shipped (`mask_old_observations`); added config gate (`compress_*`) + `sc_mask_should_compress` test |
 | 4.5 project memory + repo_search | 🔵 SHIPPED | `project_memory.c` + `repo_search` tool (`SC_ENABLE_PROJECT_MEMORY` default n); build→search tested. System-prompt injection deferred |
 | 4.6 `doctor --local` | 🟠 GATED-EXT | Probes need a live provider |

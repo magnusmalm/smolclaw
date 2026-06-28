@@ -133,11 +133,46 @@ blocks and that defaults still allow (×4).
 
 **Source:** claude-code P1 #4
 
-**Files:** `src/providers/claude.c`, `src/context.c`, `src/providers/types.h`
+**Files:** `src/context.c` (static/dynamic split — this slice), `src/providers/claude.c`
+(cache_control emission — pre-existing)
 
-- [ ] Split system prompt static vs dynamic
-- [ ] `cache_control: ephemeral` on static block
-- [ ] Only when provider is Anthropic and config enabled
+> **Recon (2026-06-28):** the mechanical pieces were **already shipped** —
+> `providers/claude.c` emits `cache_control: {type: "ephemeral"}` on the first
+> system block (`build_system_blocks`) and the last tool (`build_tools_json`),
+> and it is Anthropic-only by construction (the OpenAI-compatible `http.c` emits
+> none). **But the cache silently never hit:** `sc_context_build_system_prompt`
+> concatenated the entire prompt into **one** system block with a
+> minute-resolution timestamp at the very top (`build_identity`). Prompt caching
+> is a prefix match, so that timestamp invalidated the whole prefix every minute
+> (`cache_read_input_tokens ≈ 0`). The real, unmet deliverable was the
+> **static/dynamic split**.
+
+- [x] **Split system prompt static vs dynamic (this slice).** `context.c` now
+  builds two system blocks: a **static** prefix (`build_static_system`: identity
+  sans-timestamp + bootstrap + skills + deferred tools + per-session info) and a
+  **dynamic** suffix (`build_dynamic_system`: timestamp + memory, plus
+  summary/scratchpad/action-log appended in `sc_context_build_messages`).
+  `sc_context_build_messages` emits them as two `sc_msg_system` messages
+  `[static, dynamic]`; the public `sc_context_build_system_prompt` still returns
+  the full prompt (static+dynamic) for the 4.7 `context` token estimate + tests.
+- [x] `cache_control: ephemeral` on static block — the pre-existing
+  `claude.c` "mark first system block" logic now lands the breakpoint on the
+  static block (no provider change needed); the dynamic block follows uncached.
+- [x] Only when provider is Anthropic — satisfied by construction (`claude.c`
+  only). **Runtime config gate dropped** (owner-chosen scope, 2026-06-28):
+  caching default-on is correct, sub-minimum prefixes silently don't cache
+  anyway, and gating the provider-side emission on agent config would need
+  vtable plumbing (the same decoupling that scoped down 4.1) for little value.
+- [~] **Live cache-hit verification = human gate (🟠).** Code + tests are
+  autonomous; confirming `usage.cache_read_input_tokens > 0` across turns needs
+  an **Anthropic key**.
+
+**Status (2026-06-28):** ✅ code-complete (mock-tested); 🟠 live verification
+pending an Anthropic key. The split makes the existing `cache_control` actually
+cache the static prefix (tools + static system) across multi-turn Anthropic
+sessions. Tests: `test_context_isolation` (`test_prompt_cache_static_dynamic_split`
++ updated scratchpad/action-log contract) and `test_session_isolation` (mock now
+concatenates all leading system blocks).
 
 ### 4.4 Context transform: compress old tool results
 
@@ -578,6 +613,28 @@ a staged addition. Tests in `test_memory_tools.c` (capacity/dedup/append/staging
   incl. `test_project_memory`; minimal (flag off) 285 KB ≤ 1024 KB; KC-1
   satisfied; `check_claude_md.sh` clean.
 
+- **Slice 12 — `task/4.3-prompt-caching` (task 4.3)** — 2026-06-28. Made
+  Anthropic prompt caching actually hit. Recon found the `cache_control:
+  ephemeral` emission already shipped in `providers/claude.c` (first system block
+  + last tool, Anthropic-only by construction) but **silently non-functional**:
+  `context.c` built one system block with a minute-resolution timestamp at the
+  top, so the prefix-match cache invalidated every minute. This slice splits the
+  system prompt into a **static** block (`build_static_system`: identity
+  sans-timestamp + bootstrap + skills + deferred tools + per-session info) and a
+  **dynamic** block (`build_dynamic_system`: timestamp + memory; summary +
+  scratchpad + action-log appended in `sc_context_build_messages`), emitted as
+  two `sc_msg_system` messages `[static, dynamic]`. The pre-existing claude.c
+  "mark first system block" logic now caches the static prefix; the dynamic block
+  follows uncached — **no provider change**. Public `sc_context_build_system_prompt`
+  still returns the full prompt (4.7 `context` cmd + tests). Runtime config gate
+  dropped (owner-chosen scope; provider-coupling cost ≫ value). New test
+  `test_prompt_cache_static_dynamic_split` + updated scratchpad/action-log
+  contract in `test_context_isolation`; `test_session_isolation` mock now
+  concatenates all leading system blocks. 🟠 Live `cache_read_input_tokens > 0`
+  verification = human gate (Anthropic key).
+  **Verification gates:** Release build clean (KC-2 `implicit`=0); `ctest` 50/50;
+  `check_size_budget.sh` minimal-dynamic 285 KB ≤ 1024 KB (restructure, no
+  growth); `check_claude_md.sh` clean; no new Kconfig flag (KC-1 N/A).
 - **Slice 11 — `task/4.1-arena` (task 4.1)** — 2026-06-28. Recon-only outcome: the
   arena allocator + per-turn reset already ship (`util/arena.{c,h}`, `agent->arena`,
   `sc_arena_reset` at turn start, `snap->arena` in `mask_old_observations`); the

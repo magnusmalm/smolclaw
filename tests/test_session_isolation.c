@@ -65,10 +65,17 @@ static sc_llm_response_t *mock_chat(sc_provider_t *self,
     d->chat_call_count++;
     free(d->last_system_prompt);
     d->last_system_prompt = NULL;
-    if (msg_count > 0 && msgs[0].role && strcmp(msgs[0].role, "system") == 0
-        && msgs[0].content) {
-        d->last_system_prompt = sc_strdup(msgs[0].content);
+    /* Task 4.3: the system prompt is now split into a static block + a dynamic
+     * block. Concatenate all leading system messages so last_system_prompt
+     * still represents the full system context the model saw. */
+    sc_strbuf_t sysbuf;
+    sc_strbuf_init(&sysbuf);
+    for (int i = 0; i < msg_count; i++) {
+        if (!msgs[i].role || strcmp(msgs[i].role, "system") != 0) break;
+        if (i > 0) sc_strbuf_append(&sysbuf, "\n\n");
+        if (msgs[i].content) sc_strbuf_append(&sysbuf, msgs[i].content);
     }
+    d->last_system_prompt = sc_strbuf_finish(&sysbuf);
     if (d->call_index >= d->response_count) return NULL;
 
     canned_response_t *src = &d->responses[d->call_index++];

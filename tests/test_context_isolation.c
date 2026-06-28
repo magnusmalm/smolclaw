@@ -215,16 +215,74 @@ static void test_non_isolated_includes_scratchpad_and_action_log(void)
     sc_llm_message_t *msgs = sc_context_build_messages(
         shared, NULL, 0, NULL, "do the task", "web", "chat1", &count);
     ASSERT_NOT_NULL(msgs);
-    ASSERT(count >= 2, "system + user message present");
+    /* Task 4.3: two system blocks (static cached prefix + dynamic suffix) + user */
+    ASSERT(count >= 3, "static + dynamic system + user message present");
     ASSERT_NOT_NULL(msgs[0].content);
-    ASSERT(strstr(msgs[0].content, "SHARED-SCRATCHPAD-MARKER") != NULL,
-           "shared prompt still injects the scratchpad");
-    ASSERT(strstr(msgs[0].content, "SHARED-ACTIONLOG-MARKER") != NULL,
-           "shared prompt still injects the action log");
+    ASSERT_NOT_NULL(msgs[1].content);
+    /* Scratchpad + action log are volatile → live in the DYNAMIC block (msgs[1]),
+     * never in the cached static prefix (msgs[0]). */
+    ASSERT(strstr(msgs[1].content, "SHARED-SCRATCHPAD-MARKER") != NULL,
+           "shared prompt still injects the scratchpad (dynamic block)");
+    ASSERT(strstr(msgs[1].content, "SHARED-ACTIONLOG-MARKER") != NULL,
+           "shared prompt still injects the action log (dynamic block)");
+    ASSERT(strstr(msgs[0].content, "SHARED-SCRATCHPAD-MARKER") == NULL,
+           "scratchpad must not pollute the cached static prefix");
+    ASSERT(strstr(msgs[0].content, "SHARED-ACTIONLOG-MARKER") == NULL,
+           "action log must not pollute the cached static prefix");
 
     sc_llm_message_array_free(msgs, count);
     free(sp_path);
     free(al_path);
+    sc_context_builder_free(shared);
+    rm_rf(ws);
+}
+
+/* Task 4.3: the static block (cached prefix) must be free of volatile content —
+ * timestamp and memory — which belongs in the dynamic block so the Anthropic
+ * prompt cache actually hits across turns. */
+static void test_prompt_cache_static_dynamic_split(void)
+{
+    char *ws = make_workspace();
+    ASSERT_NOT_NULL(ws);
+
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    sc_strbuf_appendf(&sb, "%s/memory/MEMORY.md", ws);
+    char *long_term_path = sc_strbuf_finish(&sb);
+    write_text(long_term_path, "SPLIT-MEMORY-MARKER durable knowledge");
+
+    sc_context_builder_t *shared = sc_context_builder_new(ws);
+    ASSERT_NOT_NULL(shared);
+
+    int count = 0;
+    sc_llm_message_t *msgs = sc_context_build_messages(
+        shared, NULL, 0, NULL, "do the task", "web", "chat1", &count);
+    ASSERT_NOT_NULL(msgs);
+    ASSERT(count >= 3, "static + dynamic system + user message present");
+    ASSERT_NOT_NULL(msgs[0].content);
+    ASSERT_NOT_NULL(msgs[1].content);
+
+    /* Static (cached) prefix: no timestamp, no memory. */
+    ASSERT(strstr(msgs[0].content, "## Current Time") == NULL,
+           "static block must not carry the volatile timestamp");
+    ASSERT(strstr(msgs[0].content, "SPLIT-MEMORY-MARKER") == NULL,
+           "static block must not carry memory content");
+    ASSERT(strstr(msgs[0].content, "# Memory") == NULL,
+           "static block must not carry the memory header");
+    /* Static prefix should still hold the stable identity + session info. */
+    ASSERT(strstr(msgs[0].content, "You are smolclaw") != NULL,
+           "static block carries the stable identity");
+    ASSERT(strstr(msgs[0].content, "Current Session") != NULL,
+           "static block carries the per-session info");
+
+    /* Dynamic suffix: timestamp + memory live here. */
+    ASSERT(strstr(msgs[1].content, "## Current Time") != NULL,
+           "dynamic block carries the timestamp");
+    ASSERT(strstr(msgs[1].content, "SPLIT-MEMORY-MARKER") != NULL,
+           "dynamic block carries memory content");
+
+    sc_llm_message_array_free(msgs, count);
+    free(long_term_path);
     sc_context_builder_free(shared);
     rm_rf(ws);
 }
@@ -284,6 +342,7 @@ int main(void)
     RUN_TEST(test_non_isolated_includes_memory_block);
     RUN_TEST(test_isolated_skips_scratchpad_and_action_log);
     RUN_TEST(test_non_isolated_includes_scratchpad_and_action_log);
+    RUN_TEST(test_prompt_cache_static_dynamic_split);
     RUN_TEST(test_isolated_constructor_uses_namespaced_memory);
     TEST_REPORT();
 }

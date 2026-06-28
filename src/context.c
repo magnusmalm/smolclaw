@@ -90,18 +90,18 @@ void sc_context_builder_set_skills(sc_context_builder_t *cb, void *skills)
     if (cb) cb->skills = skills;
 }
 
-/* Build identity section of system prompt */
+/* Build identity section of system prompt.
+ *
+ * Task 4.3 (Anthropic prompt caching): this is STATIC content — it must be
+ * byte-stable across turns within a session so the cache breakpoint on the
+ * first system block actually hits. The volatile current-time line lives in
+ * build_dynamic_system() instead; emitting it here (as it once did) put a
+ * minute-resolution timestamp at the top of the cached prefix and silently
+ * invalidated the whole cache every minute. */
 static char *build_identity(const sc_context_builder_t *cb)
 {
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-
-    /* Timestamp */
-    time_t now = time(NULL);
-    struct tm tm;
-    localtime_r(&now, &tm);
-    char timebuf[64];
-    strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M (%A)", &tm);
 
     /* Platform */
     struct utsname uts;
@@ -114,7 +114,6 @@ static char *build_identity(const sc_context_builder_t *cb)
 
     sc_strbuf_appendf(&sb, "# %s %s\n\n", SC_NAME, SC_LOGO);
     sc_strbuf_append(&sb, "You are smolclaw, a helpful AI assistant.\n\n");
-    sc_strbuf_appendf(&sb, "## Current Time\n%s\n\n", timebuf);
     sc_strbuf_appendf(&sb, "## Runtime\n%s %s, C11\n\n", sysname, machine);
     sc_strbuf_appendf(&sb, "## Workspace\nYour workspace is at: %s\n", cb->workspace);
     if (cb->is_isolated) {
@@ -200,12 +199,20 @@ char *sc_context_load_bootstrap(const sc_context_builder_t *cb)
     return sc_strbuf_finish(&sb);
 }
 
-char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
+/*
+ * STATIC system content (task 4.3): identity + bootstrap files + skill listing
+ * + deferred tool listing. This is stable across turns within a session, so it
+ * forms the cached prefix — the Anthropic provider marks the first system block
+ * with cache_control: ephemeral (see providers/claude.c build_system_blocks).
+ * Nothing volatile (timestamp, memory, summary, scratchpad) may appear here, or
+ * the prefix changes and the cache silently misses.
+ */
+static char *build_static_system(const sc_context_builder_t *cb)
 {
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
 
-    /* Identity */
+    /* Identity (no timestamp — that is dynamic) */
     char *identity = build_identity(cb);
     if (identity) {
         sc_strbuf_append(&sb, identity);
@@ -219,6 +226,49 @@ char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
         sc_strbuf_append(&sb, bootstrap);
     }
     free(bootstrap);
+
+    /* Skill listing */
+    if (cb->skills) {
+        char *skill_list = sc_skill_registry_listing(cb->skills);
+        if (skill_list) {
+            sc_strbuf_append(&sb, "\n\n");
+            sc_strbuf_append(&sb, skill_list);
+            free(skill_list);
+        }
+    }
+
+    /* Deferred tool listing (if any MCP tools are deferred) */
+    if (cb->tools) {
+        char *deferred = sc_tool_registry_deferred_listing(cb->tools);
+        if (deferred) {
+            sc_strbuf_append(&sb, "\n\n");
+            sc_strbuf_append(&sb, deferred);
+            free(deferred);
+        }
+    }
+
+    return sc_strbuf_finish(&sb);
+}
+
+/*
+ * DYNAMIC system content (task 4.3): current time + memory block. These change
+ * turn-to-turn (the timestamp every minute; memory whenever the agent writes),
+ * so they must sit AFTER the cache breakpoint — i.e. in a second system block
+ * that carries no cache_control. summary/scratchpad/action-log (added in
+ * sc_context_build_messages) are appended to this block for the same reason.
+ */
+static char *build_dynamic_system(const sc_context_builder_t *cb)
+{
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+
+    /* Timestamp */
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    char timebuf[64];
+    strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M (%A)", &tm);
+    sc_strbuf_appendf(&sb, "## Current Time\n%s\n", timebuf);
 
     /* Memory context — CDATA-wrapped to isolate user-influenced data.
      * Skipped entirely in isolated sessions: per-session memory exists for
@@ -247,26 +297,30 @@ char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
         free(mem_ctx);
     }
 
-    /* Skill listing */
-    if (cb->skills) {
-        char *skill_list = sc_skill_registry_listing(cb->skills);
-        if (skill_list) {
-            sc_strbuf_append(&sb, "\n\n");
-            sc_strbuf_append(&sb, skill_list);
-            free(skill_list);
-        }
-    }
+    return sc_strbuf_finish(&sb);
+}
 
-    /* Deferred tool listing (if any MCP tools are deferred) */
-    if (cb->tools) {
-        char *deferred = sc_tool_registry_deferred_listing(cb->tools);
-        if (deferred) {
-            sc_strbuf_append(&sb, "\n\n");
-            sc_strbuf_append(&sb, deferred);
-            free(deferred);
-        }
-    }
+/*
+ * Full system prompt = static prefix + dynamic suffix. Used for the read-only
+ * `smolclaw context` token estimate (main.c) and content tests; the live agent
+ * path (sc_context_build_messages) instead emits the two halves as separate
+ * system blocks so the static half can be cached. Content is preserved; only
+ * the timestamp/memory ordering shifts (now after skills, in the dynamic half).
+ */
+char *sc_context_build_system_prompt(const sc_context_builder_t *cb)
+{
+    char *static_sys = build_static_system(cb);
+    char *dynamic_sys = build_dynamic_system(cb);
 
+    sc_strbuf_t sb;
+    sc_strbuf_init(&sb);
+    if (static_sys) sc_strbuf_append(&sb, static_sys);
+    if (dynamic_sys && dynamic_sys[0]) {
+        sc_strbuf_append(&sb, "\n\n---\n\n");
+        sc_strbuf_append(&sb, dynamic_sys);
+    }
+    free(static_sys);
+    free(dynamic_sys);
     return sc_strbuf_finish(&sb);
 }
 
@@ -277,19 +331,30 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
                                              const char *channel, const char *chat_id,
                                              int *out_count)
 {
-    /* Build system prompt */
-    char *sys_prompt = sc_context_build_system_prompt(cb);
+    /* Task 4.3: emit the system prompt as TWO blocks so the Anthropic provider
+     * can cache the static half. Block 1 (static) = identity + bootstrap +
+     * skills + deferred tools + per-session info (constant across turns within
+     * a session). Block 2 (dynamic) = timestamp + memory + summary + scratchpad
+     * + action log (changes turn-to-turn). The provider marks block 1 with
+     * cache_control: ephemeral; block 2 follows uncached. */
+    sc_strbuf_t static_buf;
+    sc_strbuf_init(&static_buf);
+    char *static_sys = build_static_system(cb);
+    if (static_sys) sc_strbuf_append(&static_buf, static_sys);
+    free(static_sys);
 
-    /* Append session info if available */
-    sc_strbuf_t prompt_buf;
-    sc_strbuf_init(&prompt_buf);
-    sc_strbuf_append(&prompt_buf, sys_prompt);
-    free(sys_prompt);
-
+    /* Per-session info is constant for the session's lifetime → stays in the
+     * cached (static) block. */
     if (channel && channel[0] && chat_id && chat_id[0]) {
-        sc_strbuf_appendf(&prompt_buf, "\n\n## Current Session\nChannel: %s\nChat ID: %s",
+        sc_strbuf_appendf(&static_buf, "\n\n## Current Session\nChannel: %s\nChat ID: %s",
                           channel, chat_id);
     }
+
+    sc_strbuf_t prompt_buf;
+    sc_strbuf_init(&prompt_buf);
+    char *dynamic_sys = build_dynamic_system(cb);
+    if (dynamic_sys) sc_strbuf_append(&prompt_buf, dynamic_sys);
+    free(dynamic_sys);
 
     if (summary && summary[0]) {
         sc_strbuf_append(&prompt_buf, "\n\n## Summary of Previous Conversation\n\n");
@@ -358,7 +423,8 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
         }
     }
 
-    char *final_prompt = sc_strbuf_finish(&prompt_buf);
+    char *static_block = sc_strbuf_finish(&static_buf);
+    char *dynamic_block = sc_strbuf_finish(&prompt_buf);
 
     /* Skip orphaned tool messages at start of history */
     int hist_start = 0;
@@ -370,20 +436,23 @@ sc_llm_message_t *sc_context_build_messages(const sc_context_builder_t *cb,
     }
     int effective_history = history_count - hist_start;
 
-    /* Total messages: system + history + user */
-    int total = 1 + effective_history + 1;
+    /* Total messages: static system + dynamic system + history + user */
+    int total = 2 + effective_history + 1;
     sc_llm_message_t *msgs = calloc(total, sizeof(sc_llm_message_t));
     if (!msgs) {
-        free(final_prompt);
+        free(static_block);
+        free(dynamic_block);
         *out_count = 0;
         return NULL;
     }
 
     int idx = 0;
 
-    /* System message */
-    msgs[idx++] = sc_msg_system(final_prompt);
-    free(final_prompt);
+    /* System messages: cached static prefix first, then dynamic suffix (task 4.3) */
+    msgs[idx++] = sc_msg_system(static_block);
+    free(static_block);
+    msgs[idx++] = sc_msg_system(dynamic_block);
+    free(dynamic_block);
 
     /* History */
     for (int i = hist_start; i < history_count; i++) {
