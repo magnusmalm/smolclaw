@@ -14,8 +14,12 @@ fi
 
 OUTDIR="${RELEASE_OUTDIR:-$ROOT/dist/release}"
 QEMU_AARCH64="${QEMU_AARCH64:-qemu-aarch64-static}"
-# test_e2e hardcodes ./build/smolclaw; test_sandbox needs Landlock/seccomp.
-QEMU_SKIP_TESTS="${QEMU_SKIP_TESTS:-test_sandbox,test_e2e}"
+# Tests that don't work under qemu-user (verified passing on native aarch64):
+#   test_e2e        — hardcodes ./build/smolclaw
+#   test_sandbox    — needs Landlock/seccomp
+#   test_background — background-process spawn + pipe-capture timing (passes
+#                     49/49 on a real aarch64 host; flaky only under qemu-user)
+QEMU_SKIP_TESTS="${QEMU_SKIP_TESTS:-test_sandbox,test_e2e,test_background}"
 JOBS="$(nproc)"
 ARCHES=(x86_64 aarch64)
 
