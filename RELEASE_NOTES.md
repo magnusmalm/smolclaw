@@ -74,8 +74,7 @@ A C11 lightweight AI agent framework.
   `{workspace}/memory/_sessions/<id>/` and skip the shared "# Memory"
   block in the system prompt. Background cleanup reaps namespaces idle
   longer than 24 h. See
-  [`docs/operations/session-isolation.md`](docs/operations/session-isolation.md)
-  and [`docs/design/session-isolation-plan.md`](docs/design/session-isolation-plan.md).
+  [`docs/operations/session-isolation.md`](docs/operations/session-isolation.md).
 - **code_graph regex fix** — POSIX ERE patterns in the Phase 3 symbol
   extractor used PCRE-only `(?:...)` non-capturing groups; `regcomp`
   silently failed and `extract_c_symbols` returned 0 symbols. Replaced

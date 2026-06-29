@@ -7,8 +7,6 @@ user on loopback.
 [`session-isolation.md`](session-isolation.md),
 [`CONFIGURATION.md`](../CONFIGURATION.md)
 
-**Audit:** repo-audit `4298ba13` (PR-1, PR-6 hardening)
-
 ---
 
 ## Summary
@@ -33,8 +31,8 @@ callers.
 | `gateway` | Auto-approved (`gateway_auto_confirm`)    | Headless services, bots  |
 
 In gateway mode, `agents.defaults.auto_confirm: true` (common in examples)
-registers an approve-all callback. Tools marked `needs_confirm` (exec, git
-push, file writes, etc.) run **without a human prompt**. Deny patterns,
+registers an approve-all callback. Tools marked `needs_confirm` (`exec`,
+`exec_background`, `git`) run **without a human prompt**. Deny patterns,
 exec allowlist mode, Landlock, and per-channel tool allowlists remain the
 guards — not an operator in the loop.
 

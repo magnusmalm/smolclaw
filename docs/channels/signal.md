@@ -1,8 +1,7 @@
 # Signal Channel
 
 > **Status**: Implemented (MVP) — text DMs + groups, polling receive.  
-> Build with `-DSC_ENABLE_SIGNAL=ON` (Kconfig `SC_ENABLE_SIGNAL`, **default off**).  
-> Design document: [docs/design/signal-channel.md](../design/signal-channel.md)
+> Build with `-DSC_ENABLE_SIGNAL=ON` (Kconfig `SC_ENABLE_SIGNAL`, **default off**).
 >
 > The mock-tested code is complete (`tests/test_signal.c`). A manual smoke test
 > against a real `signal-cli` daemon with a test number is still recommended
@@ -128,19 +127,16 @@ Media support, typing indicators, and richer features are planned for later phas
 - Keep `signal-cli` reasonably up to date, as Signal server changes can affect older versions.
 - Prefer `dm_policy: "pairing"` for most deployments.
 
-See [Security](../SECURITY.md) and the [design document](../design/signal-channel.md) for more details.
+See [Security](../SECURITY.md) for more details.
 
 ---
 
 ## Related Documentation
 
-- [Pairing](pairing.md)
 - [Security](../SECURITY.md)
-- Design document: [docs/design/signal-channel.md](../design/signal-channel.md)
 
 ---
 
 **Note**: The Signal channel is implemented (MVP — text DMs + groups, polling
 receive) behind `SC_ENABLE_SIGNAL` (**default off**). A live `signal-cli` smoke
-test is the remaining acceptance step before production use — see the
-[acceptance runbook](signal-acceptance.md).
+test is the remaining acceptance step before production use.

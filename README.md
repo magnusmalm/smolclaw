@@ -10,7 +10,7 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 - **~257 KB** dynamic-minimal binary (CI-enforced budget: 1 MB), **4.6 MB** fully static (musl, zero runtime deps)
 - **672 KB** peak RSS (musl-static)
-- **28** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
+- **33** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
 - C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector, no runtime
 
 ## Features
@@ -21,9 +21,10 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
   Ollama
 - **Tools** — File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is
   deny-by-default without an explicit remote allowlist), gitea (repos/issues/PRs), web search/fetch,
-  X read, memory read/write/log/search, context search, code graph, message, note (scratchpad),
-  cron, spawn, delegate, converse, notify, background processes, camera (capture stills, list motion
-  events, describe images via a remote vision model — `SC_ENABLE_CAMERA`)
+  X read, memory read/write/log/search, context search, code graph, symbol lookup, repo/project &
+  session search, tool search, message, note (scratchpad), cron, spawn, delegate, converse, compact,
+  skills, notify, background processes, git worktree enter/exit, host inventory/metrics, camera
+  (capture stills, list motion events, describe images via a remote vision model — `SC_ENABLE_CAMERA`)
 - **Memory** — Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search
   (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic
   action log
@@ -148,7 +149,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_SIGNAL`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_SESSION_SEARCH`, `SC_ENABLE_PROJECT_MEMORY`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_SIGNAL`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_SESSION_SEARCH`, `SC_ENABLE_PROJECT_MEMORY`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`, `SC_ENABLE_MOA`, `SC_ENABLE_XAI_OAUTH`.
 
 ## Architecture
 
@@ -228,7 +229,7 @@ Each channel can specify which tools the LLM sees, reducing prompt token overhea
     },
     "web": {
       "enabled": true,
-      "tools": ["web_search", "web_fetch", "file_read", "file_write", "exec", "git"]
+      "tools": ["web_search", "web_fetch", "read_file", "write_file", "exec", "git"]
     }
   }
 }
@@ -486,13 +487,14 @@ smolclaw gateway      Start all channels + services
 smolclaw mcp-server   Run as an MCP server (JSON-RPC over stdio; needs SC_ENABLE_MCP_SERVER)
                       Read-only tools by default; --all-tools to expose write/exec
 smolclaw pairing      Manage channel trust (list/approve/revoke)
+smolclaw auth         xAI Grok OAuth login (login/status/logout/refresh xai; needs SC_ENABLE_XAI_OAUTH)
 smolclaw vault        Manage encrypted secrets
 smolclaw update       Check for and apply updates
 smolclaw backup       Backup and restore state (create/verify/list/restore)
 smolclaw session      Maintain stored sessions (compact [--force] [--max-bytes N] [key...]; prune [--keep N] [--yes])
 smolclaw cost         View token usage and costs
 smolclaw context      Prompt budget breakdown for a session ([session_key] [--warn-pct N])
-smolclaw memory       Review staged memory writes (pending | approve <id> | reject <id>; task 4.14)
+smolclaw memory       Review staged memory writes (pending | approve <id> | reject <id>)
 smolclaw analytics    Usage analytics (summary, today, week, month, model, channel; requires SC_ENABLE_ANALYTICS)
 smolclaw host-refresh Refresh host inventory and retained metrics
 smolclaw doctor       Validate configuration and dependencies
@@ -544,8 +546,7 @@ The body is expanded on use, with `$ARGUMENTS` replaced by the invocation text.
 
 The frontmatter mirrors the [agentskills.io](https://agentskills.io) /
 Claude Code `SKILL.md` format for portability; smolclaw ships no Skills Hub —
-drop files in the directories above. To author skills with the agent itself,
-see [docs/development/using-grok-implement-skill.md](docs/development/using-grok-implement-skill.md).
+drop files in the directories above.
 
 ## Security
 

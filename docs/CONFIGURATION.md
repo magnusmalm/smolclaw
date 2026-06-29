@@ -107,10 +107,10 @@ definitions.
 | session_keep_last         | int  | 4       | Recent messages kept verbatim.         |
 | summary_max_transcript    | int  | 4000    | Max transcript chars to summarizer.    |
 | memory_consolidation      | bool | true    | Extract facts from summaries to notes. |
-| memory_background_review  | bool | false   | After each successful turn, an async LLM pass proposes 0–2 durable memory entries (task 4.13). Opt-in. |
+| memory_background_review  | bool | false   | After each successful turn, an async LLM pass proposes 0–2 durable memory entries. Opt-in. |
 | memory_review_model       | string | (summary/main) | Optional cheaper model for the background review. |
 | memory_notifications      | string | off     | Background-review logging: `off` \| `on` \| `verbose`. |
-| memory_write_approval     | bool | false   | Stage memory writes (foreground tool + background review) to `memory/pending/` for review instead of committing (task 4.14). |
+| memory_write_approval     | bool | false   | Stage memory writes (foreground tool + background review) to `memory/pending/` for review instead of committing. |
 
 When `memory_write_approval` is true, review staged entries with the CLI
 (`smolclaw memory pending` / `approve <id>` / `reject <id>`) or the Web API
@@ -195,6 +195,11 @@ The compression transform rewrites tool-result messages older than the last
 Known names: `anthropic`, `openai`, `openrouter`, `groq`, `zhipu`, `vllm`,
 `gemini`, `deepseek`, `ollama`, `xai`. Any other name is treated as a custom
 OpenAI-compatible provider (up to 8), addressable as `customname/model`.
+
+When built with `SC_ENABLE_XAI_OAUTH` (default off), the virtual providers
+`xai-oauth` / `grok-oauth` / `grok-sub` (and the model prefix
+`grok-sub/<model>`) route through a SuperGrok OAuth bearer token instead of a
+static `api_key` — log in with `smolclaw auth login xai`.
 
 | Key      | Type   | Default            | Description                         |
 |----------|--------|--------------------|-------------------------------------|
@@ -285,6 +290,28 @@ All channels share these fields:
 
 - [1] The struct field exists but `load_channels()` does not parse it; the X
   API base is fixed at `https://api.x.com` at runtime.
+
+### `channels.signal` (`SC_ENABLE_SIGNAL`, default off)
+
+Connects to an external `signal-cli` daemon over HTTP JSON-RPC (smolclaw does
+not speak the Signal protocol natively). See
+[`channels/signal.md`](channels/signal.md) for the full setup guide.
+
+| Key           | Type   | Default     | Description                                            |
+|---------------|--------|-------------|--------------------------------------------------------|
+| enabled       | bool   | false       | Enable the Signal channel.                             |
+| account       | string | (none)      | Bot phone number, e.g. `+15551234567`.                 |
+| http_host     | string | 127.0.0.1   | signal-cli daemon host.                                |
+| http_port     | int    | 7583        | signal-cli daemon port.                                |
+| http_url      | string | (derived)   | Full base URL; overrides `http_host`/`http_port`.      |
+| proxy         | string | (none)      | Optional HTTP proxy for daemon requests.               |
+| dm_policy     | string | pairing     | `pairing`, `allowlist`, or `open`.                     |
+| allow_from    | array  | []          | Allowed numbers / `uuid:...` entries.                  |
+| group_trigger | string | (none)      | Only group messages containing this substring trigger. |
+
+Every field has an environment override (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
+`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, …). The daemon is reached at
+`http://<http_host>:<http_port>/api/v1/rpc`.
 
 ## `tools.web` — web search backends
 
@@ -572,8 +599,7 @@ the invocation text. Invoke via the `/name args` slash command (when
 `user-invocable`) or the `skill` tool (unless `disable-model-invocation`).
 The format follows the [agentskills.io](https://agentskills.io) / Claude Code
 `SKILL.md` convention; there is no Skills Hub in core. See the README
-"Skills" section and
-[using-grok-implement-skill.md](development/using-grok-implement-skill.md).
+"Skills" section.
 
 ## `moa` — Mixture of Agents (`SC_ENABLE_MOA`, default off)
 
@@ -626,4 +652,4 @@ tasks, not the default path. Build with `-DSC_ENABLE_MOA=ON`.
   conversation tail.
 - Recursive presets (an aggregator whose provider is `moa`) are rejected.
 - Reference failures are non-fatal: the error is injected as the reference text
-  and the aggregator still runs. Design: `docs/design/mixture-of-agents.md`.
+  and the aggregator still runs.

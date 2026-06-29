@@ -4,8 +4,6 @@
 multi-tenant callers (e.g. an orchestrated agent fleet, a multi-user IRC bot,
 multiple MCP clients).
 
-**Related**: [`design/session-isolation-plan.md`](../design/session-isolation-plan.md)
-
 ---
 
 ## Why this exists

@@ -8,9 +8,9 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Tool Confirmation
 
-`src/tools/registry.c`: Tools with `needs_confirm = 1` (exec, exec_background, git, write_file, edit_file, append_file, memory_write) require user approval before execution. In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
+`src/tools/registry.c`: Tools with `needs_confirm = 1` (`exec`, `exec_background`, `git`) require user approval before execution. (File-write and memory tools rely on the deny-pattern list and allowlist rather than per-call confirmation.) In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
 
-**Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and `auto_confirm` implications (audit `4298ba13`).
+**Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and `auto_confirm` implications.
 
 ## Tool Allowlist
 
