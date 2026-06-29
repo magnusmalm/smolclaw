@@ -251,6 +251,12 @@ const char *sc_model_strip_prefix(const char *model)
     if (!slash || slash == model) return model;
 
     size_t prefix_len = (size_t)(slash - model);
+#if SC_ENABLE_XAI_OAUTH
+    /* The OAuth-only prefixes (grok-sub/xai-oauth/grok-oauth) route to the
+     * OAuth provider but are not in provider_table, so strip them here too —
+     * otherwise the literal `grok-sub/<model>` reaches api.x.ai and 400s. */
+    if (model_has_xai_oauth_prefix(model)) return slash + 1;
+#endif
     for (int i = 0; i < PROVIDER_COUNT; i++) {
         for (int j = 0; provider_table[i].names[j]; j++) {
             if (strlen(provider_table[i].names[j]) == prefix_len &&

@@ -11,6 +11,7 @@
 #include "test_main.h"
 
 #include "util/xai_oauth.h"
+#include "providers/factory.h"
 #include "util/base64.h"
 #include "util/sha256.h"
 #include "util/str.h"
@@ -304,9 +305,24 @@ static void test_ensure_fresh_not_expiring(void)
     unsetenv("SMOLCLAW_HOME");
 }
 
+/* Regression: the OAuth-only prefixes route to the OAuth provider but must
+ * also be stripped from the model name before it reaches api.x.ai — otherwise
+ * the literal `grok-sub/<model>` 400s ("Model not found"). Caught on live
+ * SuperGrok acceptance 2026-06-29. */
+static void test_strip_oauth_prefix(void)
+{
+    ASSERT_STR_EQ(sc_model_strip_prefix("grok-sub/grok-4.3"), "grok-4.3");
+    ASSERT_STR_EQ(sc_model_strip_prefix("xai-oauth/grok-4.3"), "grok-4.3");
+    ASSERT_STR_EQ(sc_model_strip_prefix("grok-oauth/grok-4.3"), "grok-4.3");
+    /* Table-driven prefixes still strip; bare names and unknowns pass through. */
+    ASSERT_STR_EQ(sc_model_strip_prefix("grok/grok-4.3"), "grok-4.3");
+    ASSERT_STR_EQ(sc_model_strip_prefix("grok-4.3"), "grok-4.3");
+}
+
 int main(void)
 {
     printf("test_xai_oauth:\n");
+    RUN_TEST(test_strip_oauth_prefix);
     RUN_TEST(test_base64url);
     RUN_TEST(test_pkce);
     RUN_TEST(test_jwt_exp);
