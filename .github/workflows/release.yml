@@ -42,12 +42,17 @@ jobs:
               zlib-static zstd-static brotli-static nghttp2-static \
               libidn2-static libunistring-static libpsl-static
             pip3 install --break-system-packages -q kconfiglib
+            # Alpine is musl-native, so reuse the SC_MUSL_STATIC path pointed at
+            # /usr (its static libs live there). Alpine builds libcurl.a with
+            # nghttp2/brotli/etc, so add curl/readline transitive static deps
+            # (pkg-config --static gives curls full chain) to the link line.
+            EXTRA="$(pkg-config --static --libs libcurl) -lreadline -lncursesw"
             cmake -B build \
               -DCMAKE_BUILD_TYPE=MinSizeRel \
               -DSC_STRIP=ON \
-              -DCMAKE_C_FLAGS="-DCURL_STATICLIB" \
-              -DCMAKE_EXE_LINKER_FLAGS="-static" \
-              -DCMAKE_FIND_LIBRARY_SUFFIXES=".a"
+              -DSC_MUSL_STATIC=ON \
+              -DMUSL_STATIC_PREFIX=/usr \
+              -DCMAKE_EXE_LINKER_FLAGS="$EXTRA"
             cmake --build build -j"$(nproc)" --target smolclaw
             # Fully static = no NEEDED dynamic dependencies (readelf is in build-base).
             if readelf -d build/smolclaw 2>/dev/null | grep -q NEEDED; then
