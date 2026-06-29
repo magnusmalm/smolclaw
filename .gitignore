@@ -24,6 +24,14 @@ Testing/
 # Host / editor noise that can appear at the repo root — never commit these
 .bashrc
 .bash_profile
+.profile
+.zshrc
+.zprofile
 .gitconfig
 .mcp.json
-.idea/
+.ripgreprc
+.idea
+.vscode
+
+# Internal-only docs (kept local, never published to the public mirror)
+docs/progress-*.md
