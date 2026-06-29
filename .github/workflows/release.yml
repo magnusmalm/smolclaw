@@ -1,0 +1,116 @@
+name: Release
+
+# Publishes on a v* tag:
+#   - static musl binaries (x86_64 + arm64) attached to a GitHub Release
+#   - a multi-arch container image to ghcr.io
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push to ghcr.io
+
+jobs:
+  # ---- Static musl binaries, built natively in Alpine on each arch ----------
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build the static binary inside Alpine (musl). Run via `docker run`
+      # rather than `container:` — JS actions can't run in a musl container,
+      # so checkout/upload happen on the host. The runner is native to the
+      # target arch, so the Alpine image and build are native too.
+      - name: Build static binary in Alpine
+        run: |
+          docker run --rm -v "$PWD":/src -w /src alpine:3.21 sh -euc '
+            apk add --no-cache \
+              build-base cmake python3 py3-pip linux-headers \
+              curl-dev curl-static \
+              libevent-dev libevent-static \
+              openssl-dev openssl-libs-static \
+              readline-dev readline-static ncurses-static \
+              zlib-static zstd-static brotli-static nghttp2-static \
+              c-ares-static libidn2-static libunistring-static libpsl-static
+            pip3 install --break-system-packages -q kconfiglib
+            cmake -B build \
+              -DCMAKE_BUILD_TYPE=MinSizeRel \
+              -DSC_STRIP=ON \
+              -DCMAKE_C_FLAGS="-DCURL_STATICLIB" \
+              -DCMAKE_EXE_LINKER_FLAGS="-static" \
+              -DCMAKE_FIND_LIBRARY_SUFFIXES=".a"
+            cmake --build build -j"$(nproc)" --target smolclaw
+            # Fully static = no NEEDED dynamic dependencies (readelf is in build-base).
+            if readelf -d build/smolclaw 2>/dev/null | grep -q NEEDED; then
+              echo "ERROR: binary is not fully static:"; readelf -d build/smolclaw; exit 1
+            fi
+            ./build/smolclaw version
+          '
+
+      - name: Package
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ART="smolclaw-${TAG}-linux-${{ matrix.arch }}"
+          mkdir -p "dist/$ART"
+          cp build/smolclaw LICENSE README.md "dist/$ART/"
+          tar -C dist -czf "dist/${ART}.tar.gz" "$ART"
+          (cd dist && sha256sum "${ART}.tar.gz" > "${ART}.tar.gz.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smolclaw-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  # ---- Multi-arch container image to ghcr.io --------------------------------
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+
+  # ---- GitHub Release with the binary artifacts -----------------------------
+  release:
+    needs: [binaries, image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          generate_release_notes: true
+          body: |
+            Static musl binaries (x86_64, arm64) and a multi-arch container image
+            at `ghcr.io/${{ github.repository }}:${{ github.ref_name }}`.
