@@ -372,6 +372,10 @@ The four tools are then available from any channel (IRC, CLI, Web, etc.). Indepe
 
 #### X MCP server
 
+> See the [MCP Cookbook](docs/integrations/mcp-cookbook.md) for the server
+> config schema, the sandbox model, and recipes (incl. why `npx`-based servers
+> need `capabilities.sandbox: false`).
+
 Add to the `mcp.servers` section of your config. The agent gains tools like `x_get_tweet`, `x_get_thread`, `x_search`, `x_get_user`, and (if not read-only) `x_post_tweet`, `x_like`, etc.
 
 ```json
