@@ -1944,6 +1944,23 @@ static int write_ci_config(const char *workspace, const char *path)
     return 0;
 }
 
+/* Recursively create a directory path (like `mkdir -p`); ignores EEXIST.
+ * sc_config_load() returns a non-NULL defaults config even when no config
+ * file exists, so the workspace may resolve to ~/.smolclaw/workspace on a
+ * fresh host (e.g. a CI runner) where that directory has never been created.
+ * The exec (chdir) and write_file tests need it to exist. */
+static void ensure_dir_p(const char *path)
+{
+    if (!path || !path[0]) return;
+    char *tmp = sc_strdup(path);
+    if (!tmp) return;
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') { *p = '\0'; mkdir(tmp, 0700); *p = '/'; }
+    }
+    mkdir(tmp, 0700);
+    free(tmp);
+}
+
 static int setup(void)
 {
     const char *override = getenv("SMOLCLAW_TEST_CONFIG");
@@ -1983,6 +2000,7 @@ static int setup(void)
     }
 
     char *workspace = sc_config_workspace_path(g_cfg);
+    ensure_dir_p(workspace);  /* may not exist yet on a fresh host / CI runner */
 
     /* Init audit (to /dev/null — we don't need real audit in tests) */
     sc_audit_init("/dev/null");
