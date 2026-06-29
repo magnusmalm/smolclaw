@@ -5,7 +5,7 @@
 FROM alpine:3.21 AS builder
 
 RUN apk add --no-cache \
-    build-base cmake python3 py3-pip curl-dev libevent-dev openssl-dev \
+    bash build-base cmake python3 py3-pip curl-dev libevent-dev openssl-dev \
     readline-dev sqlite-dev linux-headers
 
 # Install kconfiglib

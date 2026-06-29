@@ -34,13 +34,13 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/src -w /src alpine:3.21 sh -euc '
             apk add --no-cache \
-              build-base cmake python3 py3-pip linux-headers \
+              bash build-base cmake python3 py3-pip linux-headers \
               curl-dev curl-static \
               libevent-dev libevent-static \
               openssl-dev openssl-libs-static \
               readline-dev readline-static ncurses-static \
               zlib-static zstd-static brotli-static nghttp2-static \
-              c-ares-static libidn2-static libunistring-static libpsl-static
+              libidn2-static libunistring-static libpsl-static
             pip3 install --break-system-packages -q kconfiglib
             cmake -B build \
               -DCMAKE_BUILD_TYPE=MinSizeRel \
