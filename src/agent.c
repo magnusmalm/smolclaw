@@ -1067,7 +1067,7 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     agent->memory_consolidation = cfg->memory_consolidation;
     agent->memory_background_review = cfg->memory_background_review;
     agent->memory_review_model = cfg->memory_review_model
-        ? sc_strdup(cfg->memory_review_model) : NULL;
+        ? sc_strdup(sc_model_strip_prefix(cfg->memory_review_model)) : NULL;
     agent->memory_notifications = cfg->memory_notifications;
     agent->memory_write_approval = cfg->memory_write_approval;
     agent->workspace_per_session = cfg->workspace_per_session;
@@ -1167,9 +1167,11 @@ void sc_agent_free(sc_agent_t *agent)
     if (agent->summarize_task)
         sc_task_cancel(agent->summarize_task);
     sc_drain_summarize(agent);
-    /* Task 4.13: drain any in-flight post-turn memory review. */
+    /* Task 4.13: let any in-flight post-turn review finish and PERSIST before
+     * teardown. One-shot `agent` runs have no next turn to reap it, and the
+     * worker discards its result if cancelled first — so grace-join (no cancel)
+     * up to 10s; sc_task_free() cancels+joins any straggler that overruns. */
     if (agent->review_task) {
-        sc_task_cancel(agent->review_task);
         sc_task_join(agent->review_task, 10000);
         sc_task_free(agent->review_task);
         agent->review_task = NULL;
