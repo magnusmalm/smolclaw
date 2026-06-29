@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-GITEA_URL="${GITEA_URL:-http://192.168.1.118:3000}"
+GITEA_URL="${GITEA_URL:?set GITEA_URL to your Gitea base URL, e.g. http://gitea.local:3000}"
 GITEA_OWNER="${GITEA_OWNER:-magnus}"
 GITEA_REPO="${GITEA_REPO:-smolclaw}"
 TAG="${RELEASE_TAG:-${GITHUB_REF_NAME:-}}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ensure CI dependencies on the starbase host runner (no sudo).
+# Ensure CI dependencies on the self-hosted CI runner (no sudo).
 set -euo pipefail
 
 profile="${1:?usage: $0 <base|gcc|clang>}"
@@ -15,7 +15,7 @@ require_pkgs() {
     pkg_present "$p" || missing+=("$p")
   done
   if ((${#missing[@]})); then
-    echo "Host runner missing packages. Install once on starbase:"
+    echo "Host runner missing packages. Install once on the CI runner:"
     echo "  sudo apt-get install -y --no-install-recommends ${missing[*]}"
     exit 1
   fi

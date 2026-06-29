@@ -1,13 +1,13 @@
 # Releasing smolclaw
 
-Releases are published to the private Gitea instance (`192.168.1.118:3000`).
-The starbase host runner builds and attaches artifacts automatically.
+Releases are published to a private Gitea instance (set `GITEA_URL` to its base
+URL). A self-hosted host runner builds and attaches artifacts automatically.
 
 ## Prerequisites
 
 - Clean working tree (`git status`)
 - Push/PR CI green on `master` (`.gitea/workflows/ci.yml`)
-- `qemu-user-static` on starbase for aarch64 release tests:
+- `qemu-user-static` on the CI runner for aarch64 release tests:
   `sudo apt-get install -y qemu-user-static`
 
 ## Steps
@@ -58,13 +58,13 @@ The `v*` tag triggers `.gitea/workflows/release.yml`, which:
 
 Open:
 
-`http://192.168.1.118:3000/magnus/smolclaw/releases/tag/vX.Y.Z`
+`$GITEA_URL/magnus/smolclaw/releases/tag/vX.Y.Z`
 
 Or use the API:
 
 ```bash
 curl -sS -H "Authorization: token $TOKEN" \
-  "http://192.168.1.118:3000/api/v1/repos/magnus/smolclaw/releases/tags/vX.Y.Z" \
+  "$GITEA_URL/api/v1/repos/magnus/smolclaw/releases/tags/vX.Y.Z" \
   | python3 -m json.tool
 ```
 

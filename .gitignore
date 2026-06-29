@@ -20,3 +20,10 @@ code-analysis-report.md
 CLAUDE.md
 CLAUDE.md.bak
 Testing/
+
+# Host / editor noise that can appear at the repo root — never commit these
+.bashrc
+.bash_profile
+.gitconfig
+.mcp.json
+.idea/

@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        profile: [full, minimal]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential clang python3-pip \
+            libcurl4-openssl-dev libevent-dev libssl-dev \
+            libreadline-dev libsqlite3-dev
+          pip3 install --user kconfiglib
+
+      - name: Configure (minimal)
+        if: matrix.profile == 'minimal'
+        run: |
+          cp configs/defconfig.minimal .config
+          cmake -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Configure (full)
+        if: matrix.profile == 'full'
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: |
+          if [ "${{ matrix.profile }}" = "minimal" ]; then
+            # Skip the heavy web-gated integration suite by name; the core
+            # security-labelled tests (sandbox, exec_safety, security) still run.
+            ctest --test-dir build --output-on-failure -E test_security_prod
+          else
+            ctest --test-dir build --output-on-failure
+          fi
+
+      - name: Binary info
+        run: |
+          ls -lh build/smolclaw
+          file build/smolclaw
+          ./build/smolclaw version
+
+  size-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential python3-pip \
+            libcurl4-openssl-dev libevent-dev libssl-dev \
+            libreadline-dev libsqlite3-dev
+          pip3 install --user kconfiglib
+
+      - name: Build minimal (MinSizeRel + LTO + gc-sections)
+        run: |
+          cp configs/defconfig.minimal .config
+          cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel
+          cmake --build build-size -j$(nproc) --target smolclaw
+
+      - name: Check size budget
+        run: ./scripts/check_size_budget.sh build-size/smolclaw 1024 minimal-dynamic

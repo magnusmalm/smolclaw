@@ -407,7 +407,7 @@ OAuth flows are notoriously easy to get wrong on security edges. We will have **
 
 Implemented behind `SC_ENABLE_XAI_OAUTH` (default n) and landed 2026-06-28
 (`src/util/xai_oauth.{c,h}`). Live end-to-end acceptance run on a **real
-SuperGrok subscription**, starbase desktop, build with the flag on:
+SuperGrok subscription**, a Linux desktop, build with the flag on:
 
 | Step | Command / probe | Result |
 |------|-----------------|--------|
