@@ -38,7 +38,14 @@
 
 #define TAG "xai-oauth"
 
-/* --- Constants (stale-constant risk: see header; verify on live login). --- */
+/* --- Constants. Re-verified 2026-06-29 against xAI's official CLI installer
+ *     (x.ai/cli/install.sh) and the reference PKCE impl
+ *     ysnock404/opencode-grok-auth (src/constants.ts + src/oauth.ts): client_id,
+ *     issuer, scope, plan=generic and the 120s refresh skew all match. referrer
+ *     is a free-form per-client identifier (reference uses "hermes-agent"). The
+ *     authorize/token endpoints are resolved via OIDC discovery, not hardcoded,
+ *     so they self-correct if xAI moves them. Live SuperGrok login still gates
+ *     the end-to-end flow. --- */
 #define XAI_CLIENT_ID  "b1a00492-073a-47ea-816f-4c329264a828"
 #define XAI_ISSUER     "https://auth.x.ai"
 #define XAI_SCOPE      "openid profile email offline_access grok-cli:access api:access"
