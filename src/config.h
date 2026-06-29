@@ -203,6 +203,10 @@ typedef struct {
     int    fs_write_count;
     int    no_process;    /* 1 = block execve/fork/clone in seccomp */
     int    no_network;    /* 1 = block socket/connect in seccomp */
+    int    no_sandbox;    /* 1 = run the server with NO Landlock/seccomp at all
+                           * (capabilities.sandbox=false). Explicit opt-in for
+                           * trusted servers — e.g. npx/node packages whose
+                           * multi-process startup the sandbox cannot host. */
 } sc_mcp_capabilities_t;
 
 /* MCP server config */

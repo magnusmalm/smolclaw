@@ -328,10 +328,12 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         close(pipe_stdout[1]);
 
         /* Redirect stderr to /dev/null to prevent server logs polluting our stdout */
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
+        if (!getenv("SC_MCP_DEBUG_STDERR")) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
         }
 
         /* Close inherited file descriptors (bus pipes, sockets, etc.) */
@@ -343,8 +345,11 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
         /* Apply OS-level sandbox (Landlock + seccomp) — restrict MCP
          * server to workspace + per-process tmpdir (C-3, L-5).
          * If per-server capabilities are set, use them instead of
-         * blanket workspace access. */
-        if (workspace) {
+         * blanket workspace access. capabilities.sandbox=false opts out
+         * entirely (trusted server — e.g. npx/node whose multi-process
+         * startup the sandbox cannot host). */
+        const sc_mcp_capabilities_t *mcaps = caps;
+        if (workspace && !(mcaps && mcaps->no_sandbox)) {
             const char *tmpdir = mcp_tmpdir ? mcp_tmpdir : "/tmp";
             sc_sandbox_opts_t sandbox_opts = {
                 .workspace = workspace,
@@ -353,7 +358,6 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             };
 
             /* Apply capability overrides if provided */
-            const sc_mcp_capabilities_t *mcaps = caps;
             if (mcaps && (mcaps->fs_read_count > 0 || mcaps->fs_write_count > 0)) {
                 sandbox_opts.cap_fs_read = (const char **)mcaps->fs_read;
                 sandbox_opts.cap_fs_read_count = mcaps->fs_read_count;

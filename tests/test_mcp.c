@@ -214,7 +214,8 @@ static void test_mcp_config_parse(void)
     fprintf(f, "    \"servers\": {\n");
     fprintf(f, "      \"test\": {\n");
     fprintf(f, "        \"command\": [\"echo\", \"hello\"],\n");
-    fprintf(f, "        \"env\": { \"KEY\": \"val\" }\n");
+    fprintf(f, "        \"env\": { \"KEY\": \"val\" },\n");
+    fprintf(f, "        \"capabilities\": { \"sandbox\": false }\n");
     fprintf(f, "      }\n");
     fprintf(f, "    }\n");
     fprintf(f, "  }\n");
@@ -232,6 +233,8 @@ static void test_mcp_config_parse(void)
     ASSERT_INT_EQ(cfg->mcp.servers[0].env_count, 1);
     ASSERT_STR_EQ(cfg->mcp.servers[0].env_keys[0], "KEY");
     ASSERT_STR_EQ(cfg->mcp.servers[0].env_values[0], "val");
+    /* capabilities.sandbox=false -> no_sandbox opt-out parsed. */
+    ASSERT_INT_EQ(cfg->mcp.servers[0].caps.no_sandbox, 1);
 
     sc_config_free(cfg);
 }

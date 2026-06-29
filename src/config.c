@@ -1295,6 +1295,10 @@ static void load_mcp_config(sc_config_t *cfg, const cJSON *root)
             if ((cJSON_IsArray(net) && cJSON_GetArraySize(net) == 0) ||
                 (cJSON_IsBool(net) && !cJSON_IsTrue(net)))
                 s->caps.no_network = 1;
+            /* sandbox: false = run this (trusted) server with no OS sandbox. */
+            const cJSON *sb = cJSON_GetObjectItem(caps, "sandbox");
+            if (cJSON_IsBool(sb) && !cJSON_IsTrue(sb))
+                s->caps.no_sandbox = 1;
         }
 
         cfg->mcp.server_count++;
