@@ -27,7 +27,7 @@ jobs:
 
       - name: Publish Gitea release
         env:
-          GITEA_URL: ${{ vars.GITEA_URL }}
+          GITEA_URL: ${{ vars.RELEASE_TARGET_URL }}
           GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: ./scripts/gitea-release-publish.sh
