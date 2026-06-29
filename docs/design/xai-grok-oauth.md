@@ -401,4 +401,35 @@ OAuth flows are notoriously easy to get wrong on security edges. We will have **
 
 **This design keeps smolclaw smol while giving Grok subscribers the same first-class experience that Hermes users now enjoy.** Implementation can proceed once this doc is reviewed and approved.
 
+---
+
+## 13. Live acceptance record (2026-06-29)
+
+Implemented behind `SC_ENABLE_XAI_OAUTH` (default n) and landed 2026-06-28
+(`src/util/xai_oauth.{c,h}`). Live end-to-end acceptance run on a **real
+SuperGrok subscription**, starbase desktop, build with the flag on:
+
+| Step | Command / probe | Result |
+|------|-----------------|--------|
+| Build | `cmake -B build-xai -DSC_ENABLE_XAI_OAUTH=ON` | clean, 0 implicit |
+| No-creds smoke | `auth status xai` (fresh `SMOLCLAW_HOME`) | graceful "not logged in" (no double-free) |
+| Login | `auth login xai` → browser SuperGrok consent | **`referrer=smolclaw` accepted by xAI's shared public client**; loopback callback caught the code; `~/.smolclaw/auth.json` written 0600 |
+| Token | inspect stored JWT | valid: `iss=https://auth.x.ai`, `aud`=client_id, `scope` exactly as requested, `sub`=account |
+| API — list | `GET api.x.ai/v1/models` w/ OAuth bearer | **HTTP 200**; live catalog incl. `grok-4.3`, `grok-4.20-0309-{reasoning,non-reasoning,multi-agent}`, `grok-build-0.1`, `grok-imagine-*` |
+| API — chat (raw) | `POST /v1/chat/completions` w/ bearer | **HTTP 200**, correct reply (note: legacy `grok-3` is aliased forward to `grok-4.3`) |
+| Refresh | `auth refresh xai` | access token rotated, expiry reset ~360 min, `last_refresh` updated |
+| Native resolver | `smolclaw agent -m … ` model `grok-sub/grok-4.3` | real Grok turn via our `xai-oauth` factory path |
+
+**Bug found & fixed during acceptance** (commit `2265949`): the OAuth-only
+model prefixes (`grok-sub`/`xai-oauth`/`grok-oauth`) were recognized for
+*routing* but not *stripped* by `sc_model_strip_prefix`, so the literal
+`grok-sub/grok-4.3` reached `api.x.ai` and returned 400 "Model not found".
+Mock tests missed it (they don't assert on the wire-level model string). Fixed
++ regression test added. Re-run confirmed HTTP 200 with the stripped name.
+
+**Verdict: 2.1/2.2 live-accepted.** Constants (client_id, issuer, scope,
+`plan=generic`, refresh skew) also re-verified offline 2026-06-29 against xAI's
+official installer (`x.ai/cli/install.sh`) and the reference impl
+`ysnock404/opencode-grok-auth`.
+
 Next concrete step after approval: create the skeleton `src/util/xai_oauth.h` + basic JWT + PKCE functions + test file, then the full login flow.

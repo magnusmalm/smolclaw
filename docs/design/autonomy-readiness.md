@@ -82,8 +82,8 @@ GATED-EXT (2.1/2.2, 2.12) remain — code is autonomous, acceptance is human; 2.
 
 | Task | Tag | Note / acceptance gate |
 |------|-----|------------------------|
-| 2.1 xAI Grok OAuth | 🔵 SHIPPED / 🟠 | **Landed 2026-06-28** behind `SC_ENABLE_XAI_OAUTH` (default n). `src/util/xai_oauth.{c,h}`: PKCE + JWT-exp + loopback login + auth.json store + refresh + factory `xai-oauth` resolver. base64url added. Pure + mock-HTTP tested (`test_xai_oauth`, 12 cases). **Live SuperGrok login = human gate**; constants (client_id `b1a00492-…`, issuer, scope, `plan=generic`, refresh skew) **re-verified 2026-06-29** against xAI's official installer (`x.ai/cli/install.sh`) + reference impl `ysnock404/opencode-grok-auth` — all match; authorize/token endpoints come from OIDC discovery. (Recon: no `SC_ENABLE_XAI` flag exists → no `depends`.) See phase-2 §2.1–2.2 |
-| 2.2 `auth` subcommand | 🔵 SHIPPED / 🟠 | `smolclaw auth login\|status\|logout\|refresh xai` (`--no-browser`, `--timeout N`) in `main.c`/`xai_oauth.c`. Part of 2.1; same live gate |
+| 2.1 xAI Grok OAuth | 🔵 SHIPPED / ✅ ACCEPTED | **Landed 2026-06-28** behind `SC_ENABLE_XAI_OAUTH` (default n). `src/util/xai_oauth.{c,h}`: PKCE + JWT-exp + loopback login + auth.json store + refresh + factory `xai-oauth` resolver. base64url added. Pure + mock-HTTP tested (`test_xai_oauth`, 13 cases). **✅ LIVE-ACCEPTED 2026-06-29** on a real SuperGrok sub: browser login (`referrer=smolclaw` accepted by xAI's shared client) → 0600 token → `/v1/models` + a real Grok turn + refresh all HTTP 200; native `grok-sub/` resolver end-to-end verified. Acceptance **surfaced & fixed a real bug** (model-prefix not stripped → `grok-sub/<m>` 400'd; fix `2265949`). Constants re-verified offline 2026-06-29 vs official installer + reference impl. See phase-2 §2.1–2.2 + `xai-grok-oauth.md` §13 |
+| 2.2 `auth` subcommand | 🔵 SHIPPED / ✅ ACCEPTED | `smolclaw auth login\|status\|logout\|refresh xai` (`--no-browser`, `--timeout N`) in `main.c`/`xai_oauth.c`. Part of 2.1; **all four verbs exercised live 2026-06-29** (login/status/refresh green; logout clears store) |
 | 2.3 `session compact` | 🔵 SHIPPED | `session_maint.c`; `test_session_maint` |
 | 2.4 `session prune` | 🔵 SHIPPED | `sc_session_prune_candidates` |
 | 2.5 incremental reload | 🟡 GATED-DEC | **Skipped** — no measured bottleneck (in-process append covers reload) |
@@ -207,9 +207,9 @@ hold final acceptance for a human:
 
 - [ ] **Ollama / vLLM** reachable — for 1.5, 1.8, 4.6 acceptance benchmarks
 - [ ] **`signal-cli` daemon + dedicated test phone number** — for 3.1 smoke test
-- [ ] **SuperGrok subscription** — for 2.1 real login (the client_id/endpoints/
-  scope/`plan` constants were re-verified offline 2026-06-29; only the live
-  end-to-end consent flow remains)
+- [x] **SuperGrok subscription** — for 2.1 real login. **DONE 2026-06-29:** live
+  end-to-end accepted (login → token → real Grok turn → refresh, all 200);
+  surfaced + fixed a model-prefix-strip bug (`2265949`). 2.1/2.2 gate CLEARED.
 - [ ] **Anthropic API key** — for 4.3 cache-hit verification
 - [ ] **KVM host + `microsandbox-server` on :5555** — for 4.9
 - [ ] **≥1 real MCP server** (e.g. Playwright, Home Assistant) — for 2.12 recipe

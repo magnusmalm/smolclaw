@@ -224,7 +224,7 @@ Phases are ordered to **minimize regression risk**: foundations first, agent-loo
 ```text
 Phase 0 — Safety & stability     ✓ DONE  docs/design/phases/phase-0-safety-and-stability.md
 Phase 1 — Context efficiency     ✓ DONE  docs/design/phases/phase-1-context-efficiency.md
-Phase 2 — Operator & provider UX  ~ READY tasks landed; GATED-EXT (2.1/2.12) remain
+Phase 2 — Operator & provider UX  ~ READY landed; 2.1/2.2 xAI OAuth LIVE-ACCEPTED 2026-06-29; only 2.12 MCP cookbook GATED-EXT
 Phase 3 — Optional surface area   ← current; most READY landed; 3.9/3.5/3.1 remain
 Phase 4 — Larger investments          docs/design/phases/phase-4-larger-investments.md
 Phase 5 — Defer / reject              docs/design/phases/phase-5-defer-reject.md
