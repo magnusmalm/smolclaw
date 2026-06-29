@@ -110,6 +110,78 @@ static void test_tool_selection_ambiguous_keeps_all(void)
     sc_tool_definitions_free(defs, n);
 }
 
+/* ---- 1.5 tuning: richer category coverage ---------------------------- */
+
+static const char *const TOOLS2[] = {
+    "repo_search", "symbol_lookup", "session_search",  /* CAT_FILE  */
+    "gitea", "worktree_enter", "background",           /* CAT_SHELL */
+    "x_search", "x_get_tweet",                          /* CAT_WEB   */
+    "host_status", "host_trend",                        /* CAT_SYS   */
+    "note",                                             /* CAT_MEM   */
+    "spawn", "mcp_custom"                               /* UNKNOWN   */
+};
+#define NTOOLS2 13
+
+static sc_tool_definition_t *make_defs_from(const char *const *names, int n)
+{
+    sc_tool_definition_t *defs = calloc(n, sizeof(*defs));
+    for (int i = 0; i < n; i++) {
+        defs[i].name = sc_strdup(names[i]);
+        defs[i].description = sc_strdup("desc");
+        defs[i].parameters = cJSON_CreateObject();
+    }
+    return defs;
+}
+
+static void test_tuning_greeting_keeps_only_unknown(void)
+{
+    sc_tool_definition_t *defs = make_defs_from(TOOLS2, NTOOLS2);
+    int n = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO, "hello", defs, NTOOLS2);
+    /* Only the genuinely-uncategorized tools survive a greeting. */
+    ASSERT_INT_EQ(n, 2);
+    ASSERT(has_tool(defs, n, "spawn"), "orchestration tool kept (UNKNOWN)");
+    ASSERT(has_tool(defs, n, "mcp_custom"), "custom tool kept (UNKNOWN)");
+    ASSERT_INT_EQ(has_tool(defs, n, "repo_search"), 0);
+    ASSERT_INT_EQ(has_tool(defs, n, "host_status"), 0);
+    ASSERT_INT_EQ(has_tool(defs, n, "x_search"), 0);
+    ASSERT_INT_EQ(has_tool(defs, n, "gitea"), 0);
+    sc_tool_definitions_free(defs, n);
+}
+
+static void test_tuning_sysish(void)
+{
+    sc_tool_definition_t *defs = make_defs_from(TOOLS2, NTOOLS2);
+    int n = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO,
+                                    "what is the cpu load on this host", defs, NTOOLS2);
+    ASSERT(has_tool(defs, n, "host_status"), "sysish keeps host_status");
+    ASSERT(has_tool(defs, n, "host_trend"), "sysish keeps host_trend");
+    ASSERT(has_tool(defs, n, "mcp_custom"), "unknown always kept");
+    ASSERT_INT_EQ(has_tool(defs, n, "x_search"), 0);
+    sc_tool_definitions_free(defs, n);
+}
+
+static void test_tuning_code_search(void)
+{
+    sc_tool_definition_t *defs = make_defs_from(TOOLS2, NTOOLS2);
+    int n = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO,
+                                    "find the function definition", defs, NTOOLS2);
+    ASSERT(has_tool(defs, n, "repo_search"), "code search keeps repo_search");
+    ASSERT(has_tool(defs, n, "symbol_lookup"), "code search keeps symbol_lookup");
+    ASSERT_INT_EQ(has_tool(defs, n, "host_status"), 0);
+    sc_tool_definitions_free(defs, n);
+}
+
+static void test_tuning_xish(void)
+{
+    sc_tool_definition_t *defs = make_defs_from(TOOLS2, NTOOLS2);
+    int n = sc_tool_selection_apply(SC_TOOL_SELECTION_AUTO,
+                                    "post a tweet about the release", defs, NTOOLS2);
+    ASSERT(has_tool(defs, n, "x_search"), "xish keeps x_search");
+    ASSERT(has_tool(defs, n, "x_get_tweet"), "xish keeps x_get_tweet");
+    ASSERT_INT_EQ(has_tool(defs, n, "host_status"), 0);
+    sc_tool_definitions_free(defs, n);
+}
+
 int main(void)
 {
     printf("test_tool_selection\n");
@@ -121,6 +193,10 @@ int main(void)
     RUN_TEST(test_tool_selection_shellish);
     RUN_TEST(test_tool_selection_editish);
     RUN_TEST(test_tool_selection_ambiguous_keeps_all);
+    RUN_TEST(test_tuning_greeting_keeps_only_unknown);
+    RUN_TEST(test_tuning_sysish);
+    RUN_TEST(test_tuning_code_search);
+    RUN_TEST(test_tuning_xish);
 
     TEST_REPORT();
 }

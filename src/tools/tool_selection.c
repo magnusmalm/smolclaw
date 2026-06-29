@@ -11,11 +11,12 @@
 /* Tool categories (bitmask). A tool whose name is not in the built-in map is
  * UNKNOWN and always kept (don't hide skill/MCP/custom tools from the model). */
 enum {
-    CAT_FILE  = 1u << 0,  /* read / list / search files */
+    CAT_FILE  = 1u << 0,  /* read / list / search files + code */
     CAT_EDIT  = 1u << 1,  /* write / edit / create */
-    CAT_SHELL = 1u << 2,  /* exec / build / run */
-    CAT_WEB   = 1u << 3,  /* web search / fetch */
-    CAT_MEM   = 1u << 4,  /* long-term memory */
+    CAT_SHELL = 1u << 2,  /* exec / build / run / git / gitea / worktree */
+    CAT_WEB   = 1u << 3,  /* web search / fetch / X */
+    CAT_MEM   = 1u << 4,  /* long-term memory / notes */
+    CAT_SYS   = 1u << 5,  /* host metrics / inventory */
 };
 #define CAT_UNKNOWN 0xFFFFFFFFu
 
@@ -36,24 +37,36 @@ static unsigned category_of(const char *name)
 {
     if (!name) return CAT_UNKNOWN;
 
-    /* memory_* tools */
+    /* memory_* tools + scratchpad note */
     if (strncmp(name, "memory", 6) == 0) return CAT_MEM;
+    if (strcmp(name, "note") == 0) return CAT_MEM;
 
+    /* read / search files and code */
     if (strcmp(name, "read_file") == 0 || strcmp(name, "list_dir") == 0 ||
-        strcmp(name, "glob") == 0 || strcmp(name, "code_graph") == 0)
+        strcmp(name, "glob") == 0 || strcmp(name, "code_graph") == 0 ||
+        strcmp(name, "repo_search") == 0 || strcmp(name, "symbol_lookup") == 0 ||
+        strcmp(name, "session_search") == 0 || strcmp(name, "context_search") == 0)
         return CAT_FILE;
 
     if (strcmp(name, "write_file") == 0 || strcmp(name, "edit_file") == 0 ||
         strcmp(name, "append_file") == 0)
         return CAT_EDIT;
 
-    if (strcmp(name, "exec") == 0 || strcmp(name, "exec_background") == 0 ||
+    /* exec / background / VCS (git, gitea, worktree). Note the background tool
+     * registers as "background", not "exec_background". */
+    if (strcmp(name, "exec") == 0 || strcmp(name, "background") == 0 ||
         strcmp(name, "bg_poll") == 0 || strcmp(name, "bg_kill") == 0 ||
-        strcmp(name, "git") == 0)
+        strcmp(name, "git") == 0 || strcmp(name, "gitea") == 0 ||
+        strcmp(name, "worktree_enter") == 0 || strcmp(name, "worktree_exit") == 0)
         return CAT_SHELL;
 
-    if (strcmp(name, "web_search") == 0 || strcmp(name, "web_fetch") == 0)
+    /* web + X/Twitter (x_search, x_get_tweet, x_get_thread, x_get_user) */
+    if (strcmp(name, "web_search") == 0 || strcmp(name, "web_fetch") == 0 ||
+        strncmp(name, "x_", 2) == 0)
         return CAT_WEB;
+
+    /* host_status / host_inventory / host_trend */
+    if (strncmp(name, "host_", 5) == 0) return CAT_SYS;
 
     return CAT_UNKNOWN;
 }
@@ -109,15 +122,21 @@ static unsigned classify_message(const char *lc)
     static const char *const shell_kw[] = {
         "run ", "exec", "build", "compile", "install", " test", "make ",
         "cmake", "command", "shell", "bash", "npm ", "git ", "./",
-        "execute", NULL
+        "execute", "worktree", "branch", "commit", "merge", "checkout",
+        "clone", "gitea", "issue", "pull request", "pr ", NULL
     };
     static const char *const web_kw[] = {
         "http", "url", " web", "browse", "google", "fetch", "look up",
-        "online", "internet", "website", NULL
+        "online", "internet", "website", "tweet", "twitter", "x.com", NULL
     };
     static const char *const mem_kw[] = {
         "remember", "recall", "memory", "note ", "earlier", "last time",
         "we discussed", "you said", "previously", NULL
+    };
+    static const char *const sys_kw[] = {
+        "host", "cpu", "disk", "uptime", "load average", "metric",
+        "sensor", "temperature", "resource usage", "system status",
+        " swap", "hostname", NULL
     };
 
     if (contains_any(lc, file_kw))  want |= CAT_FILE | CAT_MEM;
@@ -125,6 +144,7 @@ static unsigned classify_message(const char *lc)
     if (contains_any(lc, shell_kw)) want |= CAT_SHELL | CAT_FILE;
     if (contains_any(lc, web_kw))   want |= CAT_WEB;
     if (contains_any(lc, mem_kw))   want |= CAT_MEM | CAT_FILE;
+    if (contains_any(lc, sys_kw))   want |= CAT_SYS;
 
     return want;
 }
