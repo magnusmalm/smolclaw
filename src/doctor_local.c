@@ -302,7 +302,10 @@ int sc_doctor_local(const sc_config_t *cfg, const char *model)
         return 1;
     }
 
-    const char *probe_model = want;
+    /* `want` keeps its provider prefix for routing (create_for_model above),
+     * but the model name sent to the API must be stripped — otherwise e.g.
+     * `grok-sub/grok-4.3` reaches api.x.ai verbatim and 400s. */
+    const char *probe_model = want ? sc_model_strip_prefix(want) : NULL;
     if (!probe_model || !probe_model[0])
         probe_model = provider->get_default_model(provider);
 
