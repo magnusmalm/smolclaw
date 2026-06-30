@@ -141,6 +141,13 @@ typedef struct {
     int tool_count;
 } sc_signal_config_t;
 
+/* Scoped companion bearer (defense-in-depth; see companion/auth.h). */
+typedef struct {
+    char *token;
+    char **scopes;
+    int scope_count;
+} sc_companion_token_entry_t;
+
 /* Web channel config */
 typedef struct {
     int enabled;
@@ -172,6 +179,8 @@ typedef struct {
      * embeds this URL. The channel is agnostic about what it points
      * at; auth/exposure of the stream is the operator's concern. */
     char *embed_stream_url;
+    sc_companion_token_entry_t *companion_tokens;
+    int companion_token_count;
 } sc_web_config_t;
 
 /* Web tools config */
