@@ -34,17 +34,22 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
-            -DCMAKE_BUILD_TYPE=Debug
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSC_ENABLE_COMPANION=ON
 
       - name: Build
         run: cmake --build build -j$(nproc)
+
+      - name: Companion OpenAPI conformance (SC7)
+        if: matrix.profile == 'full'
+        run: ./scripts/check_companion_openapi.sh
 
       - name: Test
         run: |
           if [ "${{ matrix.profile }}" = "minimal" ]; then
             # Skip the heavy web-gated integration suite by name; the core
             # security-labelled tests (sandbox, exec_safety, security) still run.
-            ctest --test-dir build --output-on-failure -E test_security_prod
+            ctest --test-dir build --output-on-failure -E 'test_security_prod|test_companion'
           else
             ctest --test-dir build --output-on-failure
           fi
