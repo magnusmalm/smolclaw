@@ -17,6 +17,14 @@ Follow these steps in order:
 1. **Classify** — pick a short category (task, idea, reminder, question, link, other) and 1–3 tags.
 2. **Store** — call `memory_write` with the thought, category, and tags in structured form.
 3. **Research (optional)** — you may call `web_search` **at most once** if a quick fact-check or context would materially improve the triage. Skip if unnecessary.
-4. **Reply** — respond with a concise triage summary: category, tags, what was stored, and any research takeaway (or "no search needed").
+4. **Reply** — use this exact structure (all lines required):
 
-Keep the reply under ~8 sentences. Do not call exec, git, spawn, or cron tools.
+```
+Category: <task|idea|reminder|question|link|other>
+Tags: <tag1>, <tag2>
+Stored: yes — <one-line summary of memory_write>
+Search: <none|one-line web_search takeaway>
+Triage: <1-2 sentence summary for the operator>
+```
+
+Do not call exec, git, spawn, or cron tools. Call `web_search` at most once.

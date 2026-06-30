@@ -5,6 +5,7 @@ when-to-use: when a snap path under companion/inbox/ needs vision description
 arguments: "<workspace-relative image path>"
 allowed-tools: camera, memory_write, memory_read
 user-invocable: true
+disable-model-invocation: true
 version: "1.0.0"
 ---
 

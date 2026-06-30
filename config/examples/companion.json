@@ -1,10 +1,10 @@
 {
   "config_version": 1,
-  "_comment": "Reference agent-host snap/vision companion deployment (P1.3). Live config is on host 192.0.2.10; backup before edit. SECURITY: channels.web.tools is the boundary — keep exec/git/spawn/cron out.",
+  "_comment": "Reference agent-host snap/vision companion deployment (P1.3). Build: cmake -B build-companion -DSC_ENABLE_COMPANION=ON -DSC_ENABLE_WEB=ON -DSC_ENABLE_CAMERA=ON -DSC_ENABLE_VAULT=ON && cmake --build build-companion -j --target smolclaw. Live config on 192.0.2.10; backup before edit. SECURITY: channels.web.tools is the boundary — keep exec/git/spawn/cron out.",
   "agents": {
     "defaults": {
       "provider": "ollama",
-      "model": "qwen3-coder:30b",
+      "model": "devstral:24b",
       "workspace": "~/.smolclaw/workspace",
       "restrict_to_workspace": true,
       "sandbox": true,
