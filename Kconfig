@@ -71,6 +71,15 @@ config SC_ENABLE_SIGNAL
 
 	  Recommended: a dedicated bot phone number + dm_policy="pairing".
 
+config SC_ENABLE_COMPANION
+	bool "Android companion API + QR setup CLI"
+	default n
+	depends on SC_ENABLE_WEB
+	help
+	  Layer-1 companion routes (/api/companion/capabilities, /api/companion/snap)
+	  and the `smolclaw companion qr` subcommand. Default off to keep the
+	  minimal binary within size budget (includes vendored QR encoder).
+
 endmenu
 
 menu "Tools"

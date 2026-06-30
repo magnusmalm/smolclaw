@@ -48,6 +48,9 @@
 #if SC_ENABLE_HEARTBEAT
 #include "heartbeat/service.h"
 #endif
+#if SC_ENABLE_COMPANION
+#include "companion/setup.h"
+#endif
 #if SC_ENABLE_VAULT
 #include "util/vault.h"
 #endif
@@ -239,6 +242,10 @@ static void print_help(void)
     printf("              compact [--force] [--max-bytes N] [key...]\n");
     printf("              prune [--keep N] [--yes]\n");
     printf("  version     Show version information\n");
+#if SC_ENABLE_COMPANION
+    printf("  companion   Android companion setup\n");
+    printf("              qr [--url ORIGIN] [--force]\n");
+#endif
 }
 
 #if SC_ENABLE_MCP_SERVER
@@ -2268,6 +2275,16 @@ int main(int argc, char **argv)
 #if SC_ENABLE_XAI_OAUTH
     } else if (strcmp(command, "auth") == 0) {
         return sc_cmd_auth(argc, argv);
+#endif
+#if SC_ENABLE_COMPANION
+    } else if (strcmp(command, "companion") == 0) {
+        if (argc < 3 || strcmp(argv[2], "qr") != 0) {
+            fprintf(stderr, "Usage: smolclaw companion qr [--url ORIGIN] [--force]\n");
+            return 1;
+        }
+        int rc = sc_companion_cmd_qr(argc - 2, argv + 2);
+        sc_logger_shutdown();
+        return rc;
 #endif
     } else {
         fprintf(stderr, "Unknown command: %s\n", command);
