@@ -1,0 +1,37 @@
+{
+  "config_version": 1,
+  "_comment": "Reference companion-deployment config. scripts/companion_smoke.sh generates its own throwaway copy with a fresh token; this file documents the shape. SECURITY: channels.web.tools is the real boundary — gateway auto_confirm runs every allowed tool on any /api/message, so a companion bearer is shell-equivalent unless this list is restrictive. Scoped companion_tokens[] are defense-in-depth only.",
+  "agents": {
+    "defaults": {
+      "provider": "ollama",
+      "model": "qwen2.5:14b",
+      "workspace": "~/.smolclaw/workspace",
+      "network_scope": "local",
+      "restrict_to_workspace": true,
+      "sandbox": true
+    }
+  },
+  "providers": {
+    "ollama": { "api_base": "http://127.0.0.1:11434/v1" }
+  },
+  "channels": {
+    "web": {
+      "enabled": true,
+      "bind_addr": "127.0.0.1",
+      "port": 8088,
+      "bearer_token": "file:///etc/smolclaw/companion.token",
+      "tools": ["note", "memory_read", "memory_search"],
+      "companion_tokens": [
+        {
+          "token": "file:///etc/smolclaw/companion-scoped.token",
+          "scopes": ["chat", "progress", "memory_pending", "snap_upload", "audit_read"]
+        }
+      ]
+    },
+    "telegram": { "enabled": false },
+    "discord": { "enabled": false },
+    "irc": { "enabled": false },
+    "slack": { "enabled": false },
+    "x": { "enabled": false }
+  }
+}
