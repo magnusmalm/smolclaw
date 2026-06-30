@@ -1,0 +1,479 @@
+openapi: 3.1.0
+info:
+  title: smolclaw Companion Protocol
+  version: "1.0.0"
+  description: |
+    HTTP contract between the smolclaw Android companion app and a gateway
+    with `SC_ENABLE_COMPANION=y`. Layer 0 routes exist on any web-enabled
+    gateway; Layer 1 routes require the companion Kconfig flag.
+
+    Auth: `Authorization: Bearer <token>` on every route. Errors use
+    `{"error":"<message>"}` (see ErrorResponse).
+
+servers:
+  - url: https://{host}
+    description: Production (HTTPS required unless LAN)
+    variables:
+      host:
+        default: gateway.example.com
+  - url: http://127.0.0.1:8080
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Main `channels.web.bearer_token` or a scoped entry from
+        `channels.web.companion_tokens[]`.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: Unauthorized
+
+    HealthResponse:
+      type: object
+      required: [status, version, uptime_secs, pending_requests]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+          example: "0.9.1"
+        uptime_secs:
+          type: integer
+          minimum: 0
+        pending_requests:
+          type: integer
+          minimum: 0
+
+    MessageRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        session:
+          type: string
+          description: Defaults to request id; use `mobile-main` for stable mobile session.
+        progress_id:
+          type: string
+          description: 16 hex chars; enables GET /api/progress polling.
+        context:
+          type: string
+        response_format:
+          type: object
+        run_repo_dir:
+          type: string
+
+    MessageResponse:
+      type: object
+      required: [response]
+      properties:
+        response:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: string
+          description: Workspace-relative image paths.
+
+    ProgressResponse:
+      type: object
+      required: [lines, next, done]
+      properties:
+        lines:
+          type: array
+          items:
+            type: string
+        next:
+          type: integer
+          minimum: 0
+        done:
+          type: boolean
+
+    MemoryPendingItem:
+      type: object
+      required: [id, content]
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+
+    MemoryPendingListResponse:
+      type: object
+      required: [pending]
+      properties:
+        pending:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryPendingItem"
+
+    MemoryPendingActionRequest:
+      type: object
+      required: [action, id]
+      properties:
+        action:
+          type: string
+          enum: [approve, reject]
+        id:
+          type: string
+
+    StatusOk:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    CompanionCapabilities:
+      type: object
+      required: [protocol, version, features, limits]
+      properties:
+        protocol:
+          type: string
+          enum: [smolclaw-companion/1]
+        version:
+          type: string
+          example: "0.9.1"
+        features:
+          type: object
+          required: [snap, memory_pending, audit_poll]
+          properties:
+            snap:
+              type: boolean
+            memory_pending:
+              type: boolean
+            audit_poll:
+              type: boolean
+        limits:
+          type: object
+          required: [snap_max_bytes, snap_types]
+          properties:
+            snap_max_bytes:
+              type: integer
+              enum: [10485760]
+            snap_types:
+              type: array
+              items:
+                type: string
+                enum: [image/jpeg, image/png]
+
+    SnapResponse:
+      type: object
+      required: [path, bytes, content_type]
+      properties:
+        path:
+          type: string
+          description: Workspace-relative path under companion/inbox/
+          example: companion/inbox/a1b2c3d4e5f6789012345678abcdef01.jpg
+        bytes:
+          type: integer
+          minimum: 1
+        content_type:
+          type: string
+          enum: [image/jpeg, image/png]
+
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Connection test
+      tags: [Layer0]
+      responses:
+        "200":
+          description: Gateway healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          description: Missing or invalid bearer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/message:
+    post:
+      operationId: postMessage
+      summary: Chat (blocking until turn completes)
+      tags: [Layer0]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageRequest"
+      responses:
+        "200":
+          description: Agent response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Too many pending requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: Request timed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/progress:
+    get:
+      operationId: getProgress
+      summary: Poll live tool log for an in-flight message
+      tags: [Layer0]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgressResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/media:
+    get:
+      operationId: getMedia
+      summary: Serve agent-produced image
+      tags: [Layer0]
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Image bytes
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/memory/pending:
+    get:
+      operationId: listMemoryPending
+      summary: List staged memory entries
+      tags: [Layer0]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryPendingListResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: actMemoryPending
+      summary: Approve or reject a staged memory entry
+      tags: [Layer0]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryPendingActionRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/audit:
+    get:
+      operationId: getAudit
+      summary: Poll agent events (v1 notification substitute)
+      tags: [Layer0]
+      parameters:
+        - name: since
+          in: query
+          description: Unix timestamp (float)
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: JSON array of audit entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/ui-config:
+    get:
+      operationId: getUiConfig
+      summary: UI bootstrap (optional live-stream URL)
+      tags: [Layer0]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/companion/capabilities:
+    get:
+      operationId: getCompanionCapabilities
+      summary: Protocol version, features, limits
+      tags: [Layer1]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionCapabilities"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/companion/snap:
+    post:
+      operationId: postCompanionSnap
+      summary: Upload phone camera image (raw body, not multipart)
+      tags: [Layer1]
+      requestBody:
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapResponse"
+        "400":
+          description: Empty body or unsupported content type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Image exceeds snap_max_bytes (10 MiB)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

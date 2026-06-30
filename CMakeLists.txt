@@ -353,6 +353,15 @@ if(SC_ENABLE_WEB)
     list(APPEND SC_SOURCES src/channels/web.c)
 endif()
 
+if(SC_ENABLE_COMPANION)
+    list(APPEND SC_SOURCES
+        src/companion/auth.c
+        src/companion/random.c
+        src/companion/routes.c
+        src/companion/setup.c
+        vendor/qrcodegen/qrcodegen.c)
+endif()
+
 if(SC_ENABLE_X OR SC_ENABLE_X_TOOLS)
     list(APPEND SC_SOURCES src/util/x_api.c)
 endif()
@@ -424,6 +433,10 @@ target_include_directories(smolclaw_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/deps/cJSON
     ${CMAKE_BINARY_DIR}
 )
+if(SC_ENABLE_COMPANION)
+    target_include_directories(smolclaw_lib PUBLIC
+        ${CMAKE_SOURCE_DIR}/vendor/qrcodegen)
+endif()
 if(LOCAL_DEV_INC)
     target_include_directories(smolclaw_lib PUBLIC ${LOCAL_DEV_INC})
 endif()
@@ -551,6 +564,13 @@ set(TEST_SOURCES
 
 if(SC_ENABLE_WEB)
     list(APPEND TEST_SOURCES tests/test_web_isolation.c tests/test_web_auth.c)
+endif()
+
+if(SC_ENABLE_COMPANION AND SC_ENABLE_WEB)
+    list(APPEND TEST_SOURCES
+        tests/test_companion_setup.c
+        tests/test_companion_auth.c
+        tests/test_companion_http.c)
 endif()
 
 if(SC_ENABLE_STREAMING)
@@ -779,6 +799,7 @@ message(STATUS "  Gitea tool ......... ${SC_ENABLE_GITEA}")
 message(STATUS "  Camera tool ........ ${SC_ENABLE_CAMERA}")
 message(STATUS "  Slack channel ...... ${SC_ENABLE_SLACK}")
 message(STATUS "  Web channel ........ ${SC_ENABLE_WEB}")
+message(STATUS "  Companion API ...... ${SC_ENABLE_COMPANION}")
 message(STATUS "  Self-updater ....... ${SC_ENABLE_UPDATER}")
 message(STATUS "  Tee-on-truncation .. ${SC_ENABLE_TEE}")
 message(STATUS "  Output filter ...... ${SC_ENABLE_OUTPUT_FILTER}")

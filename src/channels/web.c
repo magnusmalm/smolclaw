@@ -16,6 +16,11 @@
 
 #include "channels/web.h"
 
+#if SC_ENABLE_COMPANION
+#include "companion/auth.h"
+#include "companion/routes.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -138,6 +143,11 @@ typedef struct {
 
     /* Uptime tracking */
     time_t start_time;
+
+#if SC_ENABLE_COMPANION
+    sc_companion_token_entry_t *companion_tokens;
+    int companion_token_count;
+#endif
 
 #if SC_HAVE_EVENT_OPENSSL
     SSL_CTX *ssl_ctx;
@@ -340,6 +350,27 @@ static int check_auth(struct evhttp_request *req, const web_data_t *wd)
     return sc_web_check_bearer_auth(wd->bearer_token, auth);
 }
 
+#if SC_ENABLE_COMPANION
+static int check_auth_scope(struct evhttp_request *req, sc_channel_t *ch,
+                             const char *required_scope)
+{
+    const char *auth = evhttp_find_header(evhttp_request_get_input_headers(req),
+                                           "Authorization");
+    return sc_web_companion_check_auth(ch, auth, required_scope);
+}
+#endif
+
+static int web_authorize(struct evhttp_request *req, sc_channel_t *ch,
+                          const char *required_scope)
+{
+#if SC_ENABLE_COMPANION
+    if (ch)
+        return check_auth_scope(req, ch, required_scope);
+#endif
+    web_data_t *wd = ch ? ch->data : NULL;
+    return check_auth(req, wd);
+}
+
 /* Per-IP rate limiting for /api/message (audit 4298ba13 / P1-4). HTTP bypasses
  * sc_channel_handle_message, so we apply agents.defaults rate_limiter here,
  * keyed by client IP and bearer-token hash to limit credential sharing abuse. */
@@ -383,7 +414,45 @@ int sc_web_check_message_rate_limit(sc_rate_limiter_t *rl,
     return sc_rate_limiter_check(rl, key);
 }
 
-static void web_client_ip(struct evhttp_request *req, char *buf, size_t buflen)
+int sc_web_build_snap_rate_key(const char *client_ip,
+                                const char *authorization_header,
+                                char *out, size_t out_len)
+{
+    if (!out || out_len == 0) return -1;
+
+    const char *ip = (client_ip && client_ip[0]) ? client_ip : "unknown";
+    char token_hash[17] = "anon";
+
+    if (authorization_header &&
+        strncmp(authorization_header, "Bearer ", 7) == 0 &&
+        authorization_header[7]) {
+        sc_sha256_ctx_t ctx;
+        sc_sha256_init(&ctx);
+        sc_sha256_update(&ctx, (const uint8_t *)(authorization_header + 7),
+                         strlen(authorization_header + 7));
+        uint8_t hash[32];
+        sc_sha256_final(&ctx, hash);
+        for (int i = 0; i < 8; i++)
+            snprintf(token_hash + i * 2, 3, "%02x", hash[i]);
+    }
+
+    snprintf(out, out_len, "web:snap:%s:%s", ip, token_hash);
+    return 0;
+}
+
+int sc_web_check_snap_rate_limit(sc_rate_limiter_t *rl,
+                                  const char *client_ip,
+                                  const char *authorization_header)
+{
+    if (!rl) return 1;
+    char key[128];
+    if (sc_web_build_snap_rate_key(client_ip, authorization_header,
+                                   key, sizeof(key)) != 0)
+        return 1;
+    return sc_rate_limiter_check(rl, key);
+}
+
+void sc_web_client_ip(struct evhttp_request *req, char *buf, size_t buflen)
 {
     if (!buf || buflen == 0) return;
     buf[0] = '\0';
@@ -403,7 +472,7 @@ static void web_client_ip(struct evhttp_request *req, char *buf, size_t buflen)
         snprintf(buf, buflen, "unknown");
 }
 
-static void send_json_error(struct evhttp_request *req, int code,
+void sc_web_send_json_error(struct evhttp_request *req, int code,
                              const char *msg)
 {
     struct evbuffer *buf = evbuffer_new();
@@ -427,7 +496,7 @@ static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
 
     /* Send 504 and let cleanup happen */
     if (wp->req)
-        send_json_error(wp->req, 504, "Request timed out");
+        sc_web_send_json_error(wp->req, 504, "Request timed out");
     wp->req = NULL; /* Mark as handled */
 }
 
@@ -562,8 +631,12 @@ static void handle_progress(struct evhttp_request *req, void *arg)
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_PROGRESS)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -615,8 +688,8 @@ static void handle_ui_config(struct evhttp_request *req, void *arg)
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
 
-    if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+    if (!web_authorize(req, ch, NULL)) {
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -647,7 +720,7 @@ static int web_is_image_ext(const char *name)
 
 /* Resolve a path (absolute or workspace-relative) and confine it to the
  * workspace. Returns malloc'd workspace-RELATIVE path, or NULL. */
-static char *web_confine_image(const char *workspace, const char *path)
+char *sc_web_confine_image(const char *workspace, const char *path)
 {
     if (!workspace || !path || !path[0]) return NULL;
     if (!web_is_image_ext(path)) return NULL;
@@ -742,7 +815,7 @@ static cJSON *collect_attachments(web_data_t *wd, web_pending_t *wp,
                     char cand[PATH_MAX];
                     snprintf(cand, sizeof(cand), "%.*s",
                              (int)(end - start), start);
-                    char *rel = web_confine_image(wd->workspace, cand);
+                    char *rel = sc_web_confine_image(wd->workspace, cand);
                     if (rel) { attach_add(arr, rel); free(rel); }
                 }
                 p = end;
@@ -768,8 +841,12 @@ static void handle_media(struct evhttp_request *req, void *arg)
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_CHAT)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -778,10 +855,10 @@ static void handle_media(struct evhttp_request *req, void *arg)
     evhttp_parse_query(uri, &params);
     const char *path = evhttp_find_header(&params, "path");
 
-    char *rel = path ? web_confine_image(wd->workspace, path) : NULL;
+    char *rel = path ? sc_web_confine_image(wd->workspace, path) : NULL;
     if (!rel) {
         evhttp_clear_headers(&params);
-        send_json_error(req, 404, "Image not found");
+        sc_web_send_json_error(req, 404, "Image not found");
         return;
     }
 
@@ -793,7 +870,7 @@ static void handle_media(struct evhttp_request *req, void *arg)
         !(f = fopen(full, "rb"))) {
         free(rel);
         evhttp_clear_headers(&params);
-        send_json_error(req, 404, "Image not readable");
+        sc_web_send_json_error(req, 404, "Image not readable");
         return;
     }
 
@@ -822,12 +899,16 @@ static void handle_message(struct evhttp_request *req, void *arg)
     web_data_t *wd = ch->data;
 
     if (evhttp_request_get_command(req) != EVHTTP_REQ_POST) {
-        send_json_error(req, 405, "Method not allowed");
+        sc_web_send_json_error(req, 405, "Method not allowed");
         return;
     }
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_CHAT)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -836,12 +917,12 @@ static void handle_message(struct evhttp_request *req, void *arg)
     pthread_mutex_unlock(&ch->security_mutex);
     if (rl) {
         char ip[64];
-        web_client_ip(req, ip, sizeof(ip));
+        sc_web_client_ip(req, ip, sizeof(ip));
         const char *auth = evhttp_find_header(
             evhttp_request_get_input_headers(req), "Authorization");
         if (!sc_web_check_message_rate_limit(rl, ip, auth)) {
             SC_LOG_WARN(WEB_TAG, "Rate limited /api/message from %s", ip);
-            send_json_error(req, 429, "Rate limit exceeded");
+            sc_web_send_json_error(req, 429, "Rate limit exceeded");
             return;
         }
     }
@@ -850,13 +931,13 @@ static void handle_message(struct evhttp_request *req, void *arg)
     struct evbuffer *input = evhttp_request_get_input_buffer(req);
     size_t len = evbuffer_get_length(input);
     if (len == 0 || len > 64 * 1024) {
-        send_json_error(req, 400, "Invalid request body");
+        sc_web_send_json_error(req, 400, "Invalid request body");
         return;
     }
 
     char *body = malloc(len + 1);
     if (!body) {
-        send_json_error(req, 500, "Out of memory");
+        sc_web_send_json_error(req, 500, "Out of memory");
         return;
     }
     evbuffer_copyout(input, body, len);
@@ -865,7 +946,7 @@ static void handle_message(struct evhttp_request *req, void *arg)
     cJSON *json = cJSON_Parse(body);
     free(body);
     if (!json) {
-        send_json_error(req, 400, "Invalid JSON");
+        sc_web_send_json_error(req, 400, "Invalid JSON");
         return;
     }
 
@@ -874,12 +955,12 @@ static void handle_message(struct evhttp_request *req, void *arg)
     cJSON *response_format = cJSON_GetObjectItem(json, "response_format");
     if (!message || !message[0]) {
         cJSON_Delete(json);
-        send_json_error(req, 400, "Missing 'message' field");
+        sc_web_send_json_error(req, 400, "Missing 'message' field");
         return;
     }
     if (response_format && !cJSON_IsObject(response_format)) {
         cJSON_Delete(json);
-        send_json_error(req, 400, "'response_format' must be an object");
+        sc_web_send_json_error(req, 400, "'response_format' must be an object");
         return;
     }
 
@@ -894,7 +975,7 @@ static void handle_message(struct evhttp_request *req, void *arg)
     if (add_pending(wd, request_id, req, response_format != NULL,
                     progress_id) != 0) {
         cJSON_Delete(json);
-        send_json_error(req, 503, "Too many pending requests");
+        sc_web_send_json_error(req, 503, "Too many pending requests");
         return;
     }
 
@@ -962,7 +1043,7 @@ static void handle_message(struct evhttp_request *req, void *arg)
     } else {
         web_pending_t *wp = take_pending(wd, request_id);
         if (wp) {
-            send_json_error(wp->req, 500, "Failed to create message");
+            sc_web_send_json_error(wp->req, 500, "Failed to create message");
             free_pending(wp);
         }
     }
@@ -974,8 +1055,12 @@ static void handle_audit(struct evhttp_request *req, void *arg)
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_AUDIT_READ)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -1010,8 +1095,8 @@ static void handle_health(struct evhttp_request *req, void *arg)
 
     /* Require bearer auth (audit 4298ba13 / P2-5): health exposed version,
      * uptime, and pending count — same sensitivity as other API routes. */
-    if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+    if (!web_authorize(req, ch, NULL)) {
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
@@ -1044,17 +1129,21 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     web_data_t *wd = ch->data;
 
     if (evhttp_request_get_command(req) != EVHTTP_REQ_POST) {
-        send_json_error(req, 405, "Method not allowed");
+        sc_web_send_json_error(req, 405, "Method not allowed");
         return;
     }
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_CHAT)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
     if (!wd->workspace) {
-        send_json_error(req, 500, "Workspace not configured");
+        sc_web_send_json_error(req, 500, "Workspace not configured");
         return;
     }
 
@@ -1062,13 +1151,13 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     struct evbuffer *input = evhttp_request_get_input_buffer(req);
     size_t len = evbuffer_get_length(input);
     if (len == 0 || len > 64 * 1024) {
-        send_json_error(req, 400, "Invalid request body");
+        sc_web_send_json_error(req, 400, "Invalid request body");
         return;
     }
 
     char *body = malloc(len + 1);
     if (!body) {
-        send_json_error(req, 500, "Out of memory");
+        sc_web_send_json_error(req, 500, "Out of memory");
         return;
     }
     evbuffer_copyout(input, body, len);
@@ -1077,14 +1166,14 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     cJSON *json = cJSON_Parse(body);
     free(body);
     if (!json) {
-        send_json_error(req, 400, "Invalid JSON");
+        sc_web_send_json_error(req, 400, "Invalid JSON");
         return;
     }
 
     const char *content = sc_json_get_string(json, "content", NULL);
     if (!content || !content[0]) {
         cJSON_Delete(json);
-        send_json_error(req, 400, "Missing 'content' field");
+        sc_web_send_json_error(req, 400, "Missing 'content' field");
         return;
     }
 
@@ -1092,7 +1181,7 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     sc_memory_t *mem = sc_memory_new(wd->workspace);
     if (!mem) {
         cJSON_Delete(json);
-        send_json_error(req, 500, "Failed to open memory store");
+        sc_web_send_json_error(req, 500, "Failed to open memory store");
         return;
     }
 
@@ -1101,7 +1190,7 @@ static void handle_memory_log(struct evhttp_request *req, void *arg)
     cJSON_Delete(json);
 
     if (rc != 0) {
-        send_json_error(req, 500, "Failed to write to daily notes");
+        sc_web_send_json_error(req, 500, "Failed to write to daily notes");
         return;
     }
 
@@ -1146,12 +1235,16 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     sc_channel_t *ch = arg;
     web_data_t *wd = ch->data;
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_MEMORY_PENDING)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
     if (!wd->workspace) {
-        send_json_error(req, 500, "Workspace not configured");
+        sc_web_send_json_error(req, 500, "Workspace not configured");
         return;
     }
 
@@ -1159,7 +1252,7 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     char *pdir = mem ? sc_memory_pending_dir_dup(mem) : NULL;
     if (!pdir) {
         if (mem) sc_memory_free(mem);
-        send_json_error(req, 500, "Failed to open memory store");
+        sc_web_send_json_error(req, 500, "Failed to open memory store");
         return;
     }
 
@@ -1199,7 +1292,7 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     }
 
     if (cmd != EVHTTP_REQ_POST) {
-        send_json_error(req, 405, "Method not allowed");
+        sc_web_send_json_error(req, 405, "Method not allowed");
         free(pdir); sc_memory_free(mem);
         return;
     }
@@ -1209,7 +1302,7 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     size_t len = evbuffer_get_length(input);
     char *body = (len > 0 && len < 4096) ? malloc(len + 1) : NULL;
     if (!body) {
-        send_json_error(req, 400, "Invalid request body");
+        sc_web_send_json_error(req, 400, "Invalid request body");
         free(pdir); sc_memory_free(mem);
         return;
     }
@@ -1224,7 +1317,7 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     int bad_id = !id || !id[0] || strchr(id, '/') || strstr(id, "..");
     if (!action || bad_id) {
         cJSON_Delete(json);
-        send_json_error(req, 400, "Missing/invalid 'action' or 'id'");
+        sc_web_send_json_error(req, 400, "Missing/invalid 'action' or 'id'");
         free(pdir); sc_memory_free(mem);
         return;
     }
@@ -1255,7 +1348,7 @@ static void handle_memory_pending(struct evhttp_request *req, void *arg)
     cJSON_Delete(json);
     free(pdir); sc_memory_free(mem);
 
-    if (!ok) { send_json_error(req, 404, "No such pending entry or action failed"); return; }
+    if (!ok) { sc_web_send_json_error(req, 404, "No such pending entry or action failed"); return; }
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddStringToObject(resp, "status", "ok");
@@ -1278,17 +1371,21 @@ static void handle_memory_search(struct evhttp_request *req, void *arg)
     web_data_t *wd = ch->data;
 
     if (evhttp_request_get_command(req) != EVHTTP_REQ_POST) {
-        send_json_error(req, 405, "Method not allowed");
+        sc_web_send_json_error(req, 405, "Method not allowed");
         return;
     }
 
+#if SC_ENABLE_COMPANION
+    if (!web_authorize(req, ch, SC_COMP_SCOPE_CHAT)) {
+#else
     if (!check_auth(req, wd)) {
-        send_json_error(req, 401, "Unauthorized");
+#endif
+        sc_web_send_json_error(req, 401, "Unauthorized");
         return;
     }
 
     if (!wd->workspace) {
-        send_json_error(req, 500, "Workspace not configured");
+        sc_web_send_json_error(req, 500, "Workspace not configured");
         return;
     }
 
@@ -1296,13 +1393,13 @@ static void handle_memory_search(struct evhttp_request *req, void *arg)
     struct evbuffer *input = evhttp_request_get_input_buffer(req);
     size_t len = evbuffer_get_length(input);
     if (len == 0 || len > 64 * 1024) {
-        send_json_error(req, 400, "Invalid request body");
+        sc_web_send_json_error(req, 400, "Invalid request body");
         return;
     }
 
     char *body = malloc(len + 1);
     if (!body) {
-        send_json_error(req, 500, "Out of memory");
+        sc_web_send_json_error(req, 500, "Out of memory");
         return;
     }
     evbuffer_copyout(input, body, len);
@@ -1311,14 +1408,14 @@ static void handle_memory_search(struct evhttp_request *req, void *arg)
     cJSON *json = cJSON_Parse(body);
     free(body);
     if (!json) {
-        send_json_error(req, 400, "Invalid JSON");
+        sc_web_send_json_error(req, 400, "Invalid JSON");
         return;
     }
 
     const char *query = sc_json_get_string(json, "query", NULL);
     if (!query || !query[0]) {
         cJSON_Delete(json);
-        send_json_error(req, 400, "Missing 'query' field");
+        sc_web_send_json_error(req, 400, "Missing 'query' field");
         return;
     }
     int max_results = sc_json_get_int(json, "max_results", 10);
@@ -1335,7 +1432,7 @@ static void handle_memory_search(struct evhttp_request *req, void *arg)
     free(db);
     if (!idx) {
         cJSON_Delete(json);
-        send_json_error(req, 500, "Memory search index not available");
+        sc_web_send_json_error(req, 500, "Memory search index not available");
         return;
     }
 
@@ -1406,7 +1503,7 @@ static void handle_root(struct evhttp_request *req, void *arg)
 static void handle_notfound(struct evhttp_request *req, void *arg)
 {
     (void)arg;
-    send_json_error(req, 404, "Not found");
+    sc_web_send_json_error(req, 404, "Not found");
 }
 
 /* Pipe callback: reads responses from main thread */
@@ -1566,6 +1663,12 @@ static int web_start(sc_channel_t *self)
     evhttp_set_cb(wd->http, "/api/media", handle_media, self);
     evhttp_set_cb(wd->http, "/api/ui-config", handle_ui_config, self);
     evhttp_set_cb(wd->http, "/api/health", handle_health, self);
+#if SC_ENABLE_COMPANION
+    evhttp_set_cb(wd->http, "/api/companion/capabilities",
+                  sc_companion_handle_capabilities, self);
+    evhttp_set_cb(wd->http, "/api/companion/snap",
+                  sc_companion_handle_snap, self);
+#endif
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
 
@@ -1692,11 +1795,48 @@ static void web_destroy(sc_channel_t *self)
         free(wd->tls_key);
         free(wd->workspace);
         free(wd->embed_stream_url);
+#if SC_ENABLE_COMPANION
+        for (int i = 0; i < wd->companion_token_count; i++) {
+            free(wd->companion_tokens[i].token);
+            for (int j = 0; j < wd->companion_tokens[i].scope_count; j++)
+                free(wd->companion_tokens[i].scopes[j]);
+            free(wd->companion_tokens[i].scopes);
+        }
+        free(wd->companion_tokens);
+#endif
         pthread_mutex_destroy(&wd->pending_lock);
         free(wd);
     }
     self->data = NULL;
     sc_channel_base_free(self);
+}
+
+#if SC_ENABLE_COMPANION
+int sc_web_companion_check_auth(sc_channel_t *ch,
+                                 const char *authorization_header,
+                                 const char *required_scope)
+{
+    if (!ch || !ch->data) return 0;
+    web_data_t *wd = ch->data;
+    sc_web_config_t view = {
+        .bearer_token = wd->bearer_token,
+        .companion_tokens = wd->companion_tokens,
+        .companion_token_count = wd->companion_token_count,
+    };
+    return sc_companion_check_auth(&view, authorization_header, required_scope);
+}
+#endif
+
+const char *sc_web_channel_workspace(sc_channel_t *ch)
+{
+    if (!ch || !ch->data) return NULL;
+    return ((web_data_t *)ch->data)->workspace;
+}
+
+int sc_web_channel_port(const sc_channel_t *ch)
+{
+    if (!ch || !ch->data) return 0;
+    return ((web_data_t *)ch->data)->port;
 }
 
 sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
@@ -1733,6 +1873,30 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
     wd->response_pipe[1] = -1;
     wd->pipe_event = NULL;
     pthread_mutex_init(&wd->pending_lock, NULL);
+
+#if SC_ENABLE_COMPANION
+    wd->companion_token_count = cfg->companion_token_count;
+    if (cfg->companion_token_count > 0) {
+        wd->companion_tokens = calloc((size_t)cfg->companion_token_count,
+                                      sizeof(*wd->companion_tokens));
+        if (wd->companion_tokens) {
+            for (int i = 0; i < cfg->companion_token_count; i++) {
+                wd->companion_tokens[i].token =
+                    sc_strdup(cfg->companion_tokens[i].token);
+                wd->companion_tokens[i].scope_count =
+                    cfg->companion_tokens[i].scope_count;
+                if (cfg->companion_tokens[i].scope_count > 0) {
+                    wd->companion_tokens[i].scopes = calloc(
+                        (size_t)cfg->companion_tokens[i].scope_count,
+                        sizeof(char *));
+                    for (int j = 0; j < cfg->companion_tokens[i].scope_count; j++)
+                        wd->companion_tokens[i].scopes[j] =
+                            sc_strdup(cfg->companion_tokens[i].scopes[j]);
+                }
+            }
+        }
+    }
+#endif
 
     ch->name = SC_CHANNEL_WEB;
     ch->start = web_start;

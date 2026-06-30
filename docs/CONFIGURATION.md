@@ -268,12 +268,27 @@ All channels share these fields:
 | request_timeout_secs | int    | 0         | Per-request server timeout. [1]        |
 | isolation_pattern    | string | wf-*      | Per-session memory namespace glob. [2] |
 | embed_stream_url     | string | (none)    | Live-stream URL embedded in the UI.    |
+| tools                | array  | (all)     | Per-channel tool allowlist. [4]        |
+| companion_tokens     | array  | []        | Scoped bearer tokens (defense-in-depth). [5] |
 
 - [1] `0` derives it from `max_turn_secs` + 30s grace; must be >= `max_turn_secs`.
 - [2] Requests whose `session` matches run in an isolated memory namespace;
   empty disables. See [session isolation](operations/session-isolation.md).
 - [3] When `false` and the port is taken, the bind error log names the process
   holding the port (resolved via `/proc` on Linux).
+- [4] **Companion deployments:** set an explicit allowlist. Empty means all
+  tools — unsafe for phone bearer access. Route scopes on `companion_tokens`
+  do not limit which tools `/api/message` can invoke.
+- [5] Each entry: `{ "token": "<secret>", "scopes": ["chat", ...] }`. Scopes:
+  `chat`, `progress`, `memory_pending`, `snap_upload`, `audit_read`. The main
+  `bearer_token` always has full route access. Requires `SC_ENABLE_COMPANION=y`.
+  See `docs/companion-protocol.yaml` and `docs/operations/companion-remote.md`.
+
+```jsonc
+"companion_tokens": [
+  { "token": "phone-readonly", "scopes": ["chat", "progress", "audit_read"] }
+]
+```
 
 ### `channels.x` (X / Twitter)
 

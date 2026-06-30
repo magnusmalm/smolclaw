@@ -1182,6 +1182,29 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
                            "isolation_pattern");
         override_str_field(&cfg->web.embed_stream_url, webcfg,
                            "embed_stream_url");
+#if SC_ENABLE_COMPANION
+        const cJSON *ctoks = sc_json_get_array(webcfg, "companion_tokens");
+        if (ctoks && cJSON_IsArray(ctoks)) {
+            int n = cJSON_GetArraySize(ctoks);
+            if (n > 0) {
+                cfg->web.companion_tokens = calloc((size_t)n,
+                    sizeof(*cfg->web.companion_tokens));
+                if (cfg->web.companion_tokens) {
+                    cfg->web.companion_token_count = n;
+                    for (int i = 0; i < n; i++) {
+                        const cJSON *item = cJSON_GetArrayItem(ctoks, i);
+                        if (!cJSON_IsObject(item)) continue;
+                        override_str_field(&cfg->web.companion_tokens[i].token,
+                                             item, "token");
+                        cfg->web.companion_tokens[i].scopes =
+                            sc_json_parse_string_list(
+                                sc_json_get_array(item, "scopes"),
+                                &cfg->web.companion_tokens[i].scope_count);
+                    }
+                }
+            }
+        }
+#endif
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -2135,6 +2158,18 @@ void sc_config_free(sc_config_t *cfg)
     for (int i = 0; i < cfg->web.allow_from_count; i++)
         free(cfg->web.allow_from[i]);
     free(cfg->web.allow_from);
+    for (int i = 0; i < cfg->web.tool_count; i++)
+        free(cfg->web.tools[i]);
+    free(cfg->web.tools);
+#if SC_ENABLE_COMPANION
+    for (int i = 0; i < cfg->web.companion_token_count; i++) {
+        free(cfg->web.companion_tokens[i].token);
+        for (int j = 0; j < cfg->web.companion_tokens[i].scope_count; j++)
+            free(cfg->web.companion_tokens[i].scopes[j]);
+        free(cfg->web.companion_tokens[i].scopes);
+    }
+    free(cfg->web.companion_tokens);
+#endif
 
     free(cfg->x.consumer_key);
     free(cfg->x.consumer_secret);
