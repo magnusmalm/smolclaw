@@ -3,6 +3,9 @@
 
 #include "channels/base.h"
 #include "config.h"
+#include "rate_limit.h"
+
+struct evhttp_request;
 
 /* Create Web channel (HTTP REST API + embedded chat UI) */
 sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
@@ -40,5 +43,27 @@ int sc_web_build_message_rate_key(const char *client_ip,
 int sc_web_check_message_rate_limit(sc_rate_limiter_t *rl,
                                      const char *client_ip,
                                      const char *authorization_header);
+
+/* Snap upload rate limit: web:snap:<ip>:<token-hash> (plan §13.1 D3). */
+int sc_web_build_snap_rate_key(const char *client_ip,
+                                const char *authorization_header,
+                                char *out, size_t out_len);
+int sc_web_check_snap_rate_limit(sc_rate_limiter_t *rl,
+                                  const char *client_ip,
+                                  const char *authorization_header);
+
+void sc_web_send_json_error(struct evhttp_request *req, int code,
+                             const char *msg);
+char *sc_web_confine_image(const char *workspace, const char *path);
+void sc_web_client_ip(struct evhttp_request *req, char *buf, size_t buflen);
+const char *sc_web_channel_workspace(sc_channel_t *ch);
+int sc_web_channel_port(const sc_channel_t *ch);
+
+#if SC_ENABLE_COMPANION
+/* required_scope NULL = any authenticated bearer (main or companion). */
+int sc_web_companion_check_auth(sc_channel_t *ch,
+                                 const char *authorization_header,
+                                 const char *required_scope);
+#endif
 
 #endif /* SC_CHANNEL_WEB_H */
