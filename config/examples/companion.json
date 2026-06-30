@@ -1,0 +1,39 @@
+{
+  "config_version": 1,
+  "_comment": "Reference agent-host snap/vision companion deployment (P1.3). Live config is on host 192.0.2.10; backup before edit. SECURITY: channels.web.tools is the boundary — keep exec/git/spawn/cron out.",
+  "agents": {
+    "defaults": {
+      "provider": "ollama",
+      "model": "qwen3-coder:30b",
+      "workspace": "~/.smolclaw/workspace",
+      "restrict_to_workspace": true,
+      "sandbox": true,
+      "allowed_tools": ["camera", "memory_read", "memory_write", "memory_search", "note"],
+      "max_tool_iterations": 8,
+      "verbose": true
+    }
+  },
+  "providers": {
+    "ollama": { "api_base": "http://127.0.0.1:11434/v1" }
+  },
+  "channels": {
+    "web": {
+      "enabled": true,
+      "bind_addr": "192.0.2.10",
+      "port": 8080,
+      "bearer_token": "vault://WEB_BEARER_TOKEN",
+      "tools": ["memory_read", "memory_write", "memory_search", "note", "camera"]
+    },
+    "irc": { "enabled": false },
+    "telegram": { "enabled": false },
+    "discord": { "enabled": false },
+    "slack": { "enabled": false },
+    "x": { "enabled": false }
+  },
+  "camera": {
+    "vision_url": "http://127.0.0.1:11434",
+    "vision_model": "gemma4:26b",
+    "vision_timeout_secs": 300
+  },
+  "heartbeat": { "enabled": true, "interval": 30 }
+}
