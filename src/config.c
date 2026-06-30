@@ -1182,6 +1182,7 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
                            "isolation_pattern");
         override_str_field(&cfg->web.embed_stream_url, webcfg,
                            "embed_stream_url");
+#if SC_ENABLE_COMPANION
         const cJSON *ctoks = sc_json_get_array(webcfg, "companion_tokens");
         if (ctoks && cJSON_IsArray(ctoks)) {
             int n = cJSON_GetArraySize(ctoks);
@@ -1203,6 +1204,7 @@ static void load_channels(sc_config_t *cfg, const cJSON *root)
                 }
             }
         }
+#endif
     }
 
     const cJSON *xcfg = sc_json_get_object(channels, "x");
@@ -2159,6 +2161,7 @@ void sc_config_free(sc_config_t *cfg)
     for (int i = 0; i < cfg->web.tool_count; i++)
         free(cfg->web.tools[i]);
     free(cfg->web.tools);
+#if SC_ENABLE_COMPANION
     for (int i = 0; i < cfg->web.companion_token_count; i++) {
         free(cfg->web.companion_tokens[i].token);
         for (int j = 0; j < cfg->web.companion_tokens[i].scope_count; j++)
@@ -2166,6 +2169,7 @@ void sc_config_free(sc_config_t *cfg)
         free(cfg->web.companion_tokens[i].scopes);
     }
     free(cfg->web.companion_tokens);
+#endif
 
     free(cfg->x.consumer_key);
     free(cfg->x.consumer_secret);

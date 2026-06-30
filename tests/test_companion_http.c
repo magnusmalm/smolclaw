@@ -79,7 +79,11 @@ static long http_request(const char *method, const char *url,
 
 static void fixture_start(void)
 {
-    static char ws[] = "/tmp/sc_comp_test_XXXXXX";
+    /* Honor $TMPDIR so the test runs under sandboxes that mount /tmp read-only. */
+    static char ws[256];
+    const char *tmpdir = getenv("TMPDIR");
+    snprintf(ws, sizeof(ws), "%s/sc_comp_test_XXXXXX",
+             (tmpdir && tmpdir[0]) ? tmpdir : "/tmp");
     ASSERT_NOT_NULL(mkdtemp(ws));
 
     sc_bus_t *bus = sc_bus_create(NULL);
