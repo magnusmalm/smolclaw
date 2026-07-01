@@ -37,6 +37,9 @@ typedef struct {
     char *app_token;
     sc_ws_t *ws;
     pthread_t ws_thread;
+    pthread_mutex_t ws_mutex;   /* Guards ws pointer lifecycle: serializes the
+                                 * ws thread's close+null against stop()'s
+                                 * shutdown so they cannot race into a UAF. */
     int thread_started;
 } slack_data_t;
 
@@ -207,15 +210,13 @@ static void slack_handle_ws_message(sc_channel_t *ch, const char *text)
         SC_LOG_INFO(SLACK_TAG, "Socket Mode connection established");
     } else if (strcmp(type, "disconnect") == 0) {
         SC_LOG_WARN(SLACK_TAG, "Received disconnect, will reconnect");
-        /* Null the handle after closing: control returns to the read loop
-         * which calls sc_ws_recv(sd->ws). Without this it would read (and
-         * later re-close) a freed object — a use-after-free + double-free
-         * triggered by a routine Socket Mode disconnect. sc_ws_recv(NULL)
-         * returns NULL, cleanly breaking the loop into reconnect. */
-        if (sd->ws) {
-            sc_ws_close(sd->ws);
-            sd->ws = NULL;
-        }
+        /* Only unblock/disconnect here — do NOT free. This runs on the ws
+         * thread; after shutdown the loop's next sc_ws_recv returns NULL,
+         * breaks, and the loop-end cleanup performs the single sc_ws_close.
+         * Freeing here would leave the loop reading a freed handle (the
+         * original UAF + double-free on a routine Socket Mode disconnect). */
+        if (sd->ws)
+            sc_ws_shutdown(sd->ws);
     } else if (strcmp(type, "events_api") == 0) {
         /* Parse the inner event */
         const cJSON *payload = sc_json_get_object(json, "payload");
@@ -298,8 +299,12 @@ static void *ws_thread_fn(void *arg)
             free(msg);
         }
 
+        /* Sole free site for ws. Under ws_mutex so a concurrent stop()
+         * calling sc_ws_shutdown(sd->ws) cannot race the free. */
+        pthread_mutex_lock(&sd->ws_mutex);
         sc_ws_close(sd->ws);
         sd->ws = NULL;
+        pthread_mutex_unlock(&sd->ws_mutex);
 
         if (ch->running) {
             SC_LOG_INFO(SLACK_TAG, "Reconnecting in %ds", SLACK_RECONNECT_DELAY);
@@ -335,7 +340,15 @@ static int slack_stop(sc_channel_t *self)
 {
     self->running = 0;
     slack_data_t *sd = self->data;
-    if (sd->ws) sc_ws_close(sd->ws);
+
+    /* Unblock the ws thread WITHOUT freeing: shutdown under ws_mutex so we
+     * cannot race the ws thread's own close+null. The ws thread owns the free.
+     * Calling sc_ws_close() here (the old code) was a use-after-free +
+     * double-free whenever a connection was active. */
+    pthread_mutex_lock(&sd->ws_mutex);
+    if (sd->ws)
+        sc_ws_shutdown(sd->ws);
+    pthread_mutex_unlock(&sd->ws_mutex);
 
     if (sd->thread_started)
         pthread_join(sd->ws_thread, NULL);
@@ -412,6 +425,7 @@ static void slack_destroy(sc_channel_t *self)
     slack_data_t *sd = self->data;
     if (sd) {
         if (sd->ws) sc_ws_close(sd->ws);
+        pthread_mutex_destroy(&sd->ws_mutex);
         free(sd->bot_token);
         free(sd->app_token);
         free(sd);
@@ -434,6 +448,7 @@ sc_channel_t *sc_channel_slack_new(sc_slack_config_t *cfg, sc_bus_t *bus)
     sd->app_token = sc_strdup(cfg->app_token);
     sd->ws = NULL;
     sd->thread_started = 0;
+    pthread_mutex_init(&sd->ws_mutex, NULL);
 
     ch->name = SC_CHANNEL_SLACK;
     ch->start = slack_start;

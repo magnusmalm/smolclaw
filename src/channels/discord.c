@@ -50,6 +50,9 @@ typedef struct {
     pthread_t gateway_thread;
     pthread_t heartbeat_thread;
     pthread_mutex_t ws_write_mutex;  /* Serialize WebSocket writes (SSL not thread-safe) */
+    pthread_mutex_t ws_mutex;        /* Guards ws pointer lifecycle: serializes the
+                                      * owner thread's close+null against stop()'s
+                                      * shutdown so they cannot race into a UAF. */
     int thread_started;
     int heartbeat_started;
     int heartbeat_interval_ms;
@@ -239,7 +242,7 @@ static void *heartbeat_thread(void *arg)
     while (ch->running && sc_ws_is_connected(dd->ws)) {
         /* Sleep for heartbeat interval (in 100ms increments to check running flag) */
         int remaining = dd->heartbeat_interval_ms;
-        while (remaining > 0 && ch->running) {
+        while (remaining > 0 && ch->running && sc_ws_is_connected(dd->ws)) {
             int sleep_ms = remaining > 100 ? 100 : remaining;
             usleep((unsigned int)sleep_ms * 1000);
             remaining -= sleep_ms;
@@ -517,15 +520,18 @@ static int process_gateway_opcode(sc_channel_t *ch, discord_data_t *dd,
 
     case GW_RECONNECT:
         SC_LOG_INFO(DISCORD_TAG, "Server requested reconnect");
-        sc_ws_close(dd->ws);
-        dd->ws = NULL;
+        /* Don't free here — the heartbeat thread is still running and would
+         * dereference a freed ws. Just mark disconnected so the read loop
+         * exits; the unified cleanup joins the heartbeat thread and then frees
+         * ws. (Discord sends RECONNECT routinely, so this path is hot.) */
+        sc_ws_shutdown(dd->ws);
         return 1;
 
     case GW_INVALID_SESSION:
         SC_LOG_WARN(DISCORD_TAG, "Invalid session, will re-identify");
         sleep(3);
-        sc_ws_close(dd->ws);
-        dd->ws = NULL;
+        /* See GW_RECONNECT: shut down, don't free (heartbeat still live). */
+        sc_ws_shutdown(dd->ws);
         return 1;
 
     case GW_DISPATCH: {
@@ -591,16 +597,26 @@ static void *gateway_thread(void *arg)
             cJSON_Delete(msg);
         }
 
-        if (dd->ws) {
-            sc_ws_close(dd->ws);
-            dd->ws = NULL;
-        }
+        /* Mark disconnected + shut the socket so the heartbeat thread stops
+         * using ws and exits promptly; do NOT free yet. */
+        if (dd->ws)
+            sc_ws_shutdown(dd->ws);
 
-        /* Join heartbeat thread from this WSocket session */
+        /* Join heartbeat thread BEFORE freeing ws so it can never dereference
+         * a freed pointer (send / is_connected). */
         if (dd->heartbeat_started) {
             pthread_join(dd->heartbeat_thread, NULL);
             dd->heartbeat_started = 0;
         }
+
+        /* Now no other thread uses ws. Free under ws_mutex so a concurrent
+         * stop() calling sc_ws_shutdown(dd->ws) cannot race the free. */
+        pthread_mutex_lock(&dd->ws_mutex);
+        if (dd->ws) {
+            sc_ws_close(dd->ws);
+            dd->ws = NULL;
+        }
+        pthread_mutex_unlock(&dd->ws_mutex);
 
         if (ch->running) {
             SC_LOG_INFO(DISCORD_TAG, "Disconnected from gateway, reconnecting in 5s");
@@ -636,15 +652,20 @@ static int discord_stop(sc_channel_t *self)
     discord_data_t *dd = self->data;
     self->running = 0;
 
-    /* Close WebSocket to unblock the gateway thread, but keep the pointer
-     * alive until after join — other threads may still dereference dd->ws. */
+    /* Unblock the gateway thread WITHOUT freeing ws: shutdown under ws_mutex so
+     * we cannot race the gateway thread's own close+null. The gateway thread
+     * owns the free (after it joins the heartbeat thread), so stop() must never
+     * call sc_ws_close() here — doing so was a use-after-free + double-free when
+     * a connection was active. */
+    pthread_mutex_lock(&dd->ws_mutex);
     if (dd->ws)
-        sc_ws_close(dd->ws);
+        sc_ws_shutdown(dd->ws);
+    pthread_mutex_unlock(&dd->ws_mutex);
 
     if (dd->thread_started)
         pthread_join(dd->gateway_thread, NULL);
 
-    /* Safe to NULL now — all threads have exited */
+    /* Gateway thread has exited and freed ws; NULL is belt-and-suspenders. */
     dd->ws = NULL;
 
     SC_LOG_INFO(DISCORD_TAG, "Discord channel stopped");
@@ -731,6 +752,7 @@ static void discord_destroy(sc_channel_t *self)
             sc_ws_close(dd->ws);
         }
         pthread_mutex_destroy(&dd->ws_write_mutex);
+        pthread_mutex_destroy(&dd->ws_mutex);
         free(dd->token);
         free(dd->api_base);
         free(dd->bot_user_id);
@@ -759,6 +781,7 @@ sc_channel_t *sc_channel_discord_new(sc_discord_config_t *cfg, sc_bus_t *bus)
     dd->sequence = -1;
     dd->heartbeat_acked = 1;
     pthread_mutex_init(&dd->ws_write_mutex, NULL);
+    pthread_mutex_init(&dd->ws_mutex, NULL);
 
     ch->name = SC_CHANNEL_DISCORD;
     ch->start = discord_start;

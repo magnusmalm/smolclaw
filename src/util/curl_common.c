@@ -53,6 +53,12 @@ void sc_curl_apply_defaults(CURL *curl)
 {
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+    /* Thread-safety: without NOSIGNAL, a per-request timeout uses SIGALRM +
+     * siglongjmp for the DNS/connect path. Raised from a worker thread (the
+     * MoA fan-out calls curl_easy_perform off the main thread) that is
+     * undefined behavior and can crash the process. Disable signals globally
+     * here so every curl user — provider transport included — is safe. */
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     const char *ca = sc_curl_find_ca_bundle();
     if (ca)
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca);

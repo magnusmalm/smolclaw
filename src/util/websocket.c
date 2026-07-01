@@ -496,6 +496,17 @@ void sc_ws_close(sc_ws_t *ws)
     free(ws);
 }
 
+void sc_ws_shutdown(sc_ws_t *ws)
+{
+    if (!ws) return;
+    /* Mark disconnected so is_connected() / recv() bail out, and shut down the
+     * socket so any in-flight blocking SSL_read/SSL_write returns. Does NOT
+     * free — the owning thread still calls sc_ws_close(). */
+    ws->connected = 0;
+    if (ws->fd >= 0)
+        shutdown(ws->fd, SHUT_RDWR);
+}
+
 int sc_ws_is_connected(sc_ws_t *ws)
 {
     return ws ? ws->connected : 0;
