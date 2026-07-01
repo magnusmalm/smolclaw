@@ -304,12 +304,18 @@ static sc_session_t *session_read_jsonl(const char *path)
     if (!f) return NULL;
 
     sc_session_t *s = NULL;
-    char *buf = malloc(65536);
-    if (!buf) { fclose(f); return NULL; }
+    char *buf = NULL;
+    size_t bufcap = 0;
+    ssize_t nread;
 
-    while (fgets(buf, 65536, f)) {
+    /* getline() grows the buffer as needed so a node line larger than any
+     * fixed buffer is read whole. The old fgets(64KB) truncated an oversized
+     * node (e.g. a large tool result); the fragment failed to parse and was
+     * dropped, shifting every later node's array index and corrupting the
+     * parent chain on reload. */
+    while ((nread = getline(&buf, &bufcap, f)) != -1) {
         /* Strip trailing newline */
-        size_t len = strlen(buf);
+        size_t len = (size_t)nread;
         while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r'))
             buf[--len] = '\0';
         if (len == 0) continue;

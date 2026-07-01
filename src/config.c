@@ -8,6 +8,7 @@
 #include "sc_features.h"
 #if SC_ENABLE_VAULT
 #include "util/vault.h"
+#include "util/sha256.h"
 #include <openssl/crypto.h>
 #endif
 
@@ -1613,7 +1614,9 @@ sc_config_t *sc_config_load(const char *path)
     SC_LOG_INFO(LOG_TAG, "loaded config from %s", path);
     sc_audit_log_ext("config", path, 0, 0, NULL, NULL, "config_load");
 
-    /* Verify config integrity against deploy-time hash if available */
+    /* Verify config integrity against a deploy-time hash if a .sha256 sidecar
+     * exists. Opt-in: absent → no check. On mismatch we fail CLOSED (refuse to
+     * load) — a warn-only check provides no protection. */
     {
         char hash_path[1024];
         snprintf(hash_path, sizeof(hash_path), "%s.sha256", path);
@@ -1623,34 +1626,27 @@ sc_config_t *sc_config_load(const char *path)
             if (!fgets(expected, sizeof(expected), hf))
                 expected[0] = '\0';
             fclose(hf);
+            /* Keep only the hash field (sha256sum writes "hash  filename"). */
+            char *e = expected;
+            while (*e && *e != ' ' && *e != '\t' && *e != '\n' && *e != '\r')
+                e++;
+            *e = '\0';
         }
         if (expected[0]) {
-            /* Trim whitespace */
-            size_t elen = strlen(expected);
-            while (elen > 0 && (expected[elen-1] == '\n' || expected[elen-1] == '\r'
-                   || expected[elen-1] == ' '))
-                expected[--elen] = '\0';
-            (void)elen;
-
-            /* Compute actual hash via sha256sum */
-            char cmd[1024];
-            snprintf(cmd, sizeof(cmd), "sha256sum '%s' 2>/dev/null", path);
-            FILE *fp = popen(cmd, "r");
-            if (fp) {
-                char actual[128] = {0};
-                if (fgets(actual, sizeof(actual), fp)) {
-                    char *sp = strchr(actual, ' ');
-                    if (sp) *sp = '\0';
-                    if (elen > 0 && strlen(actual) > 0 &&
-                        strcmp(actual, expected) != 0) {
-                        SC_LOG_WARN(LOG_TAG,
-                            "CONFIG INTEGRITY MISMATCH: %s may have been "
-                            "tampered with (expected %.12s..., got %.12s...)",
-                            path, expected, actual);
-                    }
-                }
-                pclose(fp);
+            /* Hash in-process — no shell, so a config path containing a single
+             * quote can't break out of a command (the old
+             * popen("sha256sum '%s'") was a latent command injection). */
+            char *actual = sc_sha256_file(path);
+            if (actual && strcmp(actual, expected) != 0) {
+                SC_LOG_ERROR(LOG_TAG,
+                    "CONFIG INTEGRITY MISMATCH: %s may have been tampered with "
+                    "(expected %.12s..., got %.12s...) — refusing to load",
+                    path, expected, actual);
+                free(actual);
+                sc_config_free(cfg);
+                return NULL;
             }
+            free(actual);
         }
     }
 

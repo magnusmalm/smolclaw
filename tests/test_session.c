@@ -6,6 +6,8 @@
 #include "session.h"
 #include "util/str.h"
 
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -578,6 +580,54 @@ static void test_session_get_updated(void)
     free(cmd);
 }
 
+/* A node line larger than the old 64KB fgets buffer must survive a
+ * save/reload round-trip (getline reads the full line; fgets would truncate
+ * and drop the node, shifting later nodes). */
+static void test_session_large_node_roundtrip(void)
+{
+    char tmpdir[] = "/tmp/sc_test_sessions_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    size_t big = 100000;   /* > 64KB */
+    char *content = malloc(big + 1);
+    ASSERT_NOT_NULL(content);
+    memset(content, 'x', big);
+    content[big] = '\0';
+
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+        sc_session_add_message(sm, "big", "user", "hi");
+        sc_session_add_message(sm, "big", "assistant", content);
+        sc_session_add_message(sm, "big", "user", "bye");
+        ASSERT_INT_EQ(sc_session_save(sm, "big"), 0);
+        sc_session_manager_free(sm);
+    }
+
+    {
+        sc_session_manager_t *sm = sc_session_manager_new(tmpdir);
+        ASSERT_NOT_NULL(sm);
+        int count = 0;
+        sc_llm_message_t *h = sc_session_get_history(sm, "big", &count);
+        ASSERT_INT_EQ(count, 3);
+        ASSERT_NOT_NULL(h);
+        ASSERT_STR_EQ(h[0].content, "hi");
+        ASSERT(h[1].content && strlen(h[1].content) == big,
+               "large (>64KB) node content preserved across reload");
+        ASSERT_STR_EQ(h[2].content, "bye");
+        sc_session_manager_free(sm);
+    }
+
+    free(content);
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 int main(void)
 {
     printf("test_session\n");
@@ -586,6 +636,7 @@ int main(void)
     RUN_TEST(test_session_add_message);
     RUN_TEST(test_session_summary);
     RUN_TEST(test_session_save_load);
+    RUN_TEST(test_session_large_node_roundtrip);
     RUN_TEST(test_session_truncate);
     RUN_TEST(test_session_summary_survives_truncate);
     RUN_TEST(test_session_persistence_roundtrip);

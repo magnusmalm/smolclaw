@@ -327,12 +327,16 @@ static void walk_dir(const char *root, const char *rel, cJSON *files,
         snprintf(child_full, sizeof(child_full), "%s/%s", root, child_rel);
 
         struct stat st;
-        if (stat(child_full, &st) != 0) continue;
+        /* lstat, not stat: do NOT follow symlinks. Following a symlink to a
+         * directory would recurse — a cycle (e.g. `ln -s . x`) becomes
+         * infinite recursion / stack overflow — and a symlink out of the
+         * workspace would leak external file contents into the index. */
+        if (lstat(child_full, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             walk_dir(root, child_rel, files, prev_by_path, n);
             continue;
         }
-        if (!S_ISREG(st.st_mode)) continue;
+        if (!S_ISREG(st.st_mode)) continue;   /* skips symlinks, fifos, … */
 
         const char *lang = sc_pm_language_for(e->d_name);
         if (!lang) continue;   /* only index recognized source files */

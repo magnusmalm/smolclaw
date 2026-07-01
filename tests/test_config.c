@@ -6,7 +6,9 @@
 #include "config.h"
 #include "constants.h"
 #include "util/str.h"
+#include "util/sha256.h"
 
+#include <stdio.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -204,6 +206,44 @@ static void test_config_load_corrupt(void)
     ASSERT_INT_EQ(cfg->max_tool_iterations, SC_DEFAULT_MAX_ITERATIONS);
 
     sc_config_free(cfg);
+    unlink(tmppath);
+}
+
+static void test_config_integrity(void)
+{
+    char tmppath[] = "/tmp/sc_test_config_integ_XXXXXX";
+    int fd = mkstemp(tmppath);
+    ASSERT(fd >= 0, "mkstemp should succeed");
+    const char *content = "{\"model\":\"test-model\"}";
+    write(fd, content, strlen(content));
+    close(fd);
+
+    char hashpath[512];
+    snprintf(hashpath, sizeof(hashpath), "%s.sha256", tmppath);
+
+    /* Matching hash (sha256sum "hash  file" format) → loads. */
+    char *h = sc_sha256_file(tmppath);
+    ASSERT_NOT_NULL(h);
+    FILE *hf = fopen(hashpath, "w");
+    ASSERT_NOT_NULL(hf);
+    fprintf(hf, "%s  %s\n", h, tmppath);
+    fclose(hf);
+    free(h);
+
+    sc_config_t *cfg = sc_config_load(tmppath);
+    ASSERT_NOT_NULL(cfg);   /* integrity OK → loads */
+    sc_config_free(cfg);
+
+    /* Mismatched hash → fail closed (NULL), not warn-and-load. */
+    hf = fopen(hashpath, "w");
+    ASSERT_NOT_NULL(hf);
+    fprintf(hf, "%064d\n", 0);   /* 64 zero hex digits — wrong hash */
+    fclose(hf);
+
+    cfg = sc_config_load(tmppath);
+    ASSERT(cfg == NULL, "tampered config (hash mismatch) must fail closed");
+
+    unlink(hashpath);
     unlink(tmppath);
 }
 
@@ -615,6 +655,7 @@ int main(void)
     RUN_TEST(test_config_limits_env);
     RUN_TEST(test_config_load_missing);
     RUN_TEST(test_config_load_corrupt);
+    RUN_TEST(test_config_integrity);
     RUN_TEST(test_config_backup);
     RUN_TEST(test_config_workspace_path);
     RUN_TEST(test_config_file_ref);
