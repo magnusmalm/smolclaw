@@ -29,6 +29,12 @@
 #include <linux/filter.h>
 #include <linux/audit.h>
 
+/* SECCOMP_RET_KILL_PROCESS is Linux 4.14+; define it if building against older
+ * UAPI headers so a wrong-ABI syscall still terminates the process. */
+#ifndef SECCOMP_RET_KILL_PROCESS
+#define SECCOMP_RET_KILL_PROCESS 0x80000000U
+#endif
+
 /* Map compile-time arch to AUDIT_ARCH_* for seccomp BPF filter.
  * The filter checks this at runtime to ensure syscall numbers match. */
 #if defined(__x86_64__)
@@ -351,7 +357,10 @@ static const int sc_seccomp_no_network[] = {
 /* Build and install a seccomp-bpf denylist tailored to `opts`.
  *
  * Filter layout (BPF):
- *   [0] load arch; [1] if correct-arch skip to [3] else [2] ALLOW;
+ *   [0] load arch; [1] if correct-arch skip to [3] else fall to [2] KILL;
+ *   [2] KILL_PROCESS (wrong-ABI syscall — i386/x32 on x86-64 — is an escape
+ *       attempt: seccomp can't meaningfully filter numbers across ABIs, so
+ *       deny hard instead of the old fail-open ALLOW);
  *   [3] load nr; [4..4+N-1] one JEQ per blocked syscall jumping to ERRNO;
  *   [4+N] ALLOW (default); [4+N+1] ERRNO(EPERM).
  * A matching syscall at index i jumps (N - i) forward to reach ERRNO. */
@@ -378,7 +387,9 @@ static int apply_seccomp(const sc_sandbox_opts_t *opts)
                       offsetof(struct seccomp_data, arch));
     filter[k++] = (struct sock_filter)BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
                       SC_AUDIT_ARCH, 1, 0);
-    filter[k++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+    /* Wrong arch (mismatch) falls through here: kill, do not ALLOW. */
+    filter[k++] = (struct sock_filter)BPF_STMT(BPF_RET | BPF_K,
+                      SECCOMP_RET_KILL_PROCESS);
     filter[k++] = (struct sock_filter)BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
                       offsetof(struct seccomp_data, nr));
     for (int i = 0; i < n; i++)

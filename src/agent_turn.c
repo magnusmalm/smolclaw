@@ -1670,8 +1670,14 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         tc.msgs[i] = sc_llm_message_clone(&messages[i]);
     }
 
-    /* Intent threading: extract the user's original question */
-    tc.user_intent = extract_user_intent(tc.msgs, tc.msgs_len);
+    /* Intent threading: extract the user's original question. Own a heap copy
+     * rather than borrowing into tc.msgs[i].content: checkpoint_rewind() and
+     * grouped context-overflow truncation free/re-clone tc.msgs mid-turn, which
+     * would leave a borrowed pointer dangling and be read as tool ctx (UAF). */
+    {
+        const char *intent = extract_user_intent(tc.msgs, tc.msgs_len);
+        tc.user_intent = intent ? sc_strdup(intent) : NULL;
+    }
 
     /* Look up per-channel tool allowlist */
     char **ch_tools = NULL;
@@ -2025,6 +2031,7 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
         sc_llm_message_free_fields(&tc.msgs[i]);
     }
     free(tc.msgs);
+    free((char *)tc.user_intent);  /* owned copy from extract at turn start */
     checkpoints_free_all(&tc);
     for (int i = 0; i < tc.tool_cache_count; i++)
         free(tc.tool_cache[i].result_for_llm);
