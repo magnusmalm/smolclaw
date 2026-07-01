@@ -319,6 +319,12 @@ static const int sc_seccomp_base[] = {
     __NR_sethostname, __NR_setdomainname, __NR_bpf,
     __NR_perf_event_open, __NR_userfaultfd, __NR_move_pages,
     __NR_migrate_pages, __NR_keyctl, __NR_request_key, __NR_add_key,
+    /* io_uring submits opcodes (CONNECT/SOCKET/OPENAT/…) that are NOT syscalls
+     * and thus evade this number-based denylist — a hole in cap_no_network /
+     * cap_no_process. Block ring creation/use outright (unused by our tools). */
+#ifdef __NR_io_uring_setup
+    __NR_io_uring_setup, __NR_io_uring_enter, __NR_io_uring_register,
+#endif
 #if defined(__arm__)
     __NR_clock_settime64,
 #endif

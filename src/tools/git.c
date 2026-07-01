@@ -199,6 +199,9 @@ static int git_build_argv(const char *dir, const char *subcmd,
             strncmp(a, "--upload-pack", 13) == 0 ||
             strncmp(a, "--receive-pack", 14) == 0 ||
             strncmp(a, "--config", 8) == 0 ||
+            strncmp(a, "--repo", 6) == 0 ||   /* `push --repo=<url>` overrides the
+                                               * destination, bypassing the remote
+                                               * allowlist check */
             strncmp(a, "--git-dir", 9) == 0 ||
             strncmp(a, "--work-tree", 11) == 0 ||
             strncmp(a, "--replace-object", 16) == 0 ||
@@ -210,6 +213,25 @@ static int git_build_argv(const char *dir, const char *subcmd,
             (a[0] == '-' && a[1] == 'p' && (a[2] == '\0' || a[2] == ' ')))
             return -1;
     }
+
+    /* The `config` subcommand can persist executable config (core.fsmonitor,
+     * core.sshCommand, core.hooksPath, core.pager, credential.helper, ...) that
+     * a later git invocation runs — a persistent RCE. Restrict it to read-only
+     * queries: a config *write* (first arg is a key or --add/--unset/--edit,
+     * not a read flag) is rejected. */
+    if (strcmp(subcmd, "config") == 0) {
+        const char *first = (*extra_count > 0) ? extra_args[0] : NULL;
+        int read_only = first && (
+            strcmp(first, "--get") == 0 ||
+            strcmp(first, "--get-all") == 0 ||
+            strcmp(first, "--get-regexp") == 0 ||
+            strcmp(first, "--get-urlmatch") == 0 ||
+            strcmp(first, "--list") == 0 ||
+            strcmp(first, "-l") == 0);
+        if (!read_only)
+            return -1;
+    }
+
     return argc;
 }
 
@@ -513,6 +535,38 @@ static int is_push_remote_allowed(git_data_t *gd, const char *dir,
     return allowed;
 }
 
+/* Returns 1 if the explicit clone destination in `args_str` is absolute or
+ * contains a ".." component (would let a clone escape the workspace). A
+ * URL-derived destination (no explicit dir) is a plain repo name and is safe.
+ * repo_path (the -C dir) is validated separately; the clone target is a
+ * positional arg that is not, hence this check. */
+static int clone_dest_escapes(const char *args_str)
+{
+    if (!args_str) return 0;
+    const char *last = NULL;
+    const char *p = args_str;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char *tok = p;
+        while (*p && *p != ' ') p++;
+        if (tok[0] != '-') last = tok;   /* last non-flag token: dest or URL */
+    }
+    if (!last) return 0;
+    size_t len = 0;
+    while (last[len] && last[len] != ' ') len++;
+    /* If the last non-flag token is the URL itself, there is no explicit dir. */
+    int is_url = (len >= 4 && strncmp(last + len - 4, ".git", 4) == 0);
+    for (size_t i = 0; !is_url && i + 2 < len; i++)
+        if (last[i] == ':' && last[i + 1] == '/' && last[i + 2] == '/')
+            is_url = 1;
+    if (is_url) return 0;
+    if (last[0] == '/') return 1;                    /* absolute */
+    for (size_t i = 0; i + 1 < len; i++)             /* ".." path component */
+        if (last[i] == '.' && last[i + 1] == '.') return 1;
+    return 0;
+}
+
 static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
                                       void *ctx)
 {
@@ -566,6 +620,14 @@ static sc_tool_result_t *git_execute(sc_tool_t *self, cJSON *args_json,
 
     const char *use_dir = resolved_repo ? resolved_repo : gd->working_dir;
     const char *args_str = sc_json_get_string(args_json, "args", NULL);
+
+    /* Clone destination is a positional arg not covered by repo_path
+     * validation above; reject an absolute or ..-escaping target so a clone
+     * cannot write outside the workspace. */
+    if (is_clone && gd->restrict_to_workspace && clone_dest_escapes(args_str)) {
+        free(resolved_repo);
+        return sc_tool_result_error("clone destination is outside the workspace");
+    }
 
     if (strcmp(subcmd, "remote") == 0 &&
         is_blocked_remote_mutation(args_str)) {

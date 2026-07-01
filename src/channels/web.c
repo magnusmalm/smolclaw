@@ -1636,6 +1636,18 @@ static int web_start(sc_channel_t *self)
         return -1;
     }
 
+    /* Cap request sizes so libevent refuses oversized requests during receive,
+     * before any handler runs. The per-handler 64KB body check only fires after
+     * libevent has already buffered the whole body, which is too late against a
+     * multi-GB Content-Length (pre-auth memory-exhaustion DoS). The ceiling
+     * must clear the largest legitimate body: companion snap images (10 MB). */
+#if SC_ENABLE_COMPANION
+    evhttp_set_max_body_size(wd->http, 11 * 1024 * 1024);  /* snap images + margin */
+#else
+    evhttp_set_max_body_size(wd->http, 256 * 1024);        /* JSON messages only */
+#endif
+    evhttp_set_max_headers_size(wd->http, 32 * 1024);
+
 #if SC_HAVE_EVENT_OPENSSL
     /* Set up TLS if cert+key configured */
     if (has_tls) {
