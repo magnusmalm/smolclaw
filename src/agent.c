@@ -980,14 +980,12 @@ static int mask_old_observations(sc_context_snap_t *snap, void *userdata)
                  tool_name, arg_summary,
                  is_error ? "ERROR" : "ok", len, lines);
 
-        char *replacement = NULL;
-        if (snap->arena) {
-            size_t plen = strlen(placeholder) + 1;
-            replacement = sc_arena_alloc(snap->arena, plen);
-            if (replacement) memcpy(replacement, placeholder, plen);
-        } else {
-            replacement = sc_strdup(placeholder);
-        }
+        /* msg->content is later released field-by-field via
+         * sc_llm_message_array_free() -> free(), so the replacement MUST be
+         * heap-owned. Arena (bump-pointer) memory cannot be passed to free()
+         * (it is an interior pointer into one malloc'd block), so always
+         * sc_strdup here rather than allocating from snap->arena. */
+        char *replacement = sc_strdup(placeholder);
         if (!replacement) continue;
         free(msg->content);
         msg->content = replacement;

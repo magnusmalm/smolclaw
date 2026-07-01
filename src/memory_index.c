@@ -318,7 +318,19 @@ int sc_memory_index_rebuild_is_pending(const sc_memory_index_t *idx)
 
 static void memory_index_ensure_rebuilt(sc_memory_index_t *idx)
 {
-    if (!idx || idx->rebuild_done) return;
+    if (!idx) return;
+
+    /* Lock across the check-and-rebuild. This is called from parallel
+     * read-only tool threads (memory_search / context_search run
+     * concurrently in one turn); an unlocked check-then-act would let two
+     * threads both pass the !rebuild_done guard, run the rebuild twice, and
+     * double-free the pending dir strings below. The mutex is recursive, so
+     * the nested lock taken by sc_memory_index_rebuild_dir is fine. */
+    pthread_mutex_lock(&idx->lock);
+    if (idx->rebuild_done) {
+        pthread_mutex_unlock(&idx->lock);
+        return;
+    }
 
     if (idx->pending_mem_dir)
         sc_memory_index_rebuild(idx, idx->pending_mem_dir);
@@ -336,6 +348,7 @@ static void memory_index_ensure_rebuilt(sc_memory_index_t *idx)
     idx->pending_mem_dir = NULL;
     idx->pending_ctx_dir = NULL;
     idx->rebuild_done = 1;
+    pthread_mutex_unlock(&idx->lock);
 }
 
 int sc_memory_index_put(sc_memory_index_t *idx, const char *source,

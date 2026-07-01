@@ -207,7 +207,15 @@ static void slack_handle_ws_message(sc_channel_t *ch, const char *text)
         SC_LOG_INFO(SLACK_TAG, "Socket Mode connection established");
     } else if (strcmp(type, "disconnect") == 0) {
         SC_LOG_WARN(SLACK_TAG, "Received disconnect, will reconnect");
-        if (sd->ws) sc_ws_close(sd->ws);
+        /* Null the handle after closing: control returns to the read loop
+         * which calls sc_ws_recv(sd->ws). Without this it would read (and
+         * later re-close) a freed object — a use-after-free + double-free
+         * triggered by a routine Socket Mode disconnect. sc_ws_recv(NULL)
+         * returns NULL, cleanly breaking the loop into reconnect. */
+        if (sd->ws) {
+            sc_ws_close(sd->ws);
+            sd->ws = NULL;
+        }
     } else if (strcmp(type, "events_api") == 0) {
         /* Parse the inner event */
         const cJSON *payload = sc_json_get_object(json, "payload");
