@@ -170,8 +170,14 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
         return sc_tool_result_error("Failed to create pipe");
     }
 
+    /* Build exec parameters in the parent (async-signal-safe child; see
+     * sc_exec_prepare). */
+    sc_exec_prep_t prep;
+    sc_exec_prepare(command, d->sandbox_enabled, &prep);
+
     pid_t pid = fork();
     if (pid < 0) {
+        sc_exec_prep_free(&prep);
         pthread_mutex_unlock(&bg_lock);
         close(pipefd[0]);
         close(pipefd[1]);
@@ -181,11 +187,12 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
     if (pid == 0) {
         /* Child */
         close(pipefd[0]);
-        sc_exec_child(command, d->workspace, d->workspace,
+        sc_exec_child(&prep, d->workspace, d->workspace,
                       d->sandbox_enabled, pipefd[1]);
     }
 
     /* Parent */
+    sc_exec_prep_free(&prep);
     close(pipefd[1]);
 
     /* Set read end to non-blocking */

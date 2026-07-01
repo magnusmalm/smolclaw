@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
 #include "tools/exec_common.h"
 #include "tools/deny_patterns.h"
@@ -26,11 +27,15 @@ static const char *safe_env_keys[] = {
     "SHELL", "LOGNAME", "TMPDIR", "TZ", NULL
 };
 
-void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV])
+void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV],
+                             const char *tmpdir_override)
 {
     int n = 0;
     for (int i = 0; safe_env_keys[i]; i++) {
-        const char *val = getenv(safe_env_keys[i]);
+        const char *val =
+            (tmpdir_override && strcmp(safe_env_keys[i], "TMPDIR") == 0)
+                ? tmpdir_override
+                : getenv(safe_env_keys[i]);
         if (!val) continue;
         size_t klen = strlen(safe_env_keys[i]);
         size_t vlen = strlen(val);
@@ -43,6 +48,60 @@ void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV])
         }
     }
     envp[n] = NULL;
+}
+
+void sc_exec_prepare(const char *command, int sandbox_enabled,
+                     sc_exec_prep_t *prep)
+{
+    memset(prep, 0, sizeof(*prep));
+    prep->ok = 1;
+
+    /* ASCII-strip the command in the parent so the shell sees the same bytes
+     * the deny patterns analyzed (C-2 hardening) — and so the child does not
+     * malloc. */
+    prep->safe_cmd = sc_strdup(command);
+    if (prep->safe_cmd) {
+        char *dst = prep->safe_cmd, *src = prep->safe_cmd;
+        while (*src) {
+            if (!((unsigned char)*src & 0x80))
+                *dst++ = *src;
+            src++;
+        }
+        *dst = '\0';
+    } else {
+        prep->ok = 0;
+    }
+
+    if (sandbox_enabled) {
+        /* Per-process tmpdir so the child does not share /tmp with other users.
+         * Created here (parent) rather than in the child: mkdtemp is not
+         * async-signal-safe. */
+        char tmpl[] = "/tmp/sc_exec_XXXXXX";
+        if (mkdtemp(tmpl)) {
+            snprintf(prep->tmpdir, sizeof(prep->tmpdir), "%s", tmpl);
+            /* ~/.local for user-installed tools (cmake, pip packages, …). */
+            const char *home = getenv("HOME");
+            if (home)
+                snprintf(prep->bin_dir, sizeof(prep->bin_dir),
+                         "%s/.local", home);
+        } else {
+            prep->ok = 0;
+        }
+    }
+
+    sc_exec_build_safe_envp(prep->envp,
+        (sandbox_enabled && prep->tmpdir[0]) ? prep->tmpdir : NULL);
+}
+
+void sc_exec_prep_free(sc_exec_prep_t *prep)
+{
+    if (!prep) return;
+    free(prep->safe_cmd);
+    prep->safe_cmd = NULL;
+    for (int i = 0; i < SC_EXEC_MAX_SAFE_ENV && prep->envp[i]; i++) {
+        free(prep->envp[i]);
+        prep->envp[i] = NULL;
+    }
 }
 
 /* ---------- Deny patterns ---------- */
@@ -281,7 +340,7 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
 
 /* ---------- Shared child process setup ---------- */
 
-void sc_exec_child(const char *command, const char *working_dir,
+void sc_exec_child(const sc_exec_prep_t *prep, const char *working_dir,
                    const char *workspace, int sandbox_enabled,
                    int pipe_write_fd)
 {
@@ -289,46 +348,41 @@ void sc_exec_child(const char *command, const char *working_dir,
     dup2(pipe_write_fd, STDERR_FILENO);
     close(pipe_write_fd);
 
-    /* Close all inherited FDs (bus pipes, sockets, audit log, etc.) */
-    int max_fd = (int)sysconf(_SC_OPEN_MAX);
-    if (max_fd < 0) max_fd = 1024;
-    for (int fd = 3; fd < max_fd; fd++)
-        close(fd);
+    /* Close inherited FDs (bus pipes, sockets, audit log, …). close_range() is
+     * a single syscall vs a close()-per-fd loop up to RLIMIT_NOFILE (which can
+     * be ~1M on a server). Both paths use only async-signal-safe calls. */
+#ifdef SYS_close_range
+    if (syscall(SYS_close_range, 3, ~0U, 0) != 0)
+#endif
+    {
+        int max_fd = (int)sysconf(_SC_OPEN_MAX);
+        if (max_fd < 0) max_fd = 1024;
+        for (int fd = 3; fd < max_fd; fd++)
+            close(fd);
+    }
 
-    /* OS-level sandbox (Landlock + seccomp).
-     * Create per-process tmpdir to avoid sharing /tmp with other users. */
-    char proc_tmp[] = "/tmp/sc_exec_XXXXXX";
+    /* All non-async-signal-safe work (command strip, envp, mkdtemp, getenv)
+     * was done in the parent by sc_exec_prepare(). Bail if it failed. */
+    if (!prep || !prep->ok) {
+        const char msg[] = "exec: preparation failed, refusing to execute\n";
+        (void)write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        _exit(126);
+    }
+
+    /* OS-level sandbox (Landlock + seccomp) — must be applied post-fork in the
+     * child; uses the tmpdir/bin_dir the parent prepared. */
     if (sandbox_enabled) {
-        if (!mkdtemp(proc_tmp)) {
-            const char tmp_msg[] =
-                "sandbox: mkdtemp failed, refusing to execute\n";
-            (void)write(STDERR_FILENO, tmp_msg, sizeof(tmp_msg) - 1);
-            _exit(126);
-        }
-        const char *tmpdir = proc_tmp;
-
-        /* Resolve ~/.local for user-installed tools (cmake, pip packages,
-         * etc.).  This covers both ~/.local/bin (wrapper scripts) and
-         * ~/.local/lib/pythonX.Y/site-packages (actual binaries installed
-         * via pip, e.g. cmake, ninja). */
-        char user_local[PATH_MAX] = "";
-        const char *home = getenv("HOME");
-        if (home)
-            snprintf(user_local, sizeof(user_local), "%s/.local", home);
-
         sc_sandbox_opts_t sandbox_opts = {
             .workspace = workspace,
-            .tmpdir = tmpdir,
-            .bin_dir = user_local[0] ? user_local : NULL,
+            .tmpdir = prep->tmpdir,
+            .bin_dir = prep->bin_dir[0] ? prep->bin_dir : NULL,
         };
-        int sb_ret = sc_sandbox_apply(&sandbox_opts);
-        if (sb_ret != 0) {
-            const char sb_msg[] = "sandbox: failed to apply, refusing to execute\n";
+        if (sc_sandbox_apply(&sandbox_opts) != 0) {
+            const char sb_msg[] =
+                "sandbox: failed to apply, refusing to execute\n";
             (void)write(STDERR_FILENO, sb_msg, sizeof(sb_msg) - 1);
             _exit(126);
         }
-        /* Point TMPDIR at per-process dir so child programs use it */
-        setenv("TMPDIR", tmpdir, 1);
     }
 
     if (working_dir && *working_dir) {
@@ -339,23 +393,9 @@ void sc_exec_child(const char *command, const char *working_dir,
         }
     }
 
-    /* Strip non-ASCII from command before exec so that the shell sees
-     * the same bytes the deny patterns analyzed (C-2 hardening). */
-    char *safe_cmd = sc_strdup(command);
-    if (safe_cmd) {
-        char *dst = safe_cmd, *src = safe_cmd;
-        while (*src) {
-            if (!((unsigned char)*src & 0x80))
-                *dst++ = *src;
-            src++;
-        }
-        *dst = '\0';
-    }
-
-    char *envp[SC_EXEC_MAX_SAFE_ENV];
-    sc_exec_build_safe_envp(envp);
-    execle("/bin/sh", "sh", "-c", safe_cmd ? safe_cmd : command,
-           (char *)NULL, envp);
+    execle("/bin/sh", "sh", "-c",
+           prep->safe_cmd ? prep->safe_cmd : "",
+           (char *)NULL, prep->envp);
     _exit(127);
 }
 

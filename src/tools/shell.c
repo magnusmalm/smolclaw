@@ -239,8 +239,14 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
         return sc_tool_result_error("failed to create pipe");
     }
 
+    /* Build exec parameters in the parent: fork() clones only this thread, so
+     * malloc/getenv/mkdtemp between fork and exec could deadlock. */
+    sc_exec_prep_t prep;
+    sc_exec_prepare(command, d->sandbox_enabled, &prep);
+
     pid_t pid = fork();
     if (pid < 0) {
+        sc_exec_prep_free(&prep);
         close(pipefd[0]);
         close(pipefd[1]);
         free(resolved_cwd);
@@ -250,10 +256,11 @@ static sc_tool_result_t *shell_execute(sc_tool_t *self, cJSON *args, void *ctx)
     if (pid == 0) {
         setpgid(0, 0);
         close(pipefd[0]);
-        sc_exec_child(command, cwd, d->working_dir, d->sandbox_enabled,
+        sc_exec_child(&prep, cwd, d->working_dir, d->sandbox_enabled,
                       pipefd[1]);
     }
 
+    sc_exec_prep_free(&prep);
     free(resolved_cwd);
 
     /* Parent */

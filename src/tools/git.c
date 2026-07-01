@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -270,10 +271,17 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
             close(devnull);
         }
 
-        int max_fd = (int)sysconf(_SC_OPEN_MAX);
-        if (max_fd < 0) max_fd = 1024;
-        for (int fd = 3; fd < max_fd; fd++)
-            close(fd);
+        /* close_range() closes all inherited fds in one syscall vs a loop up
+         * to RLIMIT_NOFILE (~1M on servers). Fallback loop for old kernels. */
+#ifdef SYS_close_range
+        if (syscall(SYS_close_range, 3, ~0U, 0) != 0)
+#endif
+        {
+            int max_fd = (int)sysconf(_SC_OPEN_MAX);
+            if (max_fd < 0) max_fd = 1024;
+            for (int fd = 3; fd < max_fd; fd++)
+                close(fd);
+        }
 
         execvp("git", argv);
         _exit(127);

@@ -2,11 +2,37 @@
 #define SC_EXEC_COMMON_H
 
 #include <regex.h>
+#include <limits.h>
 
 /* Safe environment variables for exec children */
 #define SC_EXEC_MAX_SAFE_ENV 11
 
-void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV]);
+/* Build a sanitized NULL-terminated envp from the parent's environment. If
+ * tmpdir_override is non-NULL it is used as the TMPDIR value (instead of the
+ * inherited one). Entries are heap-allocated; free with sc_exec_prep_free or
+ * manually. */
+void sc_exec_build_safe_envp(char *envp[SC_EXEC_MAX_SAFE_ENV],
+                             const char *tmpdir_override);
+
+/* Exec parameters computed in the PARENT before fork(). fork() clones only the
+ * calling thread, so any malloc/getenv/setenv/mkdtemp done between fork and
+ * exec can deadlock on a lock another thread held at fork time. Building these
+ * up front keeps sc_exec_child() to async-signal-safe calls only. */
+typedef struct {
+    char  *safe_cmd;                    /* ASCII-stripped command (heap)      */
+    char  *envp[SC_EXEC_MAX_SAFE_ENV];  /* NULL-terminated; entries heap      */
+    char   tmpdir[64];                  /* per-process sandbox tmpdir, "" none */
+    char   bin_dir[PATH_MAX];           /* ~/.local for the sandbox, "" none  */
+    int    ok;                          /* 0 if preparation failed            */
+} sc_exec_prep_t;
+
+/* Build exec parameters (parent side, before fork). Always leaves prep in a
+ * valid state; on failure sets prep->ok=0 (sc_exec_child then exits the child). */
+void sc_exec_prepare(const char *command, int sandbox_enabled,
+                     sc_exec_prep_t *prep);
+
+/* Free heap owned by prep. Call in the PARENT after fork. */
+void sc_exec_prep_free(sc_exec_prep_t *prep);
 
 /* Compiled deny pattern list */
 typedef struct {
@@ -43,7 +69,7 @@ const char *sc_exec_guard_command(const sc_deny_list_t *deny,
  * close inherited FDs, apply sandbox, chdir to workspace, exec command with
  * sanitized env. Does NOT return on success.
  */
-void sc_exec_child(const char *command, const char *working_dir,
+void sc_exec_child(const sc_exec_prep_t *prep, const char *working_dir,
                    const char *workspace, int sandbox_enabled,
                    int pipe_write_fd);
 

@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <time.h>
@@ -116,10 +117,16 @@ static char *wt_git_run(char *const argv[], int *status_out, int *timed_out)
         }
 
         if (close_extra_fds) {
-            int max_fd = (int)sysconf(_SC_OPEN_MAX);
-            if (max_fd < 0) max_fd = 1024;
-            for (int fd = 3; fd < max_fd; fd++)
-                close(fd);
+            /* One syscall vs a close()-per-fd loop up to RLIMIT_NOFILE. */
+#ifdef SYS_close_range
+            if (syscall(SYS_close_range, 3, ~0U, 0) != 0)
+#endif
+            {
+                int max_fd = (int)sysconf(_SC_OPEN_MAX);
+                if (max_fd < 0) max_fd = 1024;
+                for (int fd = 3; fd < max_fd; fd++)
+                    close(fd);
+            }
         }
 
         execvp("git", argv);
