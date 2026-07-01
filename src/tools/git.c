@@ -7,7 +7,9 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -261,6 +263,13 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
 
+        /* Detach stdin so git can never block reading a credential prompt. */
+        int devnull = open("/dev/null", O_RDONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            close(devnull);
+        }
+
         int max_fd = (int)sysconf(_SC_OPEN_MAX);
         if (max_fd < 0) max_fd = 1024;
         for (int fd = 3; fd < max_fd; fd++)
@@ -277,10 +286,21 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
     sc_strbuf_init(&output);
     char buf[4096];
     int truncated = 0;
-    time_t start = time(NULL);
+
+    /* poll() with a monotonic deadline: a bare read() is blocking, so a child
+     * that produces no output (dead remote, credential prompt) would hang the
+     * parent forever and the timeout — only checked before each read — would
+     * never fire. poll() wakes at least once a second to re-check the deadline. */
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double deadline = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9
+                      + GIT_TIMEOUT_SECS;
 
     while (1) {
-        if (time(NULL) - start > GIT_TIMEOUT_SECS) {
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double remaining = deadline
+                           - ((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
+        if (remaining <= 0) {
             kill(pid, SIGKILL);
             waitpid(pid, NULL, 0);
             sc_strbuf_append(&output, "\n[git command timed out]");
@@ -288,14 +308,22 @@ static char *git_run_subprocess(char **argv, int *status_out, int *timed_out)
             break;
         }
 
+        struct pollfd pfd = { .fd = pipefd[0], .events = POLLIN };
+        int sel = poll(&pfd, 1, (remaining > 1.0) ? 1000 : (int)(remaining * 1000));
+        if (sel < 0) {
+            if (errno == EINTR) continue;
+            break;  /* poll error */
+        }
+        if (sel == 0) continue;  /* tick — re-check the deadline */
+
         ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
         if (n <= 0) break;
         buf[n] = '\0';
 
         if (output.len + (size_t)n > GIT_MAX_OUTPUT) {
-            size_t remaining = GIT_MAX_OUTPUT - output.len;
-            if (remaining > 0) {
-                buf[remaining] = '\0';
+            size_t cap_remaining = GIT_MAX_OUTPUT - output.len;
+            if (cap_remaining > 0) {
+                buf[cap_remaining] = '\0';
                 sc_strbuf_append(&output, buf);
             }
             truncated = 1;

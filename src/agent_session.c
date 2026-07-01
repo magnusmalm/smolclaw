@@ -510,6 +510,19 @@ void sc_maybe_summarize(sc_agent_t *agent, const char *session_key,
         return;
     }
 
+    /* A summarization is already running (apply_summarize_result() above only
+     * clears the handle once the task has completed). Do NOT spawn another:
+     * overwriting agent->summarize_task would leak the in-flight sc_task_t +
+     * thread and fire a duplicate summarization LLM call. A later turn reaps the
+     * running one and retries. Placed after the force-prune backstop so the hard
+     * cap still fires if summarization is genuinely stuck. */
+    if (agent->summarize_task) {
+        SC_LOG_DEBUG("agent",
+            "Summarization already in flight for session %s; skipping duplicate",
+            session_key);
+        return;
+    }
+
     SC_LOG_INFO("agent", "Session %s has %d messages, scheduling async summarization",
                 session_key, count);
 

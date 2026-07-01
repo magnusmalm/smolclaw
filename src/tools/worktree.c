@@ -16,6 +16,8 @@
 #include <signal.h>
 #include <time.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <ctype.h>
 
 #include "tools/worktree.h"
@@ -106,6 +108,13 @@ static char *wt_git_run(char *const argv[], int *status_out, int *timed_out)
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
 
+        /* Detach stdin so git can never block reading a credential prompt. */
+        int devnull = open("/dev/null", O_RDONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDIN_FILENO);
+            close(devnull);
+        }
+
         if (close_extra_fds) {
             int max_fd = (int)sysconf(_SC_OPEN_MAX);
             if (max_fd < 0) max_fd = 1024;
@@ -122,11 +131,21 @@ static char *wt_git_run(char *const argv[], int *status_out, int *timed_out)
     sc_strbuf_t output;
     sc_strbuf_init(&output);
     char buf[4096];
-    time_t start = time(NULL);
     int status = 0;
 
+    /* poll() with a monotonic deadline — see git.c git_run_subprocess: a bare
+     * read() would let a no-output child (dead remote / credential prompt)
+     * hang the parent past the never-re-checked wall-clock timeout. */
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    double deadline = (double)ts.tv_sec + (double)ts.tv_nsec / 1e9
+                      + WT_GIT_TIMEOUT_SECS;
+
     while (1) {
-        if (time(NULL) - start > WT_GIT_TIMEOUT_SECS) {
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        double remaining = deadline
+                           - ((double)ts.tv_sec + (double)ts.tv_nsec / 1e9);
+        if (remaining <= 0) {
             kill(pid, SIGKILL);
             waitpid(pid, NULL, 0);
             *timed_out = 1;
@@ -134,14 +153,22 @@ static char *wt_git_run(char *const argv[], int *status_out, int *timed_out)
             break;
         }
 
+        struct pollfd pfd = { .fd = pipefd[0], .events = POLLIN };
+        int sel = poll(&pfd, 1, (remaining > 1.0) ? 1000 : (int)(remaining * 1000));
+        if (sel < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (sel == 0) continue;
+
         ssize_t n = read(pipefd[0], buf, sizeof(buf) - 1);
         if (n <= 0) break;
         buf[n] = '\0';
 
         if (output.len + (size_t)n > WT_GIT_MAX_OUTPUT) {
-            size_t remaining = WT_GIT_MAX_OUTPUT - output.len;
-            if (remaining > 0) {
-                buf[remaining] = '\0';
+            size_t cap_remaining = WT_GIT_MAX_OUTPUT - output.len;
+            if (cap_remaining > 0) {
+                buf[cap_remaining] = '\0';
                 sc_strbuf_append(&output, buf);
             }
             break;

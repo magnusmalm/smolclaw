@@ -2209,6 +2209,12 @@ int main(int argc, char **argv)
 {
     sc_logger_init(NULL);
 
+    /* Never let a child git process block on an interactive credential prompt
+     * (it would hang the git/worktree tool until its watchdog kills it). Set
+     * once here at startup, before any threads exist, so it is inherited by
+     * every git child process-wide. */
+    setenv("GIT_TERMINAL_PROMPT", "0", 1);
+
     if (argc < 2) {
         print_help();
         return 1;
