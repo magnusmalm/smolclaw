@@ -1,0 +1,4 @@
+smolclaw_commit=4d7bcdf9f92a382dde0afae2e7a11e05e67508d8
+closure_tag=p1-phase1-closure
+heads_android=docs/p1-evidence/HEADS.txt
+generated=2026-07-01T15:24:59+02:00

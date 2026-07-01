@@ -1,0 +1,102 @@
+# P1 Phase 1 closure report (machine-readable)
+generated=2026-07-01T15:25:00+02:00
+scratch=/tmp/grok-goal-07c2abb4d6f9/implementer
+heads_android=docs/p1-evidence/HEADS.txt
+heads_smolclaw=docs/p1-evidence-closure/HEADS.txt
+TIP_ANDROID_AUTHORITY=git_rev_parse_HEAD
+TIP_SMOLCLAW_AUTHORITY=git_rev_parse_HEAD
+METADATA_ANDROID=cc0fa2ad84309388e0d3a412217f5c57da09e916
+METADATA_SMOLCLAW=4d7bcdf9f92a382dde0afae2e7a11e05e67508d8
+P1_CLOSURE_BASE_ANDROID=cf8eae4^
+P1_CLOSURE_BASE_SMOLCLAW=e0e1fe4^
+P1_BASELINE_SMOLCLAW=scripts/p1.3-describe-probe.sh last_touched=e0e1fe4 (baseline — not closure delta)
+CHANGED_ANDROID_CLOSURE=
+docs/p1-evidence/HEADS.txt
+docs/p1-evidence/INDEX.md
+docs/p1-evidence/P1_CLOSURE_REPORT.txt
+docs/p1-evidence/VERIFICATION_MANIFEST.txt
+tools/lib/p1-evidence-lib.sh
+tools/p1-commit-closure.sh
+tools/validate-p1-closure-integrity.sh
+CHANGED_SMOLCLAW_CLOSURE=
+docs/p1-evidence-closure/HEADS.txt
+docs/p1-evidence-closure/P1_CLOSURE_REPORT.txt
+docs/plan-reviews/companion-android-phase1-personal.md
+CHANGED_ANDROID_PHASE1=
+docs/p1-evidence/HEADS.txt
+docs/p1-evidence/INDEX.md
+docs/p1-evidence/P1_CLOSURE_REPORT.txt
+docs/p1-evidence/VERIFICATION_MANIFEST.txt
+docs/p1-evidence/p1-allowlist-audit.log
+docs/p1-evidence/p1-unit-tests.log
+docs/p1-evidence/p1.1-smoke.log
+docs/p1-evidence/p1.2-backup-proof.txt
+docs/p1-evidence/p1.2-journal-snippet.txt
+docs/p1-evidence/p1.2-message.json
+docs/p1-evidence/p1.2-skill-proof.txt
+docs/p1-evidence/p1.2-smoke.log
+docs/p1-evidence/p1.2-triage-host.json
+docs/p1-evidence/p1.3-describe-probe.json
+docs/p1-evidence/p1.3-describe-probe.log
+docs/p1-evidence/p1.4-snap-logcat.txt
+docs/p1-evidence/p1.4-snap-shot.png
+docs/p1-evidence/p1.4-snap-smoke-final.log
+docs/p1-evidence/p1.4-snap-smoke-full.log
+docs/p1-evidence/wg-reachability.log
+tools/lib/p1-allowlist-audit.sh
+tools/lib/p1-evidence-lib.sh
+tools/lib/p1-heads-seal.sh
+tools/p1-commit-closure.sh
+tools/p1.4-snap-smoke.sh
+tools/run-p1-verification.sh
+tools/validate-p1-closure-integrity.sh
+tools/validate-p1-evidence.sh
+CHANGED_SMOLCLAW_PHASE1=
+docs/p1-evidence-closure/HEADS.txt
+docs/p1-evidence-closure/P1_CLOSURE_REPORT.txt
+docs/plan-reviews/companion-android-phase1-personal.md
+docs/plans/companion-android-phase1-personal.md
+EVIDENCE_FILES=
+docs/p1-evidence/wg-reachability.log
+docs/p1-evidence/p1-unit-tests.log
+docs/p1-evidence/p1.1-smoke.log
+docs/p1-evidence/p1.2-smoke.log
+docs/p1-evidence/p1.2-backup-proof.txt
+docs/p1-evidence/p1.2-skill-proof.txt
+docs/p1-evidence/p1.2-message.json
+docs/p1-evidence/p1.2-journal-snippet.txt
+docs/p1-evidence/p1.2-triage-host.json
+docs/p1-evidence/p1.3-describe-probe.log
+docs/p1-evidence/p1.3-describe-probe.json
+docs/p1-evidence/p1-zero-c-diff.txt
+docs/p1-evidence/p1-allowlist-audit.log
+docs/p1-evidence/p1.4-snap-smoke-full.log
+docs/p1-evidence/p1.4-snap-smoke-final.log
+docs/p1-evidence/p1.4-snap-logcat.txt
+docs/p1-evidence/p1.4-snap-shot.png
+docs/p1-evidence/p1.1-agents-shot.png
+docs/p1-evidence/p1.1-full-logcat.txt
+---MANIFEST---
+# Phase 1 verification manifest
+generated=2026-07-01T15:25:00+02:00
+scratch=/tmp/grok-goal-07c2abb4d6f9/implementer
+heads_android=docs/p1-evidence/HEADS.txt
+heads_smolclaw=docs/p1-evidence-closure/HEADS.txt
+---
+wg-reachability.log size=178 sha256=07f9ff72619b75c2cb6fc8602b92a3d111a74c5cb6b307ce97e6a362ee8d779d
+p1-unit-tests.log size=369064 sha256=130ee7d07ef072a0e63cbeb47fbaf343f63eb4ee356e2692d24f3943d1958992
+p1.1-smoke.log size=1977 sha256=c1036f07120e6a28fd278a6a9e4c75ee2ee48c813801c0ab312ce0e2d4f2c706
+p1.2-smoke.log size=1231 sha256=662937877075a8c8cf2f9a0d1d4994a4833c9be06deb99f257d6c21dedec483e
+p1.2-backup-proof.txt size=108 sha256=43e9b39fdc8c80e483ecac70937bfe68277703e1549f4eeec24c96f3b09239a7
+p1.2-skill-proof.txt size=118 sha256=57914ef0ac43f1ddd08452000805784bd0e096106e9d45dc37fd543a6165af1c
+p1.2-message.json size=494 sha256=615a1bf74bfffec4b4a5d701e1c0e6758802700fc84caa241c09f83b0dae2394
+p1.2-journal-snippet.txt size=716 sha256=324ab8e71c6f8a819c039b9b17be25a5e4aadf86db0fde69eab613bfe1064abe
+p1.2-triage-host.json size=494 sha256=615a1bf74bfffec4b4a5d701e1c0e6758802700fc84caa241c09f83b0dae2394
+p1.3-describe-probe.log size=580 sha256=799ee6649d232a17527a4b2a94f19d4652f72ebff00bf03a3ad888b92e2c444d
+p1.3-describe-probe.json size=134 sha256=8d470a34cedf042fedb12d4fad06413cb8afbb1db7b9d6a6df1ebec18728dc0f
+p1-zero-c-diff.txt size=2 sha256=9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa
+p1-allowlist-audit.log size=305 sha256=b77b47379684cc85074b07bd0d8132ef0c2268c1cedff7efda481d2c3bf7aa95
+p1.4-snap-smoke-full.log size=11077 sha256=4a0ff8a882cb470c72f533aa42ce7e94c397615f04c7921da13f04702018623c
+p1.4-snap-smoke-final.log size=1257 sha256=d94972401c0274f870a00da1c8ac8dfad13273c79dc7b87aca4310cfd178cc1f
+p1.4-snap-logcat.txt size=7025 sha256=a0fdeb139d118e5e9236891cb4129c47baa63e57645f965290bf12a48558d0f8
+p1.4-snap-shot.png size=45876 sha256=9ee45e22f45fcf69e321d96d5b45bf32b141e80c8b1bbeaddf339dfba5df8a18
