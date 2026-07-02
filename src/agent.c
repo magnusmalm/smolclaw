@@ -1792,6 +1792,43 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         free(alias);
     }
 
+    /* The system prompt's tool listing must match the tools[] the request
+     * will carry (sc_tool_registry_to_defs_filtered): advertising a tool
+     * the model cannot call baits it into an undeclared call that ollama
+     * silently swallows — the turn ends as an empty response. Apply the
+     * same two per-turn restrictions BEFORE building messages:
+     * the channel allowlist, and the isolated-turn shared-memory denylist
+     * (set here, cleared after the turn below). */
+    {
+        char **ch_tools = NULL;
+        int ch_tool_count = 0;
+        for (int i = 0; i < agent->channel_tools_count; i++) {
+            if (channel &&
+                strcmp(agent->channel_tools[i].channel, channel) == 0) {
+                ch_tools = agent->channel_tools[i].tools;
+                ch_tool_count = agent->channel_tools[i].tool_count;
+                break;
+            }
+        }
+        sc_context_builder_set_channel_tools(effective_cb,
+                                             ch_tools, ch_tool_count);
+    }
+    /* Isolated turns: deny tools whose handles are pinned to the shared
+     * agent workspace. Phase 4/5 isolate the prompt and file tools, but
+     * these would still let a delegate pull (or push) agent-wide memory
+     * on demand — the secondary vector from the 2026-06-05 contamination
+     * diagnosis. Set before message building so the system prompt's tool
+     * listing excludes them too; cleared right after the turn, like the
+     * allowlist swap and the set_workspace swap in
+     * sc_agent_process_channel. */
+    static const char *SHARED_MEMORY_TOOLS[] = {
+        "memory_read", "memory_write", "memory_log", "memory_search", "note"
+    };
+    if (isolated) {
+        sc_tool_registry_set_denied(agent->tools, SHARED_MEMORY_TOOLS,
+            (int)(sizeof(SHARED_MEMORY_TOOLS) / sizeof(SHARED_MEMORY_TOOLS[0])));
+    }
+
     /* Build messages */
     int msg_count = 0;
     sc_llm_message_t *messages = sc_context_build_messages(
@@ -1802,6 +1839,8 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
         &msg_count);
 
     if (!messages) {
+        if (isolated)
+            sc_tool_registry_set_denied(agent->tools, NULL, 0);
         sc_context_builder_free(turn_cb);
         return sc_strdup("Error: failed to build context messages.");
     }
@@ -1833,6 +1872,8 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     }
 
     if (!messages) {
+        if (isolated)
+            sc_tool_registry_set_denied(agent->tools, NULL, 0);
         sc_context_builder_free(turn_cb);
         return sc_strdup("Error: failed to build context messages.");
     }
@@ -1867,19 +1908,6 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
                                          structured_allowed_count);
         }
         agent->response_format = (cJSON *)response_format_override;
-    }
-    /* Isolated turns: deny tools whose handles are pinned to the shared
-     * agent workspace. Phase 4/5 isolate the prompt and file tools, but
-     * these would still let a delegate pull (or push) agent-wide memory
-     * on demand — the secondary vector from the 2026-06-05 contamination
-     * diagnosis. Cleared right after the turn, like the allowlist swap
-     * above and the set_workspace swap in sc_agent_process_channel. */
-    static const char *SHARED_MEMORY_TOOLS[] = {
-        "memory_read", "memory_write", "memory_log", "memory_search", "note"
-    };
-    if (isolated) {
-        sc_tool_registry_set_denied(agent->tools, SHARED_MEMORY_TOOLS,
-            (int)(sizeof(SHARED_MEMORY_TOOLS) / sizeof(SHARED_MEMORY_TOOLS[0])));
     }
     char *final_content = sc_run_llm_iteration(agent, use_provider, use_model,
                                                 messages, msg_count,

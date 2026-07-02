@@ -126,6 +126,12 @@ void sc_tool_definitions_free(sc_tool_definition_t *defs, int count);
 /* Get tool summaries for system prompt. Caller owns result. */
 char *sc_tool_registry_get_summaries(sc_tool_registry_t *reg);
 
+/* Summaries restricted to a per-channel allowlist — must mirror the
+ * filtering of sc_tool_registry_to_defs_filtered so the system prompt
+ * never advertises tools absent from the request's tools[]. */
+char *sc_tool_registry_get_summaries_filtered(sc_tool_registry_t *reg,
+    char **channel_tools, int channel_tool_count);
+
 /* Tool count */
 int sc_tool_registry_count(sc_tool_registry_t *reg);
 

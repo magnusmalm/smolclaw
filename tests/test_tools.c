@@ -113,6 +113,58 @@ static void test_registry_to_defs(void)
     free(cmd);
 }
 
+/* The system-prompt tool listing must honor the same channel allowlist
+ * and per-turn denylist as the request's tools[] — advertising a tool the
+ * model cannot call baits it into undeclared calls (empty responses). */
+static void test_registry_summaries_filtered(void)
+{
+    sc_tool_registry_t *reg = sc_tool_registry_new();
+    ASSERT_NOT_NULL(reg);
+
+    char tmpdir[] = "/tmp/sc_test_tools_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(tmpdir));
+
+    sc_tool_registry_register(reg, sc_tool_read_file_new(tmpdir, 0));
+    sc_tool_registry_register(reg, sc_tool_write_file_new(tmpdir, 0));
+    sc_tool_registry_register(reg, sc_tool_list_dir_new(tmpdir, 0));
+
+    /* Unfiltered: all three listed */
+    char *all = sc_tool_registry_get_summaries(reg);
+    ASSERT_NOT_NULL(all);
+    ASSERT(strstr(all, "`read_file`") != NULL, "unfiltered lists read_file");
+    ASSERT(strstr(all, "`write_file`") != NULL, "unfiltered lists write_file");
+    free(all);
+
+    /* Channel allowlist: only listed tools appear */
+    char *ch[] = { "read_file", "list_dir" };
+    char *filtered = sc_tool_registry_get_summaries_filtered(reg, ch, 2);
+    ASSERT_NOT_NULL(filtered);
+    ASSERT(strstr(filtered, "`read_file`") != NULL, "channel tool listed");
+    ASSERT(strstr(filtered, "`list_dir`") != NULL, "channel tool listed 2");
+    ASSERT(strstr(filtered, "`write_file`") == NULL,
+           "non-channel tool omitted");
+    free(filtered);
+
+    /* Per-turn denylist (isolation) beats everything, incl. channel list */
+    static const char *denied[] = { "read_file" };
+    sc_tool_registry_set_denied(reg, denied, 1);
+    char *denied_out = sc_tool_registry_get_summaries_filtered(reg, ch, 2);
+    ASSERT_NOT_NULL(denied_out);
+    ASSERT(strstr(denied_out, "`read_file`") == NULL, "denied tool omitted");
+    ASSERT(strstr(denied_out, "`list_dir`") != NULL, "allowed tool kept");
+    free(denied_out);
+    sc_tool_registry_set_denied(reg, NULL, 0);
+
+    sc_tool_registry_free(reg);
+
+    sc_strbuf_t p;
+    sc_strbuf_init(&p);
+    sc_strbuf_appendf(&p, "rm -rf %s", tmpdir);
+    char *cmd = sc_strbuf_finish(&p);
+    system(cmd);
+    free(cmd);
+}
+
 static void test_filesystem_read(void)
 {
     char tmpdir[] = "/tmp/sc_test_tools_XXXXXX";
@@ -2177,6 +2229,7 @@ int main(void)
     RUN_TEST(test_registry_create);
     RUN_TEST(test_registry_register_and_get);
     RUN_TEST(test_registry_to_defs);
+    RUN_TEST(test_registry_summaries_filtered);
     RUN_TEST(test_filesystem_read);
     RUN_TEST(test_filesystem_read_missing);
     RUN_TEST(test_registry_execute);

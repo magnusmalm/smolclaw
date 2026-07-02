@@ -30,6 +30,8 @@ struct sc_context_builder {
     sc_skill_registry_t *skills;  /* borrowed */
     int is_isolated;              /* 1 = skip shared memory block in system prompt */
     char *namespace_id;           /* set in isolated mode; NULL otherwise */
+    char **ch_tools;              /* per-channel tool allowlist (borrowed) */
+    int ch_tool_count;
 };
 
 sc_context_builder_t *sc_context_builder_new(const char *workspace)
@@ -90,6 +92,14 @@ void sc_context_builder_set_skills(sc_context_builder_t *cb, void *skills)
     if (cb) cb->skills = skills;
 }
 
+void sc_context_builder_set_channel_tools(sc_context_builder_t *cb,
+                                          char **tools, int count)
+{
+    if (!cb) return;
+    cb->ch_tools = tools;
+    cb->ch_tool_count = count;
+}
+
 /* Build identity section of system prompt.
  *
  * Task 4.3 (Anthropic prompt caching): this is STATIC content — it must be
@@ -126,9 +136,12 @@ static char *build_identity(const sc_context_builder_t *cb)
         sc_strbuf_appendf(&sb, "- Daily Notes: %s/memory/YYYYMM/YYYYMMDD.md\n\n", cb->workspace);
     }
 
-    /* Tools section */
+    /* Tools section — filtered to the current channel's allowlist so the
+     * prompt never advertises tools the request's tools[] will not carry
+     * (an advertised-but-undeclared tool bait yields empty responses). */
     if (cb->tools) {
-        char *summaries = sc_tool_registry_get_summaries(cb->tools);
+        char *summaries = sc_tool_registry_get_summaries_filtered(
+            cb->tools, cb->ch_tools, cb->ch_tool_count);
         if (summaries && summaries[0] != '\0') {
             sc_strbuf_append(&sb, "## Available Tools\n\n");
             sc_strbuf_append(&sb, "**CRITICAL**: You MUST use tools to perform actions. "

@@ -69,6 +69,12 @@ void sc_context_builder_set_tools(sc_context_builder_t *cb, sc_tool_registry_t *
 /* Set skills registry for system prompt listing (pass sc_skill_registry_t *) */
 void sc_context_builder_set_skills(sc_context_builder_t *cb, void *skills);
 
+/* Set the current channel's tool allowlist (borrowed; set per turn) so the
+ * system prompt's tool listing matches the tools[] actually sent. Pass
+ * NULL/0 for no channel restriction. */
+void sc_context_builder_set_channel_tools(sc_context_builder_t *cb,
+                                          char **tools, int count);
+
 /* Build complete system prompt. Caller owns result. */
 char *sc_context_build_system_prompt(const sc_context_builder_t *cb);
 

@@ -1716,6 +1716,11 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
     sc_warmup_maybe(agent, provider, model, tc.msgs, tc.msgs_len,
                     tool_defs, tool_count);
 
+    /* Empty final responses are usually a small local model botching a
+     * tool call (ollama swallows the malformed markup and returns empty
+     * content); a re-sample at nonzero temperature typically recovers. */
+    int empty_retries = 0;
+
     while (iteration < agent->max_iterations) {
         iteration++;
 
@@ -1920,9 +1925,19 @@ char *sc_run_llm_iteration(sc_agent_t *agent, sc_provider_t *provider,
             }
 
             if (!resp->content || resp->content[0] == '\0') {
+                if (empty_retries < 2 &&
+                    iteration < agent->max_iterations) {
+                    empty_retries++;
+                    SC_LOG_WARN("agent",
+                                "LLM returned empty response without tool "
+                                "calls (iteration %d) — retrying (%d/2)",
+                                iteration, empty_retries);
+                    sc_llm_response_free(resp);
+                    continue;
+                }
                 SC_LOG_WARN("agent",
                             "LLM returned empty response without tool calls "
-                            "(iteration %d)", iteration);
+                            "(iteration %d, retries exhausted)", iteration);
                 free(tc.failure_reason);
                 tc.failure_reason = sc_strdup(
                     "Stopped: model returned an empty final response.");

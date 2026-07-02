@@ -553,6 +553,17 @@ void sc_tool_definitions_free(sc_tool_definition_t *defs, int count)
 
 char *sc_tool_registry_get_summaries(sc_tool_registry_t *reg)
 {
+    return sc_tool_registry_get_summaries_filtered(reg, NULL, 0);
+}
+
+/* System-prompt tool listing. Must apply the SAME filters as
+ * sc_tool_registry_to_defs_filtered: advertising a tool the request's
+ * tools[] does not carry baits the model into calling it, and (with
+ * ollama) the undeclared call is silently swallowed — the turn ends as
+ * an empty response (observed live 2026-07-02, isolated companion turn). */
+char *sc_tool_registry_get_summaries_filtered(sc_tool_registry_t *reg,
+    char **channel_tools, int channel_tool_count)
+{
     if (!reg) return sc_strdup("");
 
     sc_strbuf_t sb;
@@ -561,6 +572,9 @@ char *sc_tool_registry_get_summaries(sc_tool_registry_t *reg)
     for (int i = 0; i < reg->count; i++) {
         sc_tool_t *t = reg->tools[i];
         if (!sc_tool_registry_is_allowed(reg, t->name))
+            continue;
+        if (channel_tools && channel_tool_count > 0 &&
+            !is_in_channel_list(t->name, channel_tools, channel_tool_count))
             continue;
         sc_strbuf_appendf(&sb, "- `%s` - %s\n", t->name, t->description);
     }
