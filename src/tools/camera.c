@@ -375,6 +375,15 @@ static sc_tool_result_t *cmd_describe(camera_data_t *cd, cJSON *args)
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "model", cd->vision_model);
     cJSON_AddBoolToObject(body, "stream", 0);
+    /* No chain-of-thought: a describe is a caption, not a reasoning task, and
+     * thinking-capable vision models otherwise emit a long CoT that dominates
+     * latency. Non-thinking models ignore this field. */
+    cJSON_AddBoolToObject(body, "think", 0);
+    /* A describe is one image + a short prompt; cap the context so the model
+     * allocates a small KV cache instead of its (often huge) default — faster
+     * load, less VRAM. */
+    cJSON *opts = cJSON_AddObjectToObject(body, "options");
+    cJSON_AddNumberToObject(opts, "num_ctx", 4096);
     cJSON *msgs = cJSON_AddArrayToObject(body, "messages");
     cJSON *msg = cJSON_CreateObject();
     cJSON_AddStringToObject(msg, "role", "user");
