@@ -201,6 +201,78 @@ static void test_camera_describe_mock(void)
     rm_rf(ws);
 }
 
+/* Companion snaps: describe must itself append the description to the
+ * daily notes (deterministic store — not left to agent-model volition),
+ * and say so in the result. Non-inbox images must NOT be stored. */
+static void test_camera_describe_companion_store(void)
+{
+    char *ws = make_workspace();
+    ASSERT_NOT_NULL(ws);
+
+    char mk[600];
+    snprintf(mk, sizeof(mk), "mkdir -p %s/companion/inbox", ws);
+    system(mk);
+    write_file_at(ws, "companion/inbox/snap.jpg", "JPEGDATA", 0);
+    write_file_at(ws, "plain.jpg", "JPEGDATA", 0);
+
+    sc_mock_route_t routes[] = {
+        { "POST", "/api/chat", 200, NULL,
+          "{\"message\":{\"role\":\"assistant\","
+          "\"content\":\"A red bicycle by a wall.\"}}" },
+    };
+    sc_mock_http_t *mock = sc_mock_http_start(routes, 1);
+    ASSERT_NOT_NULL(mock);
+
+    sc_tool_t *tool = sc_tool_camera_new(ws, NULL, NULL,
+                                         sc_mock_http_url(mock),
+                                         "test-vision", 30);
+    ASSERT_NOT_NULL(tool);
+
+    /* Inbox image: stored + result says so */
+    sc_tool_result_t *r = run_action(tool, "describe",
+                                     "companion/inbox/snap.jpg", NULL, 0);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    ASSERT(strstr(r->for_llm, "stored to memory") != NULL,
+           "result reports the store");
+
+    char note_path[512];
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char month[8], date[10];
+    strftime(month, sizeof(month), "%Y%m", &tmv);
+    strftime(date, sizeof(date), "%Y%m%d", &tmv);
+    snprintf(note_path, sizeof(note_path), "%s/memory/%s/%s.md",
+             ws, month, date);
+    FILE *f = fopen(note_path, "r");
+    ASSERT(f != NULL, "daily note file created");
+    char buf[2048] = {0};
+    if (f) { fread(buf, 1, sizeof(buf) - 1, f); fclose(f); }
+    ASSERT(strstr(buf, "snap companion/inbox/snap.jpg") != NULL,
+           "note references the snap path");
+    ASSERT(strstr(buf, "A red bicycle by a wall.") != NULL,
+           "note contains the description");
+    sc_tool_result_free(r);
+
+    /* Non-inbox image: described but NOT stored */
+    r = run_action(tool, "describe", "plain.jpg", NULL, 0);
+    ASSERT_NOT_NULL(r);
+    ASSERT_INT_EQ(r->is_error, 0);
+    ASSERT(strstr(r->for_llm, "stored to memory") == NULL,
+           "plain describe does not claim a store");
+    FILE *f2 = fopen(note_path, "r");
+    char buf2[2048] = {0};
+    if (f2) { fread(buf2, 1, sizeof(buf2) - 1, f2); fclose(f2); }
+    ASSERT(strstr(buf2, "plain.jpg") == NULL,
+           "plain describe not written to notes");
+    sc_tool_result_free(r);
+
+    tool->destroy(tool);
+    sc_mock_http_stop(mock);
+    rm_rf(ws);
+}
+
 static void test_camera_describe_path_safety(void)
 {
     char *ws = make_workspace();
@@ -251,6 +323,7 @@ int main(void)
     RUN_TEST(test_camera_events_empty);
     RUN_TEST(test_camera_snap_with_cp);
     RUN_TEST(test_camera_describe_mock);
+    RUN_TEST(test_camera_describe_companion_store);
     RUN_TEST(test_camera_describe_path_safety);
     TEST_REPORT();
 }

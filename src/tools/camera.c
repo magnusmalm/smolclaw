@@ -16,6 +16,7 @@
 
 #include "tools/camera.h"
 #include "tools/registry.h"
+#include "memory.h"
 #include "util/curl_common.h"
 #include "util/json_helpers.h"
 #include "util/base64.h"
@@ -460,9 +461,33 @@ static sc_tool_result_t *cmd_describe(camera_data_t *cd, cJSON *args)
         return sc_tool_result_error("vision model returned no content");
     }
 
+    /* Companion snaps: persist the description tool-side. Small agent
+     * models cannot be trusted to volunteer a memory write afterwards —
+     * they skip the call and still claim success — so the describe itself
+     * appends to the daily notes, and the result says so, keeping the
+     * agent's reply truthful. Scoped to companion/inbox/ images so
+     * ordinary camera use does not spam memory. */
+    int stored = 0;
+    if (strstr(path, "/companion/inbox/")) {
+        sc_memory_t *mem = sc_memory_new(cd->workspace);
+        if (mem) {
+            sc_strbuf_t mb;
+            sc_strbuf_init(&mb);
+            sc_strbuf_appendf(&mb, "snap %s: %s", image, content);
+            char *entry = sc_strbuf_finish(&mb);
+            if (entry && sc_memory_append_today(mem, entry) == 0)
+                stored = 1;
+            free(entry);
+            sc_memory_free(mem);
+        }
+        if (!stored)
+            SC_LOG_WARN(TAG, "companion snap description not stored to memory");
+    }
+
     sc_strbuf_t sb;
     sc_strbuf_init(&sb);
-    sc_strbuf_appendf(&sb, "[%s] %s", path, content);
+    sc_strbuf_appendf(&sb, "[%s] %s%s", path, content,
+                      stored ? "\n(Description stored to memory.)" : "");
     cJSON_Delete(root);
     free(path);
     char *out = sc_strbuf_finish(&sb);
