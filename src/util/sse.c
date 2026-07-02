@@ -16,6 +16,7 @@ void sc_sse_init(sc_sse_parser_t *p, sc_sse_event_cb cb, void *ctx)
     p->buf = malloc(SSE_INIT_CAP);
     p->len = 0;
     p->cap = p->buf ? SSE_INIT_CAP : 0;
+    p->overflowed = 0;
     p->cb = cb;
     p->ctx = ctx;
 }
@@ -54,9 +55,12 @@ void sc_sse_feed(sc_sse_parser_t *p, const char *data, size_t len)
         char c = data[i];
 
         if (c == '\n' || c == '\r') {
-            /* Process the accumulated line */
-            process_line(p, p->buf, p->len);
+            /* Deliver only complete lines; a line that overflowed is discarded
+             * entirely rather than emitted as a mid-line fragment. */
+            if (!p->overflowed)
+                process_line(p, p->buf, p->len);
             p->len = 0;
+            p->overflowed = 0;
 
             /* Skip \r\n pair */
             if (c == '\r' && i + 1 < len && data[i + 1] == '\n')
@@ -64,10 +68,15 @@ void sc_sse_feed(sc_sse_parser_t *p, const char *data, size_t len)
             continue;
         }
 
+        /* Already discarding an oversized line — skip until the next EOL. */
+        if (p->overflowed)
+            continue;
+
         /* Append to buffer, growing if needed */
         if (p->len + 1 >= p->cap) {
             if (p->cap >= (size_t)SC_SSE_MAX_LINE) {
-                /* Line too long — discard and reset */
+                /* Line too long — discard the whole line to the next EOL. */
+                p->overflowed = 1;
                 p->len = 0;
                 continue;
             }
@@ -75,7 +84,8 @@ void sc_sse_feed(sc_sse_parser_t *p, const char *data, size_t len)
             if (new_cap > (size_t)SC_SSE_MAX_LINE) new_cap = (size_t)SC_SSE_MAX_LINE;
             char *tmp = realloc(p->buf, new_cap);
             if (!tmp) {
-                /* Discard current line on OOM */
+                /* OOM growing — discard the whole line to the next EOL. */
+                p->overflowed = 1;
                 p->len = 0;
                 continue;
             }

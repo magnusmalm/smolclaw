@@ -103,8 +103,16 @@ static char *generate_ws_key(void)
 {
     unsigned char raw[16];
     if (RAND_bytes(raw, 16) != 1) {
+        /* Fallback: /dev/urandom. The WS key is not a security token
+         * (RFC 6455), but raw must be initialized to avoid encoding
+         * uninitialized stack memory on a short read / open failure. */
+        int ok = 0;
         FILE *f = fopen("/dev/urandom", "rb");
-        if (f) { fread(raw, 1, 16, f); fclose(f); }
+        if (f) {
+            ok = (fread(raw, 1, 16, f) == 16);
+            fclose(f);
+        }
+        if (!ok) memset(raw, 0x55, 16);
     }
     return sc_base64_encode(raw, 16);
 }

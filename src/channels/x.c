@@ -94,6 +94,12 @@ static char **split_tweets(const char *text, int *out_count)
         if (split <= X_MAX_TWEET_LEN / 2)
             split = X_MAX_TWEET_LEN;
 
+        /* Never split inside a multi-byte UTF-8 codepoint: back off any
+         * continuation bytes (0b10xxxxxx) so the chunk ends on a boundary,
+         * otherwise the API rejects the truncated codepoint. */
+        while (split > 1 && ((unsigned char)pos[split] & 0xC0) == 0x80)
+            split--;
+
         char *chunk = malloc((size_t)split + 1);
         if (!chunk) break;
         memcpy(chunk, pos, (size_t)split);

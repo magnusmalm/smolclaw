@@ -75,6 +75,7 @@ typedef struct web_pending {
     char *request_id;
     struct evhttp_request *req;
     struct event *timeout_ev;
+    void *wd;                     /* owning web_data_t (for self-removal on timeout) */
     int structured_response;
     /* Live-progress feed: client-chosen id polled via /api/progress
      * while the turn runs; lines come from is_progress outbound
@@ -489,15 +490,36 @@ void sc_web_send_json_error(struct evhttp_request *req, int code,
 }
 
 /* Timeout callback for pending requests */
+static void free_pending(web_pending_t *wp);  /* defined below */
+
 static void request_timeout_cb(evutil_socket_t fd, short what, void *arg)
 {
     (void)fd; (void)what;
     web_pending_t *wp = arg;
+    web_data_t *wd = wp->wd;
 
-    /* Send 504 and let cleanup happen */
+    /* Send 504 to the client. */
     if (wp->req)
         sc_web_send_json_error(wp->req, 504, "Request timed out");
-    wp->req = NULL; /* Mark as handled */
+
+    /* Unlink from the pending list and free. Otherwise a turn that times out
+     * and never produces a response leaks this slot until shutdown — after
+     * WEB_MAX_PENDING orphans, every new request gets 503. This runs on the
+     * event-loop thread, the same thread as take_pending, so there is no
+     * double-free: a response arriving first calls free_pending (whose
+     * event_del cancels this timeout), and a timeout firing first removes+frees
+     * here so the later take_pending returns NULL (both call sites handle it). */
+    pthread_mutex_lock(&wd->pending_lock);
+    web_pending_t *prev = NULL, *cur = wd->pending_head;
+    while (cur && cur != wp) { prev = cur; cur = cur->next; }
+    if (cur) {
+        if (prev) prev->next = cur->next;
+        else      wd->pending_head = cur->next;
+        wd->pending_count--;
+    }
+    pthread_mutex_unlock(&wd->pending_lock);
+
+    free_pending(wp);
 }
 
 /* Add a pending request. Returns 0 on success, -1 if at capacity. */
@@ -513,6 +535,7 @@ static int add_pending(web_data_t *wd, const char *request_id,
 
     wp->request_id = sc_strdup(request_id);
     wp->req = req;
+    wp->wd = wd;
     wp->structured_response = structured_response;
     if (progress_id && progress_id[0])
         wp->progress_id = sc_strdup(progress_id);

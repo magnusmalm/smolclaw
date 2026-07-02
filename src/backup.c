@@ -515,6 +515,12 @@ int sc_backup_restore(const char *name, int dry_run)
         fprintf(stderr, "backup: restore requires a backup name\n");
         return 1;
     }
+    /* A backup name is a single directory entry; reject path separators / ..
+     * so it cannot escape the backup root (e.g. `restore ../../etc`). */
+    if (strchr(name, '/') || strstr(name, "..")) {
+        fprintf(stderr, "backup: invalid backup name '%s'\n", name);
+        return 1;
+    }
 
     char *base = get_smolclaw_dir();
     char *root = get_backup_root();

@@ -804,6 +804,8 @@ static sc_llm_response_t *http_chat_stream(sc_provider_t *self,
         free(args_str);
     }
     free(sc.tool_arg_bufs);
+    sc.tool_arg_bufs = NULL;      /* prevent double-free in stream_ctx_cleanup */
+    sc.tool_arg_buf_count = 0;
 
     sc_llm_response_t *resp = calloc(1, sizeof(*resp));
     if (!resp) {

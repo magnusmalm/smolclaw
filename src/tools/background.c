@@ -52,6 +52,16 @@ static int bg_find_free_slot(void)
         if (bg_procs[i].pid == 0)
             return i;
     }
+    /* No truly-free slot: reclaim the first EXITED (already-reaped) slot rather
+     * than leaking it until shutdown. Only exited procs are recycled — running
+     * ones are never disturbed. Callers run bg_reap_finished() just before. */
+    for (int i = 0; i < bg_max_procs; i++) {
+        if (!bg_procs[i].alive) {
+            if (bg_procs[i].fd > 0) close(bg_procs[i].fd);
+            memset(&bg_procs[i], 0, sizeof(bg_procs[i]));
+            return i;
+        }
+    }
     return -1;
 }
 
@@ -69,7 +79,7 @@ void sc_bg_cleanup_all(void)
     pthread_mutex_lock(&bg_lock);
     for (int i = 0; i < bg_max_procs; i++) {
         if (bg_procs[i].pid > 0) {
-            kill(bg_procs[i].pid, SIGTERM);
+            kill(-bg_procs[i].pid, SIGTERM);   /* whole group (grandchildren) */
             waitpid(bg_procs[i].pid, NULL, 0);
             bg_clear_slot(i);
         }
@@ -185,7 +195,10 @@ static sc_tool_result_t *exec_bg_execute(sc_tool_t *self, cJSON *args, void *ctx
     }
 
     if (pid == 0) {
-        /* Child */
+        /* Child: own process group so bg_kill can signal the whole group
+         * (the command plus any grandchildren it spawns), not just the direct
+         * pid. Mirrors the foreground shell tool. */
+        setpgid(0, 0);
         close(pipefd[0]);
         sc_exec_child(&prep, d->workspace, d->workspace,
                       d->sandbox_enabled, pipefd[1]);
@@ -426,7 +439,11 @@ static sc_tool_result_t *bg_kill_execute(sc_tool_t *self, cJSON *args, void *ctx
     }
 
     if (proc->alive) {
-        kill(proc->pid, SIGTERM);
+        /* Signal the whole process group (-pid) so grandchildren die too; the
+         * group pgid==pid exists only if the child's setpgid succeeded, so this
+         * can never reach the gateway's own group. waitpid still reaps the
+         * direct child. */
+        kill(-proc->pid, SIGTERM);
         /* Brief wait then force kill if needed */
         int status = 0;
         pid_t w = waitpid(proc->pid, &status, WNOHANG);
@@ -434,7 +451,7 @@ static sc_tool_result_t *bg_kill_execute(sc_tool_t *self, cJSON *args, void *ctx
             usleep(100000); /* 100ms */
             w = waitpid(proc->pid, &status, WNOHANG);
             if (w == 0) {
-                kill(proc->pid, SIGKILL);
+                kill(-proc->pid, SIGKILL);
                 waitpid(proc->pid, &status, 0);
             }
         }

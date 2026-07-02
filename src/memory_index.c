@@ -922,6 +922,14 @@ static sc_memory_search_result_t *do_search(sc_memory_index_t *idx,
 
     /* 3. Compute RRF scores: 1/(k+bm25_pos) + 1/(k+recency_pos) */
     double *scores = calloc((size_t)pool_count, sizeof(double));
+    if (!scores) {
+        for (int i = 0; i < pool_count; i++) {
+            free(pool[i].source);
+            free(pool[i].snippet);
+        }
+        free(pool);
+        return NULL;
+    }
     for (int i = 0; i < pool_count; i++) {
         if (pool[i].bm25_pos > 0)
             scores[i] += 1.0 / (RRF_K + pool[i].bm25_pos);
@@ -931,6 +939,15 @@ static sc_memory_search_result_t *do_search(sc_memory_index_t *idx,
 
     /* 4. Select top max_results by RRF score */
     sc_memory_search_result_t *results = calloc((size_t)max_results, sizeof(*results));
+    if (!results) {
+        for (int i = 0; i < pool_count; i++) {
+            free(pool[i].source);
+            free(pool[i].snippet);
+        }
+        free(pool);
+        free(scores);
+        return NULL;
+    }
     int count = 0;
     for (int r = 0; r < max_results; r++) {
         int best = -1;

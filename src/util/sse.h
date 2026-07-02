@@ -17,6 +17,7 @@ typedef struct {
     char *buf;
     size_t len;
     size_t cap;
+    int overflowed;   /* current line exceeded SC_SSE_MAX_LINE — discard to EOL */
     sc_sse_event_cb cb;
     void *ctx;
 } sc_sse_parser_t;
