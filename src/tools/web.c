@@ -859,6 +859,10 @@ static int is_private_ipv4(const struct in_addr *addr)
     if ((ip >> 28) == 15) return 1;
     /* 255.255.255.255 (broadcast) */
     if (ip == 0xFFFFFFFF) return 1;
+    /* 192.0.0.0/24 (IETF protocol assignments, RFC 6890) */
+    if ((ip >> 8) == (192 << 16 | 0 << 8 | 0)) return 1;
+    /* 224.0.0.0/4 (multicast) */
+    if ((ip >> 28) == 14) return 1;
     return 0;
 }
 
@@ -889,6 +893,35 @@ static int is_private_ipv6(const struct in6_addr *addr)
 
     /* fc00::/7 (unique local address) */
     if ((b[0] & 0xfe) == 0xfc) return 1;
+
+    /* ff00::/8 (multicast) */
+    if (b[0] == 0xff) return 1;
+
+    /* 2002::/16 (6to4) — embeds an IPv4 address in bytes 2..5. */
+    if (b[0] == 0x20 && b[1] == 0x02) {
+        struct in_addr v4;
+        memcpy(&v4.s_addr, &b[2], 4);
+        if (is_private_ipv4(&v4)) return 1;
+    }
+
+    /* 64:ff9b::/96 (NAT64) — embeds an IPv4 address in the last 4 bytes. */
+    static const uint8_t nat64[12] = {0x00,0x64,0xff,0x9b,0,0,0,0,0,0,0,0};
+    if (memcmp(b, nat64, 12) == 0) {
+        struct in_addr v4;
+        memcpy(&v4.s_addr, &b[12], 4);
+        return is_private_ipv4(&v4);
+    }
+
+    /* ::x.x.x.x (deprecated IPv4-compatible) — first 12 bytes zero, last 4 a
+     * v4 address. (:: and ::1 are already handled above.) */
+    int first12_zero = 1;
+    for (int i = 0; i < 12; i++)
+        if (b[i]) { first12_zero = 0; break; }
+    if (first12_zero) {
+        struct in_addr v4;
+        memcpy(&v4.s_addr, &b[12], 4);
+        return is_private_ipv4(&v4);
+    }
 
     return 0;
 }

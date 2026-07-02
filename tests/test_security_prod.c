@@ -361,6 +361,47 @@ static void test_ssrf_ipv6_ula(void)
     ASSERT(is_ssrf_blocked(r), "fd00:: (ULA) should be SSRF-blocked");
     sc_tool_result_free(r);
 }
+
+static void test_ssrf_ipv6_6to4_loopback(void)
+{
+    /* 2002:7f00:0001:: embeds 127.0.0.1 via 6to4. */
+    sc_tool_result_t *r = fetch_url("http://[2002:7f00:1::]/");
+    ASSERT(is_ssrf_blocked(r),
+           "6to4 (2002::/16) embedding 127.0.0.1 should be SSRF-blocked");
+    sc_tool_result_free(r);
+}
+
+static void test_ssrf_ipv6_nat64_loopback(void)
+{
+    /* 64:ff9b::7f00:1 embeds 127.0.0.1 via NAT64. */
+    sc_tool_result_t *r = fetch_url("http://[64:ff9b::7f00:1]/");
+    ASSERT(is_ssrf_blocked(r),
+           "NAT64 (64:ff9b::/96) embedding 127.0.0.1 should be SSRF-blocked");
+    sc_tool_result_free(r);
+}
+
+static void test_ssrf_ipv6_compat_loopback(void)
+{
+    /* ::127.0.0.1 (deprecated IPv4-compatible). */
+    sc_tool_result_t *r = fetch_url("http://[::127.0.0.1]/");
+    ASSERT(is_ssrf_blocked(r),
+           "::x.x.x.x embedding 127.0.0.1 should be SSRF-blocked");
+    sc_tool_result_free(r);
+}
+
+static void test_ssrf_ipv6_multicast(void)
+{
+    sc_tool_result_t *r = fetch_url("http://[ff02::1]/");
+    ASSERT(is_ssrf_blocked(r), "ff00::/8 (IPv6 multicast) should be SSRF-blocked");
+    sc_tool_result_free(r);
+}
+
+static void test_ssrf_ipv4_multicast(void)
+{
+    sc_tool_result_t *r = fetch_url("http://224.0.0.1/");
+    ASSERT(is_ssrf_blocked(r), "224.0.0.0/4 (multicast) should be SSRF-blocked");
+    sc_tool_result_free(r);
+}
 #endif /* SC_ENABLE_WEB_TOOLS */
 
 /* ========== Allowlist tests ========== */
@@ -1791,6 +1832,32 @@ static void test_sensitive_path_aws(void)
     free(workspace);
 }
 
+static void test_sensitive_path_new_creds(void)
+{
+    /* Newly-added sensitive paths: gcloud creds under ~/.config/gcloud, the
+     * git credential-store file, and shell history. */
+    char *workspace = sc_config_workspace_path(g_cfg);
+    const char *paths[] = {
+        "/home/root/.config/gcloud/credentials.db",
+        "/home/root/.git-credentials",
+        "/home/root/.bash_history",
+    };
+    for (int i = 0; i < 3; i++) {
+        sc_tool_t *rf = sc_tool_read_file_new(workspace, 0);
+        ASSERT_NOT_NULL(rf);
+        cJSON *args = cJSON_CreateObject();
+        cJSON_AddStringToObject(args, "path", paths[i]);
+        sc_tool_result_t *r = rf->execute(rf, args, NULL);
+        ASSERT_NOT_NULL(r);
+        ASSERT(r->is_error == 1,
+               "gcloud/git-credentials/history path should be blocked");
+        sc_tool_result_free(r);
+        cJSON_Delete(args);
+        rf->destroy(rf);
+    }
+    free(workspace);
+}
+
 static void test_sensitive_path_env(void)
 {
     /* Writing .env should be blocked */
@@ -2264,6 +2331,11 @@ int main(void)
     RUN_TEST(test_ssrf_ipv6_mapped_10);
     RUN_TEST(test_ssrf_ipv6_link_local);
     RUN_TEST(test_ssrf_ipv6_ula);
+    RUN_TEST(test_ssrf_ipv6_6to4_loopback);
+    RUN_TEST(test_ssrf_ipv6_nat64_loopback);
+    RUN_TEST(test_ssrf_ipv6_compat_loopback);
+    RUN_TEST(test_ssrf_ipv6_multicast);
+    RUN_TEST(test_ssrf_ipv4_multicast);
 
     printf("\n  -- SSRF redirect protection --\n");
     RUN_TEST(test_ssrf_check_public);
@@ -2477,6 +2549,7 @@ int main(void)
     printf("\n  -- Sensitive path blocklist (phase 6) --\n");
     RUN_TEST(test_sensitive_path_ssh);
     RUN_TEST(test_sensitive_path_aws);
+    RUN_TEST(test_sensitive_path_new_creds);
     RUN_TEST(test_sensitive_path_env);
 
     printf("\n  -- IRC control char stripping (phase 6) --\n");

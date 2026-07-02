@@ -1124,7 +1124,15 @@ static int postprocess_result(sc_agent_t *agent, sc_turn_ctx_t *tc,
             for (int k = 0; keys[k]; k++) {
                 cJSON *v = cJSON_GetObjectItem(call->arguments, keys[k]);
                 if (v && cJSON_IsString(v) && v->valuestring) {
-                    snprintf(arg_buf, sizeof(arg_buf), "%s", v->valuestring);
+                    /* Redact the FULL value before truncating: this preview is
+                     * written to action_log.txt, which is re-injected into the
+                     * system prompt every turn, so an un-redacted secret (e.g. a
+                     * token in a command/url arg) would persist past compaction.
+                     * Redact before the truncation so patterns still match. */
+                    char *rd = sc_redact_secrets(v->valuestring);
+                    snprintf(arg_buf, sizeof(arg_buf), "%s",
+                             rd ? rd : v->valuestring);
+                    free(rd);
                     arg_preview = arg_buf;
                     break;
                 }

@@ -145,6 +145,10 @@ static int is_sensitive_path(const char *resolved)
         return 1;
     if (strstr(resolved, "/.gcloud/") || str_ends_with(resolved, "/.gcloud"))
         return 1;
+    /* gcloud actually stores credentials under ~/.config/gcloud/. */
+    if (strstr(resolved, "/.config/gcloud/") ||
+        str_ends_with(resolved, "/.config/gcloud"))
+        return 1;
     if (strstr(resolved, "/.azure/") || str_ends_with(resolved, "/.azure"))
         return 1;
     /* GitHub CLI tokens */
@@ -165,6 +169,12 @@ static int is_sensitive_path(const char *resolved)
     if (strcasecmp(basename, ".netrc") == 0 ||
         strcasecmp(basename, ".npmrc") == 0 ||
         strcasecmp(basename, ".pypirc") == 0)
+        return 1;
+    /* git credential-store plaintext creds; shell history can hold secrets
+     * typed on a command line. */
+    if (strcasecmp(basename, ".git-credentials") == 0 ||
+        strcasecmp(basename, ".bash_history") == 0 ||
+        strcasecmp(basename, ".zsh_history") == 0)
         return 1;
 
     return 0;
