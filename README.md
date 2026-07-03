@@ -24,7 +24,8 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
   X read, memory read/write/log/search, context search, code graph, symbol lookup, repo/project &
   session search, tool search, message, note (scratchpad), cron, spawn, delegate, converse, compact,
   skills, notify, background processes, git worktree enter/exit, host inventory/metrics, camera
-  (capture stills, list motion events, describe images via a remote vision model — `SC_ENABLE_CAMERA`)
+  (capture stills, list motion events, describe images via a remote vision model; companion snap
+  descriptions persist to daily notes tool-side — `SC_ENABLE_CAMERA`)
 - **Memory** — Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search
   (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic
   action log
