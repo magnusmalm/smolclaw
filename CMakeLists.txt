@@ -356,6 +356,7 @@ endif()
 if(SC_ENABLE_COMPANION)
     list(APPEND SC_SOURCES
         src/companion/auth.c
+        src/companion/library.c
         src/companion/random.c
         src/companion/routes.c
         src/companion/setup.c

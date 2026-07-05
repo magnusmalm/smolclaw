@@ -22,6 +22,89 @@ servers:
 security:
   - bearerAuth: []
 
+  /api/companion/snaps:
+    get:
+      operationId: getCompanionSnaps
+      summary: List inbox photos (newest first), or fetch one image via ?image=<id>
+      tags: [Layer1]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, maximum: 100 }
+        - name: image
+          in: query
+          description: 32-hex snap id; when present the response is the image bytes
+          schema: { type: string, pattern: "^[0-9a-f]{32}$" }
+      responses:
+        "200":
+          description: JSON list, or image/jpeg / image/png bytes when ?image= is given
+        "400":
+          description: Malformed id
+        "401":
+          description: Unauthorized
+        "404":
+          description: No such image
+    delete:
+      operationId: deleteCompanionSnap
+      summary: Delete a photo; with purge_notes=1 also remove every daily-note line referencing it
+      tags: [Layer1]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, pattern: "^[0-9a-f]{32}$" }
+        - name: purge_notes
+          in: query
+          schema: { type: string, enum: ["1"] }
+      responses:
+        "200":
+          description: '{deleted: true, notes_removed: K}'
+        "400":
+          description: Malformed id
+        "401":
+          description: Unauthorized
+        "404":
+          description: 'Photo absent ({deleted: false, notes_removed: K})'
+
+  /api/companion/notes:
+    get:
+      operationId: getCompanionNotes
+      summary: Daily-note lines of the last N days, classified (snap / snap-note / triage / other)
+      tags: [Layer1]
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, maximum: 31, default: 7 }
+      responses:
+        "200":
+          description: '{notes: [{date, line, kind, id?}]}'
+        "401":
+          description: Unauthorized
+    delete:
+      operationId: deleteCompanionNote
+      summary: Remove the first daily-note line byte-equal to `line` on `date` (exact match or 404)
+      tags: [Layer1]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, line]
+              properties:
+                date: { type: string, pattern: "^[0-9]{8}$" }
+                line: { type: string, maxLength: 8192 }
+      responses:
+        "200":
+          description: '{deleted: true}'
+        "400":
+          description: Malformed date/line
+        "401":
+          description: Unauthorized
+        "404":
+          description: No byte-equal line found
+
+
 components:
   securitySchemes:
     bearerAuth:

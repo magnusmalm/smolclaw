@@ -27,7 +27,7 @@ done
 
 # Layer 1 routes (companion flag)
 if [ -f "$ROUTES" ]; then
-    for path in /api/companion/capabilities /api/companion/snap; do
+    for path in /api/companion/capabilities /api/companion/snap /api/companion/snaps /api/companion/notes; do
         grep -q "$path" "$SPEC" || fail "OpenAPI missing path $path"
         grep -q "$path" "$WEB" || fail "web.c missing registration for $path"
     done

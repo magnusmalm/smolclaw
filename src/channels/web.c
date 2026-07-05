@@ -145,6 +145,14 @@ typedef struct {
     /* Uptime tracking */
     time_t start_time;
 
+    /* Cross-thread stop wakeup. event_base_loopbreak() from another
+     * thread cannot wake a base created without evthread support — the
+     * dispatch thread sits in epoll_wait(-1) forever and web_stop()'s
+     * pthread_join hangs. A pipe with a read event is the dependency-free
+     * wakeup (same idiom as the main-thread SIGTERM pipe). */
+    int wake_pipe[2];
+    struct event *wake_ev;
+
 #if SC_ENABLE_COMPANION
     sc_companion_token_entry_t *companion_tokens;
     int companion_token_count;
@@ -1571,6 +1579,17 @@ static void pipe_read_cb(evutil_socket_t fd, short what, void *arg)
 }
 
 /* Web thread main function */
+static void web_wake_cb(evutil_socket_t fd, short what, void *arg)
+{
+    (void)what;
+    /* Single read — the pipe is blocking and one stop writes one byte;
+     * a drain loop would block inside the callback. */
+    char buf[16];
+    ssize_t n = read(fd, buf, sizeof(buf));
+    (void)n;
+    event_base_loopbreak((struct event_base *)arg);
+}
+
 static void *web_thread_fn(void *arg)
 {
     sc_channel_t *ch = arg;
@@ -1650,6 +1669,15 @@ static int web_start(sc_channel_t *self)
         return -1;
     }
 
+    /* Stop wakeup pipe (see web_data_t) */
+    wd->wake_pipe[0] = wd->wake_pipe[1] = -1;
+    if (pipe(wd->wake_pipe) == 0) {
+        wd->wake_ev = event_new(wd->base, wd->wake_pipe[0],
+                                EV_READ | EV_PERSIST, web_wake_cb, wd->base);
+        if (wd->wake_ev)
+            event_add(wd->wake_ev, NULL);
+    }
+
     /* Create HTTP server */
     wd->http = evhttp_new(wd->base);
     if (!wd->http) {
@@ -1703,6 +1731,10 @@ static int web_start(sc_channel_t *self)
                   sc_companion_handle_capabilities, self);
     evhttp_set_cb(wd->http, "/api/companion/snap",
                   sc_companion_handle_snap, self);
+    evhttp_set_cb(wd->http, "/api/companion/snaps",
+                  sc_companion_handle_snaps, self);
+    evhttp_set_cb(wd->http, "/api/companion/notes",
+                  sc_companion_handle_notes, self);
 #endif
     evhttp_set_cb(wd->http, "/", handle_root, self);
     evhttp_set_gencb(wd->http, handle_notfound, self);
@@ -1785,6 +1817,12 @@ static int web_stop(sc_channel_t *self)
 
     if (wd->base)
         event_base_loopbreak(wd->base);
+    /* loopbreak alone cannot wake a dispatch thread blocked in epoll —
+     * the pipe write is the actual cross-thread wakeup. */
+    if (wd->wake_pipe[1] >= 0) {
+        ssize_t n = write(wd->wake_pipe[1], "x", 1);
+        (void)n;
+    }
 
     if (wd->thread_started)
         pthread_join(wd->thread, NULL);
@@ -1817,6 +1855,12 @@ static void web_destroy(sc_channel_t *self)
         }
         if (wd->response_pipe[0] >= 0) close(wd->response_pipe[0]);
         if (wd->response_pipe[1] >= 0) close(wd->response_pipe[1]);
+        if (wd->wake_ev) {
+            event_del(wd->wake_ev);
+            event_free(wd->wake_ev);
+        }
+        if (wd->wake_pipe[0] >= 0) close(wd->wake_pipe[0]);
+        if (wd->wake_pipe[1] >= 0) close(wd->wake_pipe[1]);
         if (wd->http) evhttp_free(wd->http);
         if (wd->base) event_base_free(wd->base);
 
@@ -1906,6 +1950,8 @@ sc_channel_t *sc_channel_web_new(sc_web_config_t *cfg, sc_bus_t *bus,
     wd->pending_head = NULL;
     wd->response_pipe[0] = -1;
     wd->response_pipe[1] = -1;
+    wd->wake_pipe[0] = -1;
+    wd->wake_pipe[1] = -1;
     wd->pipe_event = NULL;
     pthread_mutex_init(&wd->pending_lock, NULL);
 

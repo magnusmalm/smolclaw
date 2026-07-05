@@ -11,6 +11,7 @@
 #define SC_COMP_SCOPE_MEMORY_PENDING "memory_pending"
 #define SC_COMP_SCOPE_SNAP_UPLOAD    "snap_upload"
 #define SC_COMP_SCOPE_AUDIT_READ     "audit_read"
+#define SC_COMP_SCOPE_LIBRARY        "library"
 
 /* Returns 1 if Authorization header is valid for required_scope.
  * required_scope NULL = any authenticated caller (main bearer or any companion token).
