@@ -13,6 +13,7 @@
 #include "channels/web.h"
 #include "audit.h"
 #include "logger.h"
+#include "memory_index.h"
 #include "util/str.h"
 
 #include <cJSON.h>
@@ -171,8 +172,8 @@ static int lib_file_remove_lines(const char *path, const char *needle,
  * (atomic: tmp + rename). `new_line` is written verbatim + a single '\n';
  * the caller guarantees it holds no embedded newline.
  * Returns 1 if replaced, 0 if no match (or file missing), -1 on I/O error.
- * NOTE: like delete, the pre-edit text may linger in the FTS search index
- * until its next rebuild (startup) — documented limitation, plan §3.6. */
+ * Callers re-index the affected day (lib_reindex_date) so the pre-edit
+ * text leaves the FTS search index immediately (plan §3.6; task #4). */
 static int lib_file_replace_line(const char *path, const char *old,
                                  const char *new_line)
 {
@@ -226,9 +227,50 @@ static int lib_file_replace_line(const char *path, const char *old,
     return 1;
 }
 
+/* Re-index one daily file (source = YYYYMMDD) into search.db so a delete or
+ * edit is reflected immediately — both by the per-request web /api/memory/search
+ * (which incrementally rebuilds anyway) and, crucially, by the agent's
+ * long-lived memory_search tool handle, which otherwise stays stale until the
+ * next web rebuild or process restart. Best-effort: the per-request web rebuild
+ * is the backstop, so failures here are logged, not fatal. If the daily file is
+ * now gone or empty, the source is dropped from the index entirely. */
+static void lib_reindex_date(const char *workspace, const char *date)
+{
+    char db[PATH_MAX];
+    if (snprintf(db, sizeof(db), "%s/memory/search.db", workspace)
+        >= (int)sizeof(db))
+        return;
+    sc_memory_index_t *idx = sc_memory_index_new(db);
+    if (!idx) return;
+
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/memory/%.6s/%s.md",
+             workspace, date, date);
+    char *content = NULL;
+    FILE *f = fopen(fpath, "rb");
+    if (f) {
+        struct stat st;
+        if (fstat(fileno(f), &st) == 0 && S_ISREG(st.st_mode) &&
+            st.st_size > 0 && st.st_size < LIB_IMAGE_MAX) {
+            content = malloc((size_t)st.st_size + 1);
+            if (content) {
+                size_t got = fread(content, 1, (size_t)st.st_size, f);
+                content[got] = '\0';
+            }
+        }
+        fclose(f);
+    }
+    if (content && content[0])
+        sc_memory_index_put_chunked(idx, date, content);
+    else
+        sc_memory_index_remove_chunked(idx, date);
+    free(content);
+    sc_memory_index_free(idx);
+}
+
 /* Remove every daily-note line referencing a snap id, across all months.
- * NOTE: deleted lines may linger in the FTS search index until its next
- * rebuild (startup) — documented limitation, plan §3.6. */
+ * Re-indexes each touched daily file so the deleted lines leave the FTS
+ * search index immediately (plan §3.6; task #4). */
 static int lib_purge_snap_notes(const char *workspace, const char *id)
 {
     char needle[64];
@@ -260,7 +302,16 @@ static int lib_purge_snap_notes(const char *workspace, const char *id)
                          f->d_name) >= (int)sizeof(fpath))
                 continue;
             int r = lib_file_remove_lines(fpath, needle, NULL);
-            if (r > 0) total += r;
+            if (r > 0) {
+                total += r;
+                /* filename is YYYYMMDD.md → re-index by date key */
+                if (strlen(f->d_name) >= 8) {
+                    char date[9];
+                    memcpy(date, f->d_name, 8);
+                    date[8] = '\0';
+                    lib_reindex_date(workspace, date);
+                }
+            }
         }
         closedir(sd);
     }
@@ -587,6 +638,8 @@ static void lib_notes_delete(struct evhttp_request *req,
         return;
     }
 
+    char date_key[9];
+    snprintf(date_key, sizeof(date_key), "%.8s", date);
     char fpath[PATH_MAX];
     snprintf(fpath, sizeof(fpath), "%s/memory/%.6s/%s.md",
              workspace, date, date);
@@ -607,6 +660,7 @@ static void lib_notes_delete(struct evhttp_request *req,
         sc_web_send_json_error(req, 404, "line not found");
         return;
     }
+    lib_reindex_date(workspace, date_key);  /* drop the line from FTS now */
     cJSON *j = cJSON_CreateObject();
     cJSON_AddBoolToObject(j, "deleted", 1);
     lib_send_json(req, 200, "OK", j);
@@ -655,6 +709,8 @@ static void lib_notes_edit(struct evhttp_request *req, const char *workspace)
         return;
     }
 
+    char date_key[9];
+    snprintf(date_key, sizeof(date_key), "%.8s", date);
     char fpath[PATH_MAX];
     snprintf(fpath, sizeof(fpath), "%s/memory/%.6s/%s.md",
              workspace, date, date);
@@ -675,6 +731,7 @@ static void lib_notes_edit(struct evhttp_request *req, const char *workspace)
         sc_web_send_json_error(req, 404, "line not found");
         return;
     }
+    lib_reindex_date(workspace, date_key);  /* refresh FTS with the new text */
     cJSON *j = cJSON_CreateObject();
     cJSON_AddBoolToObject(j, "edited", 1);
     lib_send_json(req, 200, "OK", j);

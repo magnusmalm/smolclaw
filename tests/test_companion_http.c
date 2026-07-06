@@ -505,6 +505,76 @@ static void test_library_note_edit(void)
     ASSERT(strstr(buf, "test description A") == NULL, "old desc gone");
 }
 
+/* Proactive FTS re-index (task #4): a library delete must remove the line
+ * from the memory search index immediately. In this fast test the delete
+ * lands in the same wall-clock second as the initial index, so the
+ * rebuild's mtime fast-path would skip re-hashing — only lib_reindex_date's
+ * proactive removal makes the second search come back empty. */
+static void test_library_delete_updates_fts(void)
+{
+    library_fixture();  /* seeds TRIAGE_LINE = "...| water the plants" */
+    char month[8], date[10];
+    today_str(month, date);
+    (void)month;
+
+    struct curl_buf out = {0};
+    char url[300], body[512];
+
+    /* 1) search indexes the daily file and finds the triage line */
+    snprintf(url, sizeof(url), "%s/api/memory/search", g_base);
+    snprintf(body, sizeof(body), "{\"query\":\"plants\"}");
+    long code = http_request("POST", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    ASSERT(strstr(out.data, "plants") != NULL, "indexed before delete");
+    free(out.data);
+
+    /* 2) delete the triage line */
+    snprintf(url, sizeof(url), "%s/api/companion/notes", g_base);
+    snprintf(body, sizeof(body), "{\"date\":\"%s\",\"line\":\"%s\"}",
+             date, TRIAGE_LINE);
+    code = http_request("DELETE", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    free(out.data);
+
+    /* 3) the deleted text is no longer searchable */
+    snprintf(url, sizeof(url), "%s/api/memory/search", g_base);
+    snprintf(body, sizeof(body), "{\"query\":\"plants\"}");
+    code = http_request("POST", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    ASSERT(strstr(out.data, "\"count\":0") != NULL, "FTS updated after delete");
+    free(out.data);
+
+    /* 4) an edit re-indexes too: new term searchable, old term gone */
+    library_fixture();
+    snprintf(url, sizeof(url), "%s/api/memory/search", g_base);
+    snprintf(body, sizeof(body), "{\"query\":\"plants\"}");
+    http_request("POST", url, g_auth, "Content-Type: application/json",
+                 body, strlen(body), &out);  /* index it */
+    free(out.data);
+    snprintf(url, sizeof(url), "%s/api/companion/notes", g_base);
+    snprintf(body, sizeof(body),
+             "{\"date\":\"%s\",\"line\":\"%s\",\"new_line\":"
+             "\"- reminder | tag1,tag2 | water the cactus\"}", date, TRIAGE_LINE);
+    code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    free(out.data);
+    snprintf(url, sizeof(url), "%s/api/memory/search", g_base);
+    snprintf(body, sizeof(body), "{\"query\":\"cactus\"}");
+    http_request("POST", url, g_auth, "Content-Type: application/json",
+                 body, strlen(body), &out);
+    ASSERT(strstr(out.data, "cactus") != NULL, "edit indexed new term");
+    free(out.data);
+    snprintf(body, sizeof(body), "{\"query\":\"plants\"}");
+    http_request("POST", url, g_auth, "Content-Type: application/json",
+                 body, strlen(body), &out);
+    ASSERT(strstr(out.data, "\"count\":0") != NULL, "old term gone after edit");
+    free(out.data);
+}
+
 int main(void)
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -526,6 +596,7 @@ int main(void)
     RUN_TEST(test_library_snap_delete_purges_notes);
     RUN_TEST(test_library_note_delete_exact_line);
     RUN_TEST(test_library_note_edit);
+    RUN_TEST(test_library_delete_updates_fts);
 
     fixture_stop();
     curl_global_cleanup();
