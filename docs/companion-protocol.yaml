@@ -80,6 +80,35 @@ security:
           description: '{notes: [{date, line, kind, id?}]}'
         "401":
           description: Unauthorized
+    put:
+      operationId: editCompanionNote
+      summary: Replace the first daily-note line byte-equal to `line` on `date` with `new_line` (exact match or 404)
+      description: |
+        Generic single-line replace (semantics-agnostic): the client
+        reconstructs a well-formed line; the gateway only guarantees the
+        replacement holds no embedded CR/LF so structure can't be corrupted.
+        Used to edit snap descriptions, snap-notes, and triage note lines.
+      tags: [Layer1]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, line, new_line]
+              properties:
+                date: { type: string, pattern: "^[0-9]{8}$" }
+                line: { type: string, maxLength: 8192 }
+                new_line: { type: string, maxLength: 8192, description: "single line, no CR/LF" }
+      responses:
+        "200":
+          description: '{edited: true}'
+        "400":
+          description: Malformed date/line/new_line
+        "401":
+          description: Unauthorized
+        "404":
+          description: No byte-equal line found
     delete:
       operationId: deleteCompanionNote
       summary: Remove the first daily-note line byte-equal to `line` on `date` (exact match or 404)

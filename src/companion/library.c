@@ -167,6 +167,65 @@ static int lib_file_remove_lines(const char *path, const char *needle,
     return removed;
 }
 
+/* Replace the FIRST line byte-equal to `old` in `path` with `new_line`
+ * (atomic: tmp + rename). `new_line` is written verbatim + a single '\n';
+ * the caller guarantees it holds no embedded newline.
+ * Returns 1 if replaced, 0 if no match (or file missing), -1 on I/O error.
+ * NOTE: like delete, the pre-edit text may linger in the FTS search index
+ * until its next rebuild (startup) — documented limitation, plan §3.6. */
+static int lib_file_replace_line(const char *path, const char *old,
+                                 const char *new_line)
+{
+    FILE *in = fopen(path, "r");
+    if (!in) return 0;
+
+    char tmp[PATH_MAX];
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int)sizeof(tmp)) {
+        fclose(in);
+        return -1;
+    }
+    FILE *out = fopen(tmp, "w");
+    if (!out) {
+        fclose(in);
+        return -1;
+    }
+
+    int replaced = 0;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t n;
+    int io_err = 0;
+    while ((n = getline(&line, &cap, in)) != -1) {
+        size_t len = (size_t)n;
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            len--;
+        if (replaced == 0 && len == strlen(old) &&
+            memcmp(line, old, len) == 0) {
+            replaced = 1;
+            if (fprintf(out, "%s\n", new_line) < 0) { io_err = 1; break; }
+        } else if (fwrite(line, 1, (size_t)n, out) != (size_t)n) {
+            io_err = 1;
+            break;
+        }
+    }
+    free(line);
+    fclose(in);
+    if (io_err || fclose(out) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+
+    if (replaced == 0) {
+        unlink(tmp);
+        return 0;
+    }
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    return 1;
+}
+
 /* Remove every daily-note line referencing a snap id, across all months.
  * NOTE: deleted lines may linger in the FTS search index until its next
  * rebuild (startup) — documented limitation, plan §3.6. */
@@ -553,6 +612,74 @@ static void lib_notes_delete(struct evhttp_request *req,
     lib_send_json(req, 200, "OK", j);
 }
 
+/* PUT — replace the first line byte-equal to `line` on `date` with
+ * `new_line`. Generic (semantics-agnostic): the caller reconstructs a
+ * well-formed line; the gateway only guarantees the replacement is a
+ * single line (no embedded CR/LF) so structure can't be corrupted. */
+static void lib_notes_edit(struct evhttp_request *req, const char *workspace)
+{
+    struct evbuffer *input = evhttp_request_get_input_buffer(req);
+    size_t len = evbuffer_get_length(input);
+    if (len == 0 || len > 2 * LIB_NOTE_LINE_MAX + 256) {
+        sc_web_send_json_error(req, 400, "bad body");
+        return;
+    }
+    char *body = malloc(len + 1);
+    if (!body) {
+        sc_web_send_json_error(req, 500, "out of memory");
+        return;
+    }
+    evbuffer_copyout(input, body, len);
+    body[len] = '\0';
+    cJSON *in = cJSON_Parse(body);
+    free(body);
+    if (!in) {
+        sc_web_send_json_error(req, 400, "invalid json");
+        return;
+    }
+    const char *date = cJSON_GetStringValue(cJSON_GetObjectItem(in, "date"));
+    const char *line = cJSON_GetStringValue(cJSON_GetObjectItem(in, "line"));
+    const char *new_line =
+        cJSON_GetStringValue(cJSON_GetObjectItem(in, "new_line"));
+    int date_ok = date && strlen(date) == 8;
+    for (int i = 0; date_ok && i < 8; i++)
+        if (!isdigit((unsigned char)date[i])) date_ok = 0;
+    int new_ok = new_line && new_line[0] &&
+        strlen(new_line) <= LIB_NOTE_LINE_MAX &&
+        !strpbrk(new_line, "\r\n");
+    if (!date_ok || !line || !line[0] || strlen(line) > LIB_NOTE_LINE_MAX ||
+        !new_ok) {
+        cJSON_Delete(in);
+        sc_web_send_json_error(req, 400,
+            "date (YYYYMMDD), line, single-line new_line required");
+        return;
+    }
+
+    char fpath[PATH_MAX];
+    snprintf(fpath, sizeof(fpath), "%s/memory/%.6s/%s.md",
+             workspace, date, date);
+    int replaced = lib_file_replace_line(fpath, line, new_line);
+
+    char summary[200];
+    snprintf(summary, sizeof(summary), "edit note %s replaced=%d \"%.60s\"->\"%.60s\"",
+             date, replaced, line, new_line);
+    sc_audit_log("companion_library", summary, 0, replaced > 0);
+    SC_LOG_INFO(TAG, "library: %s", summary);
+    cJSON_Delete(in);
+
+    if (replaced < 0) {
+        sc_web_send_json_error(req, 500, "rewrite failed");
+        return;
+    }
+    if (replaced == 0) {
+        sc_web_send_json_error(req, 404, "line not found");
+        return;
+    }
+    cJSON *j = cJSON_CreateObject();
+    cJSON_AddBoolToObject(j, "edited", 1);
+    lib_send_json(req, 200, "OK", j);
+}
+
 void sc_companion_handle_notes(struct evhttp_request *req, void *arg)
 {
     sc_channel_t *ch = arg;
@@ -569,6 +696,9 @@ void sc_companion_handle_notes(struct evhttp_request *req, void *arg)
     switch (evhttp_request_get_command(req)) {
     case EVHTTP_REQ_GET:
         lib_notes_list(req, workspace);
+        return;
+    case EVHTTP_REQ_PUT:
+        lib_notes_edit(req, workspace);
         return;
     case EVHTTP_REQ_DELETE:
         lib_notes_delete(req, workspace);

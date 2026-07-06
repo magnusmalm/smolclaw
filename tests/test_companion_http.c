@@ -426,6 +426,85 @@ static void test_library_note_delete_exact_line(void)
     ASSERT(strstr(buf, TRIAGE_LINE) == NULL, "triage line gone");
 }
 
+static void test_library_note_edit(void)
+{
+    library_fixture();  /* fresh known state */
+
+    char month[8], date[10];
+    today_str(month, date);
+    char url[300];
+    snprintf(url, sizeof(url), "%s/api/companion/notes", g_base);
+
+    /* Happy path: replace the triage line with a new single line. */
+    const char *edited = "- reminder | tag1,tag2 | water the cactus";
+    char body[1024];
+    snprintf(body, sizeof(body),
+             "{\"date\":\"%s\",\"line\":\"%s\",\"new_line\":\"%s\"}",
+             date, TRIAGE_LINE, edited);
+    struct curl_buf out = {0};
+    long code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    ASSERT(strstr(out.data, "\"edited\":true") != NULL, "note edited");
+    free(out.data);
+
+    /* File now has the new line; the old line is gone; others intact. */
+    char path[600];
+    snprintf(path, sizeof(path), "%s/memory/%s/%s.md", g_ws, month, date);
+    FILE *f = fopen(path, "r");
+    ASSERT_NOT_NULL(f);
+    char buf[4096] = {0};
+    fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    ASSERT(strstr(buf, "water the cactus") != NULL, "new text present");
+    ASSERT(strstr(buf, TRIAGE_LINE) == NULL, "old line gone");
+    ASSERT(strstr(buf, "unrelated freeform line") != NULL, "other intact");
+
+    /* Editing the same old line again: exact-match-or-nothing → 404. */
+    code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 404);
+    free(out.data);
+
+    /* new_line with an embedded newline is rejected (no line injection). */
+    snprintf(body, sizeof(body),
+             "{\"date\":\"%s\",\"line\":\"%s\",\"new_line\":\"a\\nb\"}",
+             date, edited);
+    code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 400);
+    free(out.data);
+
+    /* Malformed date rejected. */
+    snprintf(body, sizeof(body),
+             "{\"date\":\"20xx0101\",\"line\":\"x\",\"new_line\":\"y\"}");
+    code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 400);
+    free(out.data);
+
+    /* A snap description line edits by the same mechanism. */
+    char old_desc[128], new_desc[128];
+    snprintf(old_desc, sizeof(old_desc),
+             "snap companion/inbox/%s.jpg: test description A", ID_A);
+    snprintf(new_desc, sizeof(new_desc),
+             "snap companion/inbox/%s.jpg: a red bicycle", ID_A);
+    snprintf(body, sizeof(body),
+             "{\"date\":\"%s\",\"line\":\"%s\",\"new_line\":\"%s\"}",
+             date, old_desc, new_desc);
+    code = http_request("PUT", url, g_auth,
+        "Content-Type: application/json", body, strlen(body), &out);
+    ASSERT_INT_EQ((int)code, 200);
+    free(out.data);
+    f = fopen(path, "r");
+    ASSERT_NOT_NULL(f);
+    memset(buf, 0, sizeof(buf));
+    fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    ASSERT(strstr(buf, "a red bicycle") != NULL, "desc edited");
+    ASSERT(strstr(buf, "test description A") == NULL, "old desc gone");
+}
+
 int main(void)
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -446,6 +525,7 @@ int main(void)
     RUN_TEST(test_library_notes_list);
     RUN_TEST(test_library_snap_delete_purges_notes);
     RUN_TEST(test_library_note_delete_exact_line);
+    RUN_TEST(test_library_note_edit);
 
     fixture_stop();
     curl_global_cleanup();
