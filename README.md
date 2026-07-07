@@ -51,25 +51,76 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
   for the duration of one turn — agent-wide memory paths untouched)
 - **Services** — Cron scheduling (with AI memory compaction), heartbeat, self-update, analytics
 
-## Quickstart
+## Getting started
+
+### 1. Install prerequisites
+
+A C toolchain, CMake, Python (for Kconfig), and a few dev libraries. **Or skip
+this entirely and use [Docker](#docker).**
+
+**Debian / Ubuntu**
+```bash
+sudo apt-get install -y cmake build-essential python3-pip \
+  libcurl4-openssl-dev libevent-dev libssl-dev libreadline-dev libsqlite3-dev
+pip3 install --user kconfiglib
+```
+
+**Fedora / RHEL**
+```bash
+sudo dnf install -y cmake gcc make python3-pip \
+  libcurl-devel libevent-devel openssl-devel readline-devel sqlite-devel
+pip3 install --user kconfiglib
+```
+
+**macOS (Homebrew)**
+```bash
+brew install cmake curl libevent openssl readline sqlite
+pip3 install --user kconfiglib
+```
+
+### 2. Build
 
 ```bash
-# Build
 git clone https://github.com/magnusmalm/smolclaw.git
 cd smolclaw
 cmake -B build && cmake --build build -j$(nproc)
+```
 
-# Initialize config and workspace
-./build/smolclaw onboard
+### 3. Initialize and configure
 
-# Add your API key to ~/.smolclaw/config.json, then:
-./build/smolclaw agent -m "Hello!"
+```bash
+./build/smolclaw onboard      # creates ~/.smolclaw/config.json + workspace
+```
 
-# Interactive mode
-./build/smolclaw agent
+Then point it at a model — two common paths:
 
-# Start gateway (all channels + services)
-./build/smolclaw gateway
+**A. Cloud (Anthropic Claude).** Get a key at
+<https://console.anthropic.com/>, then edit `~/.smolclaw/config.json`:
+```json
+{
+  "agents": { "defaults": { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929" } },
+  "providers": { "anthropic": { "api_key": "sk-ant-..." } }
+}
+```
+Rather not store the key in plaintext? See [Encrypted vault](#encrypted-vault).
+
+**B. Local, no API key ([Ollama](https://ollama.com)).** `ollama pull qwen2.5:7b`, then:
+```json
+{
+  "agents": { "defaults": { "provider": "ollama", "model": "qwen2.5:7b" } }
+}
+```
+More local / air-gapped recipes: [docs/EXAMPLES.md](docs/EXAMPLES.md).
+
+### 4. Verify and run
+
+```bash
+./build/smolclaw doctor       # validates config + dependencies
+./build/smolclaw selftest     # doctor + a real LLM round-trip (exits 0 on success)
+
+./build/smolclaw agent -m "Hello!"    # single turn
+./build/smolclaw agent                # interactive
+./build/smolclaw gateway              # all channels + services
 ```
 
 ## Building
@@ -77,7 +128,7 @@ cmake -B build && cmake --build build -j$(nproc)
 ### Dynamic (default)
 
 ```bash
-# Dependencies: libcurl, libevent (dev headers)
+# Dependencies: see "Getting started → Install prerequisites"
 cmake -B build
 cmake --build build -j$(nproc)
 ctest --test-dir build
@@ -492,6 +543,7 @@ smolclaw gateway      Start all channels + services
 smolclaw mcp-server   Run as an MCP server (JSON-RPC over stdio; needs SC_ENABLE_MCP_SERVER)
                       Read-only tools by default; --all-tools to expose write/exec
 smolclaw pairing      Manage channel trust (list/approve/revoke)
+smolclaw companion    Android companion pairing: `companion qr` prints a QR + smolclaw:// link (needs SC_ENABLE_COMPANION)
 smolclaw auth         xAI Grok OAuth login (login/status/logout/refresh xai; needs SC_ENABLE_XAI_OAUTH)
 smolclaw vault        Manage encrypted secrets
 smolclaw update       Check for and apply updates
