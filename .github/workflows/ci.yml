@@ -27,9 +27,13 @@ jobs:
             libreadline-dev libsqlite3-dev
           pip3 install --user kconfiglib
 
+      # rm -rf build/.config: no-op on GitHub's fresh VMs, but host-mode
+      # runners (Gitea/starbase) reuse the workdir — a stale CMakeCache or
+      # .config would silently redefine the profile being tested.
       - name: Configure (minimal)
         if: matrix.profile == 'minimal'
         run: |
+          rm -rf build
           cp configs/defconfig.minimal .config
           cmake -B build \
             -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
@@ -38,6 +42,7 @@ jobs:
       - name: Configure (full)
         if: matrix.profile == 'full'
         run: |
+          rm -rf build .config
           cmake -B build \
             -DCMAKE_C_COMPILER=${{ matrix.compiler }} \
             -DCMAKE_BUILD_TYPE=Debug
@@ -77,6 +82,7 @@ jobs:
 
       - name: Build minimal (MinSizeRel + LTO + gc-sections)
         run: |
+          rm -rf build-size
           cp configs/defconfig.minimal .config
           cmake -B build-size -DCMAKE_BUILD_TYPE=MinSizeRel
           cmake --build build-size -j$(nproc) --target smolclaw
