@@ -115,7 +115,7 @@ landings; CI enforces only minimal **dynamic** ≤ 1 MB):
 | Dynamic minimal     | 289 KB         |
 | Dynamic default-y   | ~1.25 MB       |
 | Musl static minimal | 4.6 MB         |
-| Musl static release | ~6.6 MB        |
+| Musl static release | 5.6 MB         |
 
 ### Installation
 
