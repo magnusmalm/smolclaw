@@ -156,19 +156,27 @@ The compression transform rewrites tool-result messages older than the last
 
 | Key                   | Type     | Default  | Description                              |
 |-----------------------|----------|----------|------------------------------------------|
-| restrict_to_workspace | bool     | true     | Confine file/exec/git to workspace.      |
-| workspace_per_session | bool     | false    | Per-session workspace/tasks/ subdir. [1] |
-| allowed_tools         | string[] | []       | Global tool allowlist (empty = all).     |
-| restrict_message_tool | bool     | false    | Limit message tool recipients.           |
-| exec_mode             | string   | denylist | denylist or allowlist. [2]               |
-| exec_allowed_commands | string[] | []       | Allowed commands in allowlist mode.      |
-| network_scope         | string   | public   | Scope: none/local/public/any.            |
-| sandbox               | bool     | true     | Landlock + seccomp for exec children.    |
-| auto_confirm          | bool     | false    | Auto-approve tool confirmations.         |
+| restrict_to_workspace   | bool     | true     | Confine file/exec/git to workspace.      |
+| workspace_per_session   | bool     | false    | Per-session workspace/tasks/ subdir. [1] |
+| allowed_tools           | string[] | []       | Global tool allowlist (empty = all).     |
+| restrict_message_tool   | bool     | false    | Limit message tool recipients.           |
+| exec_mode               | string   | denylist | denylist or allowlist. [2]               |
+| exec_allowed_commands   | string[] | []       | Allowed commands in allowlist mode.      |
+| network_scope           | string   | public   | Scope: none/local/public/any.            |
+| sandbox                 | bool     | true     | Landlock + seccomp for exec children.    |
+| auto_confirm            | bool     | false    | Auto-approve tool confirmations (CLI).   |
+| accept_open_dms         | bool     | false    | Allow open DM + empty allow_from (lab). [3] |
+| allow_unrestricted_exec | bool     | false    | Gateway: allow exec without allowlist (lab). [4] |
 
 - [1] Runs each session in `workspace/tasks/<id>/` (auto-pruned, last 5 kept).
-- [2] `denylist` blocks ~90 dangerous patterns; `allowlist` permits only
-  `exec_allowed_commands`. Strict builds default to `allowlist`.
+- [2] `denylist` blocks ~100+ dangerous patterns (including script-file interpreters
+  and curl upload forms); `allowlist` permits only `exec_allowed_commands`.
+  `SC_STRICT_SECURITY` builds default CLI exec to allowlist. **Gateway** requires
+  allowlist mode when exec tools are available unless [4].
+- [3] Without this, channels with `dm_policy: "open"` and empty `allow_from` are
+  not started (factory default `dm_policy` is `allowlist`).
+- [4] Gateway refuses to start if `exec`/`exec_background` are available without
+  a non-empty exec allowlist, unless this is true (isolated lab only).
 
 ### Cost, logging, diagnostics
 
@@ -213,12 +221,13 @@ All channels share these fields:
 
 | Key        | Type     | Default | Description                               |
 |------------|----------|---------|-------------------------------------------|
-| enabled    | bool     | false   | Activate the channel in gateway mode.     |
-| dm_policy  | string   | open    | open / allowlist / pairing. [1]           |
-| allow_from | string[] | []      | Permitted sender IDs (allowlist mode).    |
-| tools      | string[] | []      | Per-channel tool allowlist (empty = all). |
+| enabled    | bool     | false     | Activate the channel in gateway mode.     |
+| dm_policy  | string   | allowlist | open / allowlist / pairing. [1]           |
+| allow_from | string[] | []        | Permitted sender IDs (allowlist mode).    |
+| tools      | string[] | []        | Per-channel tool allowlist (empty = all). |
 
-- [1] Strict builds default `dm_policy` to `allowlist`.
+- [1] Factory default is `allowlist` for all builds. Explicit `open` with empty
+  `allow_from` is quarantined unless `agents.defaults.accept_open_dms` is true.
 
 ### `channels.telegram`
 

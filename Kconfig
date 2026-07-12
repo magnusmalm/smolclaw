@@ -298,17 +298,18 @@ config SC_STRICT_SECURITY
 	bool "Strict security defaults (fail-closed)"
 	default n
 	help
-	  When enabled, all security-sensitive defaults become fail-closed:
-	  - Channel DM policy defaults to "allowlist" (deny unknown senders)
+	  When enabled, additional fail-closed behaviors apply:
 	  - Exec tool defaults to allowlist mode (only pre-approved commands)
-	  - External channels are quarantined unless security is configured
-	    (allow_from or non-open dm_policy required; Web needs bearer token)
+	  - Web channel non-loopback bind is quarantined
 	  - Config version mismatch (newer config, older binary) blocks startup
 
-	  When disabled (default), behavior is backward-compatible:
-	  - DM policy defaults to "open"
-	  - Exec allows all non-denied commands
-	  - Channels start with warnings only
+	  Stock (even without this option) already:
+	  - Defaults channel dm_policy to "allowlist" (SML-001)
+	  - Quarantines open DM + empty allow_from unless accept_open_dms
+	  - Requires gateway exec allowlist unless allow_unrestricted_exec
+	  - Requires web bearer_token
+
+	  When disabled, CLI exec still defaults to denylist mode (not allowlist).
 
 config SC_ENABLE_VAULT
 	bool "Encrypted API key vault (AES-256-GCM)"

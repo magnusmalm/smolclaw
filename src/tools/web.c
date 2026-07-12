@@ -849,6 +849,12 @@ static int is_private_ipv4(const struct in_addr *addr)
     if (ip == 0) return 1;
     /* 100.64.0.0/10 (CGNAT, RFC 6598) */
     if ((ip >> 22) == (100 << 2 | 1)) return 1;
+    /* 198.18.0.0/15 (benchmarking, RFC 2544 / RFC 5735) */
+    {
+        uint32_t top16 = ip >> 16;
+        if (top16 == (198u << 8 | 18u) || top16 == (198u << 8 | 19u))
+            return 1;
+    }
     /* 192.0.2.0/24 (TEST-NET-1, RFC 5737) */
     if ((ip >> 8) == (192 << 16 | 0 << 8 | 2)) return 1;
     /* 198.51.100.0/24 (TEST-NET-2) */

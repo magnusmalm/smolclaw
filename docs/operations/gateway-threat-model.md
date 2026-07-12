@@ -13,31 +13,50 @@ user on loopback.
 
 A running gateway is an **unattended agent with tool access**. Anyone who can
 deliver an inbound message to an enabled channel can steer the LLM through
-the full tool loop (filesystem, exec, git, memory, delegation, etc.).
+the tool loop (filesystem, exec, git, memory, delegation, etc.) for tools that
+remain enabled.
 
-Defense is layered: channel auth, exec deny/allow patterns, Landlock/seccomp,
-SSRF pinning, and workspace restrictions — but **misconfiguration can remove
-the outer perimeter** while inner guards still run. Treat network exposure +
-`auto_confirm` as granting **shell-equivalent capability** to authenticated
-callers.
+Defense is layered: channel auth, **gateway exec allowlist requirement**,
+exec deny patterns, Landlock/seccomp (fail-closed), SSRF pinning, and workspace
+restrictions. Treat network exposure + full tool surface as granting
+**shell-equivalent capability** to authenticated / allowlisted callers.
 
 ---
 
 ## Gateway vs CLI
 
-| Mode      | Tool confirmation                         | Typical use              |
-|-----------|-------------------------------------------|--------------------------|
-| `agent`   | Interactive `[CONFIRM]` for risky tools   | Operator at keyboard     |
-| `gateway` | Auto-approved (`gateway_auto_confirm`)    | Headless services, bots  |
+| Mode      | Tool confirmation                         | Exec policy |
+|-----------|-------------------------------------------|-------------|
+| `agent`   | Interactive `[CONFIRM]` for risky tools   | Denylist by default (CLI) |
+| `gateway` | Auto-approved (`gateway_auto_confirm`)    | **Must** use exec allowlist if exec tools available |
 
-In gateway mode, `agents.defaults.auto_confirm: true` (common in examples)
-registers an approve-all callback. Tools marked `needs_confirm` (`exec`,
-`exec_background`, `git`) run **without a human prompt**. Deny patterns,
-exec allowlist mode, Landlock, and per-channel tool allowlists remain the
-guards — not an operator in the loop.
+In gateway mode tools marked `needs_confirm` run **without a human prompt**.
+Guards are:
 
-**Implication:** A gateway on a reachable address with weak channel auth is
-equivalent to leaving a shell open to that audience.
+1. **Exec allowlist** (required at gateway start unless lab override)
+2. Deny patterns (~100+)
+3. Landlock/seccomp (fail-closed on apply failure)
+4. `allowed_tools` / per-channel `tools`
+5. Channel DM policy / web bearer
+
+### Gateway exec policy (SML-002)
+
+On `smolclaw gateway` start, if `exec` or `exec_background` is available
+(empty global `allowed_tools`, or list includes those names), config **must**
+have:
+
+```json
+"agents": {
+  "defaults": {
+    "exec_mode": "allowlist",
+    "exec_allowed_commands": ["ls", "cat", "grep", "git"]
+  }
+}
+```
+
+**Lab-only escape hatch:** `"allow_unrestricted_exec": true` (or env
+`SMOLCLAW_AGENTS_DEFAULTS_ALLOW_UNRESTRICTED_EXEC=1`). Prefer removing exec
+from `allowed_tools` instead.
 
 ---
 
@@ -45,51 +64,39 @@ equivalent to leaving a shell open to that audience.
 
 ### Bearer token is mandatory
 
-Since audit remediation PR-1, the web channel **refuses to start** without a
-non-empty `channels.web.bearer_token`. All sensitive API routes require
-`Authorization: Bearer <token>`:
-
-- `POST /api/message`
-- `POST /api/memory/log`, `POST /api/memory/search`
-- `GET /api/audit`, `GET /api/progress`, `GET /api/media`
-- `GET /api/health` (PR-6 — no longer anonymous)
-- `GET /api/ui-config`
-
-`GET /` (embedded chat UI) remains public HTML; the UI stores the bearer
-token client-side (`sessionStorage`). Protect the bind address accordingly.
+The web channel **refuses to start** without a non-empty
+`channels.web.bearer_token`. Sensitive API routes require
+`Authorization: Bearer <token>`.
 
 ### Network binding
 
 - Default bind: `127.0.0.1`. Prefer loopback + reverse proxy for remote access.
-- Non-loopback bind without TLS logs a warning; set `channels.web.tls_cert`
-  and `channels.web.tls_key` for built-in HTTPS (requires OpenSSL build), or
-  terminate TLS at nginx/Caddy.
-- HTTP bypasses chat-channel controls (`allow_from`, pairing) — only bearer
-  auth and rate limits apply.
+- Non-loopback bind without TLS logs a warning; set TLS cert/key or terminate
+  TLS at nginx/Caddy.
+- HTTP bypasses chat-channel DM `allow_from` / pairing — only bearer auth and
+  rate limits apply. Restrict tools via `channels.web.tools`.
 
-### Rate limiting (PR-6)
+### Rate limiting
 
-`POST /api/message` consumes the global `agents.defaults.rate_limit_per_minute`
-token bucket keyed by **client IP + bearer-token hash**. Bursts return HTTP 429.
-Tune `rate_limit_per_minute` for your deployment; `0` disables limiting.
+`POST /api/message` uses `agents.defaults.rate_limit_per_minute` keyed by
+**client IP + bearer-token hash**.
 
 ### Session isolation
 
 Orchestrator delegates should use `channels.web.isolation_pattern` (default
-`wf-*`) so parallel callers do not share consolidated memory. See
-[`session-isolation.md`](session-isolation.md).
+`wf-*`). See [`session-isolation.md`](session-isolation.md).
 
 ---
 
 ## Other channels
 
-Telegram, Discord, Slack, IRC, and X route through `sc_channel_handle_message`:
+Telegram, Discord, Slack, IRC, Signal, and X route through
+`sc_channel_handle_message`:
 
-- `allow_from` / DM policy (`open`, `allowlist`, `pairing`)
-- Per-channel rate limits (same `rate_limit_per_minute` setting)
-- Pairing challenges for unknown senders when policy is `pairing`
-
-These controls **do not** apply to the web HTTP API.
+- Factory default `dm_policy` is **`allowlist`** (not open)
+- Explicit `dm_policy: "open"` with empty `allow_from` is **quarantined**
+  (channel not started) unless `agents.defaults.accept_open_dms: true`
+- Pairing challenges when policy is `pairing`
 
 ---
 
@@ -98,11 +105,18 @@ These controls **do not** apply to the web HTTP API.
 ### Development (loopback)
 
 ```jsonc
+"agents": {
+  "defaults": {
+    "exec_mode": "allowlist",
+    "exec_allowed_commands": ["ls", "cat", "grep", "pwd"]
+  }
+},
 "channels": {
   "web": {
     "enabled": true,
     "bind_addr": "127.0.0.1",
-    "bearer_token": "file:///path/to/token"
+    "bearer_token": "file:///path/to/token",
+    "tools": ["web_search", "web_fetch", "memory_search"]
   }
 }
 ```
@@ -112,20 +126,40 @@ These controls **do not** apply to the web HTTP API.
 1. Bind web to loopback; expose via TLS reverse proxy with auth at the edge.
 2. Strong random bearer token (vault or `file://`); rotate on compromise.
 3. Set `rate_limit_per_minute` appropriately.
-4. Restrict `agents.defaults.allowed_tools` and per-channel `tools` arrays.
-5. Keep `restrict_to_workspace: true`; use `exec_mode: "allowlist"` when feasible.
-6. Enable `sandbox` / Landlock where the kernel supports it.
+4. Restrict `agents.defaults.allowed_tools` and per-channel `tools` arrays
+   (companion: never leave unrestricted `exec` on web).
+5. Keep `restrict_to_workspace: true`; **require** `exec_mode: "allowlist"`.
+6. Keep `sandbox: true` (fail-closed on apply failure).
 7. Use session isolation for multi-tenant delegate traffic.
-8. Do **not** rely on `auto_confirm: false` in gateway today — gateway always
-   auto-approves; use deny/allow patterns and network isolation instead.
+8. Keep `dm_policy` as `allowlist` or `pairing` with real `allow_from` entries.
+9. Do **not** set `accept_open_dms` or `allow_unrestricted_exec` in production.
+
+### Lab-only open DMs (discouraged)
+
+```jsonc
+"agents": {
+  "defaults": {
+    "accept_open_dms": true,
+    "allow_unrestricted_exec": true
+  }
+},
+"channels": {
+  "telegram": {
+    "enabled": true,
+    "dm_policy": "open"
+  }
+}
+```
 
 ---
 
 ## What this document does not cover
 
 - Provider API key handling (see vault docs in `CONFIGURATION.md`)
-- MCP server command injection (see `SECURITY.md` MCP section)
 - Prompt injection resistance (CDATA wrapping, prompt guard)
 
-Future work (not in this remediation arc): configurable `gateway.confirm_policy`
-to deny dangerous tools in unattended mode without disabling the gateway.
+## Audit references
+
+Remediations for crystal-box findings SML-001 (DM defaults/quarantine),
+SML-002 (gateway exec allowlist + denylist), SML-006 (MCP sandbox fail-closed):
+see `docs/security-audits/`.

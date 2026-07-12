@@ -377,6 +377,15 @@ typedef struct {
     /* Auto-approve tool confirmations (for headless/autonomous operation) */
     int auto_confirm;
 
+    /* Allow channel dm_policy=open with empty allow_from (lab only; default 0).
+     * Without this, open+empty channels are not started (SML-001). */
+    int accept_open_dms;
+
+    /* Gateway only: allow exec/exec_background without exec allowlist (lab only).
+     * Default 0 — gateway refuses to start when exec tools are available unless
+     * exec_mode=allowlist with non-empty exec_allowed_commands (SML-002). */
+    int allow_unrestricted_exec;
+
     /* Tool confirmation policy (task 3.3): sc_approval_policy_t —
      * 0 dangerous-only (default), 1 always, 2 never. */
     int approval_policy;

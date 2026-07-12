@@ -425,6 +425,19 @@ static void test_ssrf_reserved(void)
     tool->destroy(tool);
 }
 
+static void test_ssrf_benchmark_net(void)
+{
+    sc_tool_t *tool = sc_tool_web_fetch_new(50000);
+    ASSERT_NOT_NULL(tool);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "url", "http://198.18.0.1/");
+    sc_tool_result_t *r = tool->execute(tool, args, NULL);
+    ASSERT(is_ssrf_blocked(r), "198.18.0.1 (benchmark) should be SSRF-blocked");
+    sc_tool_result_free(r);
+    cJSON_Delete(args);
+    tool->destroy(tool);
+}
+
 int main(void)
 {
     printf("test_web\n");
@@ -432,6 +445,7 @@ int main(void)
     /* SSRF tests run with bypass OFF (real IP checks against literals) */
     RUN_TEST(test_ssrf_cgnat);
     RUN_TEST(test_ssrf_reserved);
+    RUN_TEST(test_ssrf_benchmark_net);
 
     /* Disable SSRF protection for remaining tests (mock server is on localhost) */
     sc_web_set_ssrf_bypass(1);

@@ -2093,6 +2093,32 @@ static void gateway_shutdown(sc_channel_manager_t *ch_mgr,
     printf("  Gateway stopped\n");
 }
 
+/* Gateway: exec/exec_background require allowlist mode unless operator opts out
+ * with allow_unrestricted_exec, or excluded via allowed_tools (SML-002). */
+static int gateway_exec_tools_available(const sc_config_t *cfg)
+{
+    if (!cfg->allowed_tools || cfg->allowed_tool_count <= 0)
+        return 1; /* all tools available */
+    for (int i = 0; i < cfg->allowed_tool_count; i++) {
+        const char *n = cfg->allowed_tools[i];
+        if (!n) continue;
+        if (strcmp(n, "exec") == 0 || strcmp(n, "exec_background") == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int gateway_exec_policy_ok(const sc_config_t *cfg)
+{
+    if (cfg->allow_unrestricted_exec)
+        return 1;
+    if (!gateway_exec_tools_available(cfg))
+        return 1;
+    if (cfg->exec_use_allowlist && cfg->exec_allowed_command_count > 0)
+        return 1;
+    return 0;
+}
+
 static void cmd_gateway(int argc, char **argv)
 {
     /* Parse flags */
@@ -2107,6 +2133,19 @@ static void cmd_gateway(int argc, char **argv)
     sc_config_t *cfg = sc_config_load(config_path);
     if (!cfg) {
         fprintf(stderr, "Fatal: could not load config\n");
+        free(config_path);
+        return;
+    }
+
+    if (!gateway_exec_policy_ok(cfg)) {
+        fprintf(stderr,
+            "Fatal: gateway requires exec allowlist when exec tools are available.\n"
+            "  Set agents.defaults.exec_mode to \"allowlist\" and provide\n"
+            "  agents.defaults.exec_allowed_commands (non-empty),\n"
+            "  or remove exec/exec_background from allowed_tools,\n"
+            "  or set agents.defaults.allow_unrestricted_exec=true for lab use only.\n"
+            "See docs/operations/gateway-threat-model.md (SML-002).\n");
+        sc_config_free(cfg);
         free(config_path);
         return;
     }
@@ -2169,7 +2208,8 @@ static void cmd_gateway(int argc, char **argv)
     sc_audit_log_ext("provider", provider->name, 0, 0, NULL, NULL, "provider_init");
     sc_audit_log_ext("agent", cfg->model, 0, 0, NULL, NULL, "agent_init");
 
-    /* Gateway auto-approves tools — deny patterns and allowlist are the guards */
+    /* Gateway auto-approves tools — exec allowlist / denylist / sandbox are the
+     * primary guards (SML-002). Interactive confirm is not available headless. */
     sc_tool_registry_set_confirm(agent->tools, gateway_auto_confirm, NULL);
 
     /* Wire allowlist from config */

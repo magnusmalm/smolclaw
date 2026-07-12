@@ -585,6 +585,9 @@ static void env_override_agent_defaults(sc_config_t *cfg)
     env_override_bool(&cfg->announce_on_join, "SMOLCLAW_ANNOUNCE_ON_JOIN");
     env_override_bool(&cfg->verbose, "SMOLCLAW_AGENTS_DEFAULTS_VERBOSE");
     env_override_bool(&cfg->auto_confirm, "SMOLCLAW_AGENTS_DEFAULTS_AUTO_CONFIRM");
+    env_override_bool(&cfg->accept_open_dms, "SMOLCLAW_AGENTS_DEFAULTS_ACCEPT_OPEN_DMS");
+    env_override_bool(&cfg->allow_unrestricted_exec,
+                      "SMOLCLAW_AGENTS_DEFAULTS_ALLOW_UNRESTRICTED_EXEC");
     env_override_bool(&cfg->tee_enabled, "SMOLCLAW_AGENTS_DEFAULTS_TEE_ENABLED");
     env_override_int(&cfg->tee_max_files, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILES");
     env_override_int(&cfg->tee_max_file_size, "SMOLCLAW_AGENTS_DEFAULTS_TEE_MAX_FILE_SIZE");
@@ -853,14 +856,15 @@ sc_config_t *sc_config_default(void)
     cfg->ollama.api_base    = sc_strdup("http://localhost:11434/v1");
     cfg->xai.api_base       = sc_strdup("https://api.x.ai/v1");
 
-    /* Channel DM policy: strict mode defaults to allowlist (deny unknown),
-     * non-strict defaults to open (backward compatible). */
-#if SC_STRICT_SECURITY
+    /* Channel DM policy: allowlist by default (SML-001). Open DMs require
+     * explicit dm_policy:"open" plus accept_open_dms (or a non-empty allow_from).
+     * SC_STRICT_SECURITY also forces exec allowlist mode. */
     const char *default_dm = "allowlist";
+#if SC_STRICT_SECURITY
     cfg->exec_use_allowlist = 1;
-#else
-    const char *default_dm = "open";
 #endif
+    cfg->accept_open_dms = 0;
+    cfg->allow_unrestricted_exec = 0;
 
     /* Telegram: disabled by default */
     cfg->telegram.enabled = 0;
@@ -1069,6 +1073,10 @@ static void load_agent_defaults(sc_config_t *cfg, const cJSON *root)
     cfg->verbose = sc_json_get_bool(defaults, "verbose", cfg->verbose);
     cfg->auto_confirm = sc_json_get_bool(defaults, "auto_confirm",
                                           cfg->auto_confirm);
+    cfg->accept_open_dms = sc_json_get_bool(defaults, "accept_open_dms",
+                                             cfg->accept_open_dms);
+    cfg->allow_unrestricted_exec = sc_json_get_bool(defaults,
+        "allow_unrestricted_exec", cfg->allow_unrestricted_exec);
 
     /* Operator mode preset (3.2) then explicit approval_policy override (3.3).
      * Default policy is dangerous-only (matches prior per-tool confirm). */
@@ -1772,6 +1780,9 @@ static void save_agent_defaults(cJSON *root, const sc_config_t *cfg)
             cJSON_AddStringToObject(defaults, "network_scope", scope_names[si]);
     }
     cJSON_AddBoolToObject(defaults, "sandbox", cfg->sandbox_enabled);
+    cJSON_AddBoolToObject(defaults, "accept_open_dms", cfg->accept_open_dms);
+    cJSON_AddBoolToObject(defaults, "allow_unrestricted_exec",
+                          cfg->allow_unrestricted_exec);
     cJSON_AddBoolToObject(defaults, "memory_consolidation", cfg->memory_consolidation);
     cJSON_AddBoolToObject(defaults, "memory_background_review", cfg->memory_background_review);
     cJSON_AddBoolToObject(defaults, "memory_write_approval", cfg->memory_write_approval);

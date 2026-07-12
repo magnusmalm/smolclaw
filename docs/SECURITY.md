@@ -8,9 +8,9 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Tool Confirmation
 
-`src/tools/registry.c`: Tools with `needs_confirm = 1` (`exec`, `exec_background`, `git`) require user approval before execution. (File-write and memory tools rely on the deny-pattern list and allowlist rather than per-call confirmation.) In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is set so these tools execute without prompting — deny patterns and the allowlist are the security guards in unattended mode. The confirm callback is set on the registry via `sc_tool_registry_set_confirm()`.
+`src/tools/registry.c`: Tools with `needs_confirm = 1` (`exec`, `exec_background`, `git`) require user approval before execution. (File-write and memory tools rely on the deny-pattern list and allowlist rather than per-call confirmation.) In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is always registered (headless) — **exec allowlist**, denylist, Landlock/seccomp, and tool allowlists are the guards. Gateway **refuses to start** if `exec`/`exec_background` are available without `exec_mode=allowlist` and a non-empty `exec_allowed_commands`, unless `allow_unrestricted_exec` is set (lab only).
 
-**Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and `auto_confirm` implications.
+**Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and gateway exec policy.
 
 ## Tool Allowlist
 
@@ -18,15 +18,16 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Exec Deny Patterns
 
-`src/tools/deny_patterns.h`: ~90 POSIX ERE patterns shared between shell.c and background.c. Covers:
+`src/tools/deny_patterns.h`: ~100+ POSIX ERE patterns shared between shell.c and background.c. Covers:
 
 - rm -rf, format/mkfs, dd, shutdown, fork bombs, absolute path bypass (/bin/rm)
-- Scripting language one-liners (python -c, perl -e, ruby -e, node -e)
+- Scripting language one-liners **and script-file forms** (`python3 ./x.py`, `node x.js`, `perl`/`ruby`/`php`/`lua` invocations — not only `-c`/`-e`)
+- Compilers (`gcc`/`clang`/…) writing runnable binaries
 - Pipe to shell, reverse shells (nc, ncat, /dev/tcp, socat)
 - sudo/su, chmod 777 (including with -R flag), writes to /etc/
 - killall/pkill, crontab, eval, source, bash octal/hex escapes
 - Variable expansion evasion, find -delete/-exec rm, truncate, shred
-- curl/wget data exfiltration, LD_PRELOAD injection, tee to system paths, systemctl
+- curl/wget data exfiltration including `-T`/`--upload-file`, `--data-binary @`, form `=@` uploads
 - Command substitution (bare backtick, bare `$(`)
 - sh/bash -c invocation, pipe to interpreters (python/perl/ruby/node/php)
 - xargs rm, env bypass, busybox wrappers, heredoc to shell, base64 decode pipe, wget -O - pipe
@@ -48,14 +49,16 @@ Shell commands are normalized (newlines, `\r`, `\v`, `\f` → semicolons) and no
 
 `src/tools/shell.c`, `src/tools/background.c`: Optional allowlist mode restricts exec to a configured set of commands. Config: `agents.defaults.exec_mode` ("denylist"/"allowlist") and `agents.defaults.exec_allowed_commands` (JSON array). Env: `SMOLCLAW_AGENTS_DEFAULTS_EXEC_MODE`, `SMOLCLAW_AGENTS_DEFAULTS_EXEC_ALLOWED_COMMANDS` (comma-separated).
 
+**Gateway requirement:** if `exec` or `exec_background` is available (global tool allowlist empty or includes them), gateway requires `exec_mode=allowlist` with a non-empty command list. Override only with `agents.defaults.allow_unrestricted_exec=true` (lab).
+
 Denylist always runs even in allowlist mode (defense in depth). First command word extraction strips leading quotes (`"rm"` → `rm`) and terminates on shell metacharacters including `$`, backtick, `\`, and quote chars. Multi-segment checking: ALL command segments (split on `;`, `|`, `&&`, `||`) are verified, not just the first.
 
 ## SSRF Protection
 
 `src/tools/web.c`: `web_fetch` resolves hostnames via `getaddrinfo(AF_UNSPEC)` before fetching and blocks private/reserved IP ranges:
 
-- IPv4: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16
-- IPv6: ::1, ::ffff:mapped-private, fe80::/10, fc00::/7
+- IPv4: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 (CGNAT), 198.18.0.0/15 (benchmark), TEST-NETs, multicast/reserved
+- IPv6: ::1, ::ffff:mapped-private, fe80::/10, fc00::/7, NAT64/6to4 private embeds
 - Cloud metadata hostnames
 
 DNS rebinding is prevented via `CURLOPT_RESOLVE` pinning (resolved IP from SSRF check is passed to curl). Redirect bypass prevented via `http_get_no_follow()` + manual redirect loop with per-hop `check_ssrf()`. Tests bypass SSRF via `sc_web_set_ssrf_bypass(1)` (internal API, not settable via environment).
@@ -66,7 +69,7 @@ DNS rebinding is prevented via `CURLOPT_RESOLVE` pinning (resolved IP from SSRF 
 
 ## Environment Sanitization
 
-**MCP** (`src/mcp/client.c`): Before spawning MCP server subprocesses, dangerous environment variables are removed: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `PYTHONPATH`, `RUBYLIB`, `NODE_PATH`, `PERL5LIB`, `BASH_ENV`, `ENV`, `SHELLOPTS`.
+**MCP** (`src/mcp/client.c`): Before spawning MCP server subprocesses, dangerous environment variables are removed: `LD_PRELOAD`, `LD_LIBRARY_PATH`, `LD_AUDIT`, `PYTHONPATH`, `RUBYLIB`, `NODE_PATH`, `PERL5LIB`, `BASH_ENV`, `ENV`, `SHELLOPTS`. Landlock/seccomp sandbox is applied when a workspace is set (unless `capabilities.sandbox=false` / `no_sandbox`). **Sandbox apply failure is fail-closed** (`_exit(126)`); only explicit no-sandbox opts out.
 
 **Exec children** (`src/tools/shell.c`, `src/tools/background.c`): Fork/exec children receive a sanitized environment via `execle()`. Only safe variables are passed: PATH, HOME, TERM, LANG, LC_ALL, USER, SHELL, LOGNAME, TMPDIR, TZ.
 
@@ -122,7 +125,7 @@ Applied to: tool output before LLM, assistant messages before session storage, s
 
 ## OS-Level Sandbox
 
-`src/util/sandbox.c`: Exec children sandboxed via Landlock + seccomp-bpf after `fork()`, before `exec()`. Config: `agents.defaults.sandbox` (bool, default true).
+`src/util/sandbox.c`: Exec children sandboxed via Landlock + seccomp-bpf after `fork()`, before `exec()`. Config: `agents.defaults.sandbox` (bool, default true). Apply failure is **fail-closed** for exec (`_exit(126)`); same for MCP when sandbox was requested.
 
 **Landlock** (filesystem): Workspace and `/tmp` get full rw. System binary dirs get read+execute. `/etc` and `/proc` get read-only. Device nodes get appropriate access. Everything else denied. Graceful fallback on unsupported kernels.
 
@@ -154,7 +157,7 @@ Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Audit
 
 ## Access Control
 
-**DM policies** (per-channel): `"open"` (allow all senders), `"allowlist"` (only `allow_from` IDs), `"pairing"` (challenge code). Stock (non-strict) builds default every channel to `"open"`; `SC_STRICT_SECURITY` builds default to `"allowlist"`. When a policy string is missing or unknown, `sc_dm_policy_from_str()` fails closed to allowlist (`src/pairing.c`).
+**DM policies** (per-channel): `"open"` (allow all senders), `"allowlist"` (only `allow_from` IDs), `"pairing"` (challenge code). **Factory default is `"allowlist"`** for all builds. Channels with explicit `"open"` and empty `allow_from` are **not started** unless `agents.defaults.accept_open_dms=true` (lab). When a policy string is missing or unknown, `sc_dm_policy_from_str()` fails closed to allowlist (`src/pairing.c`).
 
 **Pairing** (`src/pairing.c`): 12-char codes (60-bit entropy, `/dev/urandom`), 1hr expiry, max 3 pending, 5-attempt brute force lockout (15min). Timing-safe comparison.
 

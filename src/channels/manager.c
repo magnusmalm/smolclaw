@@ -41,14 +41,17 @@
 #include "voice/transcriber.h"
 #endif
 
-#if SC_STRICT_SECURITY
-/* Strict mode: refuse to start channels with inadequate security config.
- * Returns 1 if the channel should be quarantined (not started). */
+/* Refuse to start channels with open DM policy and empty allow_from unless
+ * agents.defaults.accept_open_dms is set (SML-001). Always applied — not only
+ * under SC_STRICT_SECURITY. Returns 1 if the channel should be quarantined. */
 static int quarantine_check(const char *name, const char *dm_policy,
-                             int allow_from_count)
+                             int allow_from_count, int accept_open_dms)
 {
-    /* Channels with explicit non-open policy are fine */
-    if (dm_policy && strcmp(dm_policy, "open") != 0)
+    if (accept_open_dms)
+        return 0;
+
+    /* Only explicit open policy is gated; allowlist/pairing/NULL are fine */
+    if (!dm_policy || strcmp(dm_policy, "open") != 0)
         return 0;
 
     /* Open policy but has an allow_from list = effectively allowlist */
@@ -56,11 +59,11 @@ static int quarantine_check(const char *name, const char *dm_policy,
         return 0;
 
     SC_LOG_ERROR("channels", "QUARANTINE: %s channel has open DM policy and no allow_from list. "
-                 "In strict security mode, configure dm_policy or allow_from to enable this channel.",
+                 "Set dm_policy to allowlist/pairing, add allow_from entries, or set "
+                 "agents.defaults.accept_open_dms=true for lab-only open access.",
                  name);
     return 1;
 }
-#endif
 
 /* Add a channel to the manager array, set up rate limiter and DM policy warning.
  * Returns 0 on success, -1 on failure (channel is destroyed on failure).
@@ -98,77 +101,62 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
     mgr->count = 0;
 
     int rl __attribute__((unused)) = cfg->rate_limit_per_minute;
+    int accept_open = cfg->accept_open_dms;
 
 #if SC_ENABLE_TELEGRAM
     if (cfg->telegram.enabled && cfg->telegram.token && cfg->telegram.token[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("Telegram", cfg->telegram.dm_policy,
-                              cfg->telegram.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing Telegram channel");
-        sc_channel_t *tg = sc_channel_telegram_new(&cfg->telegram, bus);
-        if (tg)
-            manager_add_channel(mgr, tg, cfg->telegram.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize Telegram channel");
-#if SC_STRICT_SECURITY
+                              cfg->telegram.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing Telegram channel");
+            sc_channel_t *tg = sc_channel_telegram_new(&cfg->telegram, bus);
+            if (tg)
+                manager_add_channel(mgr, tg, cfg->telegram.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize Telegram channel");
         }
-#endif
     }
 #endif
 
 #if SC_ENABLE_DISCORD
     if (cfg->discord.enabled && cfg->discord.token && cfg->discord.token[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("Discord", cfg->discord.dm_policy,
-                              cfg->discord.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing Discord channel");
-        sc_channel_t *dc = sc_channel_discord_new(&cfg->discord, bus);
-        if (dc)
-            manager_add_channel(mgr, dc, cfg->discord.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize Discord channel");
-#if SC_STRICT_SECURITY
+                              cfg->discord.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing Discord channel");
+            sc_channel_t *dc = sc_channel_discord_new(&cfg->discord, bus);
+            if (dc)
+                manager_add_channel(mgr, dc, cfg->discord.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize Discord channel");
         }
-#endif
     }
 #endif
 
 #if SC_ENABLE_IRC
     if (cfg->irc.enabled && cfg->irc.hostname && cfg->irc.hostname[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("IRC", cfg->irc.dm_policy,
-                              cfg->irc.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing IRC channel");
-        sc_channel_t *irc = sc_channel_irc_new(&cfg->irc, bus);
-        if (irc)
-            manager_add_channel(mgr, irc, cfg->irc.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize IRC channel");
-#if SC_STRICT_SECURITY
+                              cfg->irc.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing IRC channel");
+            sc_channel_t *irc = sc_channel_irc_new(&cfg->irc, bus);
+            if (irc)
+                manager_add_channel(mgr, irc, cfg->irc.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize IRC channel");
         }
-#endif
     }
 #endif
 
 #if SC_ENABLE_SLACK
     if (cfg->slack.enabled && cfg->slack.bot_token && cfg->slack.bot_token[0]
         && cfg->slack.app_token && cfg->slack.app_token[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("Slack", cfg->slack.dm_policy,
-                              cfg->slack.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing Slack channel");
-        sc_channel_t *sl = sc_channel_slack_new(&cfg->slack, bus);
-        if (sl)
-            manager_add_channel(mgr, sl, cfg->slack.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize Slack channel");
-#if SC_STRICT_SECURITY
+                              cfg->slack.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing Slack channel");
+            sc_channel_t *sl = sc_channel_slack_new(&cfg->slack, bus);
+            if (sl)
+                manager_add_channel(mgr, sl, cfg->slack.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize Slack channel");
         }
-#endif
     }
 #endif
 
@@ -178,6 +166,7 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
             SC_LOG_ERROR("channels", "Web channel requires a bearer_token for API authentication. "
                          "Set web.bearer_token in config or SMOLCLAW_WEB_BEARER_TOKEN env var.");
         } else {
+            int web_ok = 1;
 #if SC_STRICT_SECURITY
             const char *waddr = cfg->web.bind_addr;
             int web_loopback = !waddr || !waddr[0] ||
@@ -188,23 +177,25 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
                 SC_LOG_ERROR("channels", "QUARANTINE: Web channel bind_addr is '%s' (non-loopback). "
                              "In strict security mode, bind to 127.0.0.1 and use a reverse proxy.",
                              waddr);
-            } else if (!quarantine_check("Web", cfg->web.dm_policy,
-                                         cfg->web.allow_from_count)) {
-#endif
-            SC_LOG_INFO("channels", "Initializing Web channel");
-            /* Default web request timeout to max_turn_secs + 30s grace so a
-             * long-running LLM turn doesn't 504 mid-flight. Explicit
-             * channels.web.request_timeout_secs still wins. */
-            if (cfg->web.request_timeout_secs <= 0 && cfg->max_turn_secs > 0)
-                cfg->web.request_timeout_secs = cfg->max_turn_secs + 30;
-            sc_channel_t *web = sc_channel_web_new(&cfg->web, bus, cfg->workspace);
-            if (web)
-                manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
-            else
-                SC_LOG_ERROR("channels", "Failed to initialize Web channel");
-#if SC_STRICT_SECURITY
+                web_ok = 0;
             }
 #endif
+            if (web_ok && quarantine_check("Web", cfg->web.dm_policy,
+                                           cfg->web.allow_from_count, accept_open))
+                web_ok = 0;
+            if (web_ok) {
+                SC_LOG_INFO("channels", "Initializing Web channel");
+                /* Default web request timeout to max_turn_secs + 30s grace so a
+                 * long-running LLM turn doesn't 504 mid-flight. Explicit
+                 * channels.web.request_timeout_secs still wins. */
+                if (cfg->web.request_timeout_secs <= 0 && cfg->max_turn_secs > 0)
+                    cfg->web.request_timeout_secs = cfg->max_turn_secs + 30;
+                sc_channel_t *web = sc_channel_web_new(&cfg->web, bus, cfg->workspace);
+                if (web)
+                    manager_add_channel(mgr, web, cfg->web.dm_policy, rl);
+                else
+                    SC_LOG_ERROR("channels", "Failed to initialize Web channel");
+            }
         }
     }
 #endif
@@ -212,37 +203,29 @@ sc_channel_manager_t *sc_channel_manager_new(sc_config_t *cfg, sc_bus_t *bus)
 #if SC_ENABLE_X
     if (cfg->x.enabled && cfg->x.consumer_key && cfg->x.consumer_key[0]
         && cfg->x.access_token && cfg->x.access_token[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("X", cfg->x.dm_policy,
-                              cfg->x.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing X channel");
-        sc_channel_t *xch = sc_channel_x_new(&cfg->x, bus);
-        if (xch)
-            manager_add_channel(mgr, xch, cfg->x.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize X channel");
-#if SC_STRICT_SECURITY
+                              cfg->x.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing X channel");
+            sc_channel_t *xch = sc_channel_x_new(&cfg->x, bus);
+            if (xch)
+                manager_add_channel(mgr, xch, cfg->x.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize X channel");
         }
-#endif
     }
 #endif
 
 #if SC_ENABLE_SIGNAL
     if (cfg->signal_.enabled && cfg->signal_.account && cfg->signal_.account[0]) {
-#if SC_STRICT_SECURITY
         if (!quarantine_check("Signal", cfg->signal_.dm_policy,
-                              cfg->signal_.allow_from_count)) {
-#endif
-        SC_LOG_INFO("channels", "Initializing Signal channel");
-        sc_channel_t *sig = sc_channel_signal_new(&cfg->signal_, bus);
-        if (sig)
-            manager_add_channel(mgr, sig, cfg->signal_.dm_policy, rl);
-        else
-            SC_LOG_ERROR("channels", "Failed to initialize Signal channel");
-#if SC_STRICT_SECURITY
+                              cfg->signal_.allow_from_count, accept_open)) {
+            SC_LOG_INFO("channels", "Initializing Signal channel");
+            sc_channel_t *sig = sc_channel_signal_new(&cfg->signal_, bus);
+            if (sig)
+                manager_add_channel(mgr, sig, cfg->signal_.dm_policy, rl);
+            else
+                SC_LOG_ERROR("channels", "Failed to initialize Signal channel");
         }
-#endif
     }
 #endif
 

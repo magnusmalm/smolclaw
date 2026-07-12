@@ -370,7 +370,14 @@ sc_mcp_client_t *sc_mcp_client_start(const char *name,
             if (mcaps && mcaps->no_network)
                 sandbox_opts.cap_no_network = 1;
 
-            sc_sandbox_apply(&sandbox_opts);
+            /* Fail closed when sandbox was requested (SML-006). Explicit
+             * capabilities.sandbox=false / no_sandbox opts out above. */
+            if (sc_sandbox_apply(&sandbox_opts) != 0) {
+                const char sb_msg[] =
+                    "mcp: sandbox apply failed, refusing to start server\n";
+                (void)write(STDERR_FILENO, sb_msg, sizeof(sb_msg) - 1);
+                _exit(126);
+            }
             setenv("TMPDIR", tmpdir, 1);
         }
 

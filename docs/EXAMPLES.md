@@ -66,7 +66,8 @@ cmake --build build-armv7l -j2
 - Runtime `allowed_tools` + `channels.web.tools` hide every core tool from the
   LLM; only `camera` is exposed.
 - OpenRouter needs `network_scope: "public"` (or `"any"`).
-- `auto_confirm: true` for headless/autonomous gateway operation.
+- Gateway always auto-confirms tools; use `exec_mode: "allowlist"` and a tight
+  `exec_allowed_commands` (or omit exec from `allowed_tools` / `channels.web.tools`).
 - `embed_stream_url` adds a live-view (MJPEG) toggle to the embedded web UI.
 - **armv7 caveat:** run `smolclaw gateway`, not one-shot `smolclaw agent` — the
   CLI exits with SIGILL on armv7 at process teardown
@@ -79,10 +80,14 @@ cmake --build build-armv7l -j2
 ## More scenarios
 
 - **Orchestrated worker node** — Web channel; `isolation_pattern: "wf-*"`;
-  `auto_confirm`; delegation target on a dispatcher (object-map format).
-- **Strict production gateway** — `SC_STRICT_SECURITY` build; all channels
-  `dm_policy: "allowlist"`; `exec_mode: "allowlist"`; vault for secrets;
-  `restrict_message_tool: true`.
+  restricted `channels.web.tools`; `exec_mode: "allowlist"`; delegation target
+  on a dispatcher (object-map format).
+- **Strict production gateway** — `dm_policy: "allowlist"` (factory default) with
+  real `allow_from`; `exec_mode: "allowlist"`; optional `SC_STRICT_SECURITY`
+  build; vault for secrets; `restrict_message_tool: true`. Never set
+  `accept_open_dms` / `allow_unrestricted_exec` in production.
+- **Lab open DMs (discouraged)** — `accept_open_dms: true` + explicit
+  `dm_policy: "open"`; prefer isolated network.
 - **IRC + cloud, token budget** — IRC channel only; OpenRouter/Groq; per-channel
   `tools` allowlist.
 - **Air-gapped / offline** — `network_scope: "none"`; Ollama only; all

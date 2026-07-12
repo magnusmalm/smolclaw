@@ -23,11 +23,22 @@ static const char *sc_deny_patterns[] = {
     "/bin/rm[[:space:]]+-[rf]",
     "/usr/bin/rm[[:space:]]+-[rf]",
 
-    /* Indirect execution via scripting languages */
+    /* Indirect execution via scripting languages (one-liners) */
     "\\bpython[23]?[[:space:]]+-c\\b",
     "\\bperl[[:space:]]+-e\\b",
     "\\bruby[[:space:]]+-e\\b",
     "\\bnode[[:space:]]+-e\\b",
+    /* Script-file / any invocation of common interpreters (SML-002).
+     * Broader than -c/-e so "python3 ./evil.py" and "node x.js" are blocked.
+     * Operators who need interpreters should use exec allowlist mode. */
+    "\\bpython[23]?([[:space:]]|$)",
+    "\\bpython([[:space:]]|$)",
+    "\\bnode([[:space:]]|$)",
+    "\\bperl([[:space:]]|$)",
+    "\\bruby([[:space:]]|$)",
+    "\\bphp([[:space:]]|$)",
+    "\\blua([[:space:]]|$)",
+    "\\bluajit([[:space:]]|$)",
 
     /* Pipe to shell (download-and-exec, base64 decode) */
     "\\|[[:space:]]*(ba)?sh\\b",
@@ -68,7 +79,17 @@ static const char *sc_deny_patterns[] = {
     /* Data exfiltration */
     "\\bcurl[[:space:]].*-d[[:space:]]*@",
     "\\bcurl[[:space:]].*--data[[:space:]]*@",
+    "\\bcurl[[:space:]].*--data-binary[[:space:]]*@",
+    /* Commands are lowercased before match: curl -T file → "-t file";
+     * curl -F f=@x becomes "=@". Prefer long options + these shapes. */
+    "\\bcurl[[:space:]].*[[:space:]]-t[[:space:]]",
+    "\\bcurl[[:space:]].*--upload-file",
+    "\\bcurl[[:space:]].*--form[[:space:]]",
+    "\\bcurl[[:space:]].*--form-string",
+    "\\bcurl[[:space:]].*=@",
     "\\bwget[[:space:]].*--post-file",
+    /* Compilers producing runnable binaries in workspace (optional hardening) */
+    "\\b(gcc|g\\+\\+|clang|clang\\+\\+)[[:space:]]",
     /* Reverse shells / network tools */
     "\\bsocat[[:space:]]",
     /* Preload injection */
