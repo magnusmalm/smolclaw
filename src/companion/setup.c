@@ -125,9 +125,11 @@ void sc_companion_print_qr_ascii(const char *text)
         for (int x = 0; x < size; x++) {
             int top = qrcodegen_getModule(qrcode, x, y);
             int bot = (y + 1 < size) ? qrcodegen_getModule(qrcode, x, y + 1) : 0;
-            if (top && bot) fputc('#', stdout);
-            else if (top) fputc('▀', stdout);
-            else if (bot) fputc('▄', stdout);
+            /* UTF-8 block chars are multi-byte: must be string literals.
+             * fputc('▀') truncates to one garbage byte (and clang rejects it). */
+            if (top && bot) fputs("█", stdout);
+            else if (top) fputs("▀", stdout);
+            else if (bot) fputs("▄", stdout);
             else fputc(' ', stdout);
         }
         fputc('\n', stdout);
