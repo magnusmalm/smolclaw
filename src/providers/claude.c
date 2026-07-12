@@ -799,7 +799,12 @@ static void claude_destroy(sc_provider_t *self)
 sc_provider_t *sc_provider_claude_new(const char *api_key, const char *api_base)
 {
     sc_provider_t *p = calloc(1, sizeof(sc_provider_t));
+    if (!p) return NULL;
     claude_provider_data_t *d = calloc(1, sizeof(claude_provider_data_t));
+    if (!d) {
+        free(p);
+        return NULL;
+    }
 
     d->api_key = sc_strdup(api_key);
 

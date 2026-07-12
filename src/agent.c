@@ -1848,8 +1848,13 @@ static char *run_agent_loop(sc_agent_t *agent, const char *session_key,
     /* Apply context transforms */
     if (agent->transform_count > 0) {
         int msg_cap = msg_count + 16; /* headroom for transforms that append */
-        messages = realloc(messages, (size_t)msg_cap * sizeof(sc_llm_message_t));
-        if (messages) {
+        sc_llm_message_t *grown =
+            realloc(messages, (size_t)msg_cap * sizeof(sc_llm_message_t));
+        if (!grown) {
+            SC_LOG_WARN("agent", "transform headroom realloc failed, "
+                        "skipping context transforms");
+        } else {
+            messages = grown;
             sc_context_snap_t snap = {
                 .msgs = &messages,
                 .msg_count = &msg_count,

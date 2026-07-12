@@ -354,6 +354,8 @@ int sc_web_check_bearer_auth(const char *configured_token,
 
 static int check_auth(struct evhttp_request *req, const web_data_t *wd)
 {
+    if (!wd)
+        return 0;
     const char *auth = evhttp_find_header(evhttp_request_get_input_headers(req),
                                            "Authorization");
     return sc_web_check_bearer_auth(wd->bearer_token, auth);
@@ -1084,11 +1086,11 @@ static void handle_message(struct evhttp_request *req, void *arg)
 static void handle_audit(struct evhttp_request *req, void *arg)
 {
     sc_channel_t *ch = arg;
-    web_data_t *wd = ch->data;
 
 #if SC_ENABLE_COMPANION
     if (!web_authorize(req, ch, SC_COMP_SCOPE_AUDIT_READ)) {
 #else
+    web_data_t *wd = ch->data;
     if (!check_auth(req, wd)) {
 #endif
         sc_web_send_json_error(req, 401, "Unauthorized");

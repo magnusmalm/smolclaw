@@ -1757,7 +1757,7 @@ host_inventory_execute(sc_tool_t *self, cJSON *args, void *ctx)
     int persist_context = sc_json_get_bool(args, "persist_context", 1);
 
     cJSON *root = build_host_inventory_json(include_paths,
-                                            d->sandbox_enabled);
+                                            d ? d->sandbox_enabled : 0);
     if (!root)
         return sc_tool_result_error("failed to build host inventory");
 

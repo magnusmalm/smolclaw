@@ -406,6 +406,7 @@ static int load_store(sc_cron_service_t *cs)
             sc_cron_job_t **tmp = realloc(cs->jobs, new_cap * sizeof(sc_cron_job_t *));
             if (!tmp) {
                 SC_LOG_ERROR("cron", "realloc failed loading jobs, stopping at %d", cs->job_count);
+                free_job(job);
                 break;
             }
             cs->jobs = tmp;
