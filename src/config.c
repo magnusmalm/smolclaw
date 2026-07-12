@@ -6,9 +6,9 @@
 #include "util/json_helpers.h"
 
 #include "sc_features.h"
+#include "util/sha256.h"
 #if SC_ENABLE_VAULT
 #include "util/vault.h"
-#include "util/sha256.h"
 #include <openssl/crypto.h>
 #endif
 
