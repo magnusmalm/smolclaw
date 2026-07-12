@@ -36,3 +36,6 @@ Testing/
 
 # Internal-only docs (kept local, never published to the public mirror)
 docs/progress-*.md
+
+# Security-audit artifacts (path dumps, recon) — kept local; REPORT.md files stay tracked
+docs/security-audits/**/artifacts/

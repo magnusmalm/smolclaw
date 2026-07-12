@@ -36,7 +36,7 @@
 
 ## 1.1 Introduction
 
-On 2026-07-12, a crystal-box security review was performed against **smolclaw** (Gitea `magnus/smolclaw`) at commit `a1135e9c`.
+On 2026-07-12, a crystal-box security review was performed against **smolclaw** (`magnusmalm/smolclaw`) at commit `a1135e9c`.
 
 ## 1.2 Scope of Work
 

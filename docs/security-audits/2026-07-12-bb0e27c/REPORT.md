@@ -1,8 +1,8 @@
 # Penetration Test Report
 
 **Target:** smolclaw  
-**Repository:** `/home/user/devel/smolclaw`  
-**Gitea:** `https://github.com/magnusmalm/smolclaw.git`  
+**Local path:** `/home/user/devel/smolclaw`  
+**Repository:** `https://github.com/magnusmalm/smolclaw.git`  
 **Commit:** `bb0e27c74296d47f000025afa96061aaf7918b11`  
 **Version:** 1.0  
 **Date:** 2026-07-12  
