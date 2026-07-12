@@ -39,10 +39,13 @@ A C11 lightweight AI agent framework.
   `host_trend`; SQLite trend recording gated behind new
   `SC_ENABLE_HOST_METRICS` so the minimal build stays smol.
 - **CI size budget** — `scripts/check_size_budget.sh` enforces the
-  SCOPE.md budget (minimal dynamic ≤ 1 MB stripped) on every CI run;
-  third-party GitHub Actions pinned to commit SHAs.
+  SCOPE.md budget (minimal dynamic ≤ 1 MB stripped) on every CI run.
+  Minimal musl-static ≤ 5 MB is a design budget (same script; not yet
+  a CI job).
 - **Research primitives** (`SC_ENABLE_CODE_GRAPH`) — `code_graph`
-  symbol extraction with kind filters, `symbol_lookup`, `set_workspace`.
+  symbol extraction with kind filters, and `symbol_lookup`. (Workspace
+  scoping uses the internal `set_workspace` tool vtable hook — not a
+  separate LLM-facing tool.)
 - **Agent infrastructure** — skills registry + slash commands, deferred
   tool schemas + `tool_search`, structured LLM output with JSON-schema
   enforcement, checkpoint/rewind for turn recovery, per-turn arena
@@ -90,12 +93,12 @@ A C11 lightweight AI agent framework.
 - **Built-in tools**: filesystem (read/write/edit/append/list), shell, git, gitea, web search/fetch, memory (read/write/log/search), code graph, message, cron, spawn, delegate, converse, notify, scratchpad, camera, background processes
 - **Long-term memory**: Markdown files, daily notes, auto-consolidation, full-text search (SQLite FTS5)
 - **SSE streaming**, MCP client (JSON-RPC 2.0), model fallback chain, in-prompt model override
-- **28 Kconfig feature flags** — build exactly what you need
-- **Self-contained static binaries**: 4.6 MB (musl, x86_64), zero runtime dependencies
+- **Kconfig feature flags** — build exactly what you need (see `Kconfig`; current tree has 34 `SC_ENABLE_*` plus `SC_STRICT_SECURITY`)
+- **Self-contained static binaries**: ~4.6 MB musl-minimal (x86_64), zero runtime dependencies
 
 ### Security
 
-- ~90 deny patterns for shell execution
+- Deny patterns for shell execution (105 patterns in current tree; see `src/tools/deny_patterns.h`)
 - SSRF protection with DNS pinning (`CURLOPT_RESOLVE`)
 - OS sandbox: Landlock filesystem + seccomp-bpf syscall filter
 - Encrypted API key vault (AES-256-GCM, PBKDF2 600K iterations)
@@ -104,18 +107,21 @@ A C11 lightweight AI agent framework.
 
 ### Binary sizes
 
-| Build               | Size   |
-|---------------------|--------|
-| Dynamic minimal     | 256 KB |
-| Dynamic full        | 1.9 MB |
-| Musl static minimal | 4.6 MB |
-| Musl static full    | 6.2 MB |
+Indicative stripped sizes from local MinSizeRel / musl builds (remeasure after large feature
+landings; CI enforces only minimal **dynamic** ≤ 1 MB):
 
-Peak RSS: 672 KB (musl-static)
+| Build               | Size (approx.) |
+|---------------------|----------------|
+| Dynamic minimal     | 289 KB         |
+| Dynamic default-y   | ~1.25 MB       |
+| Musl static minimal | 4.6 MB         |
+| Musl static release | ~6.6 MB        |
 
 ### Installation
 
-Download a binary from the assets below, or build from source:
+GitHub releases ship a multi-arch container image (`docker pull
+ghcr.io/magnusmalm/smolclaw:<tag>`); standalone binary assets are a planned
+follow-up. Until then, build from source:
 
 ```bash
 git clone https://github.com/magnusmalm/smolclaw.git

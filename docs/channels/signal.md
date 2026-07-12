@@ -75,9 +75,10 @@ Example configuration:
 The daemon is reached at `http://<http_host>:<http_port>/api/v1/rpc`. To point
 at a non-default endpoint (e.g. a container on another host), set `http_url`
 to the full base URL — it overrides `http_host`/`http_port`. A `proxy` field
-and per-channel `tools` allowlist are also supported. Every field has an
-environment override (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
-`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, …).
+and per-channel `tools` allowlist are also supported. Scalar fields have
+environment overrides (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
+`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, …); `allow_from` and `tools` are
+file-only (see [CONFIGURATION.md](../CONFIGURATION.md)).
 
 ---
 

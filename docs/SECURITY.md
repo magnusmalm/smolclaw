@@ -8,7 +8,13 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Tool Confirmation
 
-`src/tools/registry.c`: Tools with `needs_confirm = 1` (`exec`, `exec_background`, `git`) require user approval before execution. (File-write and memory tools rely on the deny-pattern list and allowlist rather than per-call confirmation.) In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is always registered (headless) — **exec allowlist**, denylist, Landlock/seccomp, and tool allowlists are the guards. Gateway **refuses to start** if `exec`/`exec_background` are available without `exec_mode=allowlist` and a non-empty `exec_allowed_commands`, unless `allow_unrestricted_exec` is set (lab only).
+`src/tools/registry.c`: Tools with `needs_confirm = 1` require user approval before execution in CLI mode. That set includes:
+
+- `exec`, `exec_background`, `git` (git also re-checks per subcommand at runtime)
+- `write_file`, `edit_file`, `append_file`
+- `memory_write`
+
+Other tools (including `memory_log` and read-only filesystem tools) rely on deny patterns, path checks, and allowlists rather than the confirm prompt. In CLI mode, a `[CONFIRM] Tool: <name>` prompt is shown; the user types y/N. In gateway mode, an auto-approve callback is always registered (headless) — **exec allowlist**, denylist, Landlock/seccomp, and tool allowlists are the guards. Gateway **refuses to start** if `exec`/`exec_background` are available without `exec_mode=allowlist` and a non-empty `exec_allowed_commands`, unless `allow_unrestricted_exec` is set (lab only).
 
 **Operator guide:** See [`docs/operations/gateway-threat-model.md`](operations/gateway-threat-model.md) for network exposure, web bearer auth, rate limits, and gateway exec policy.
 
@@ -18,7 +24,7 @@ Multiple layers prevent the LLM from performing destructive actions, exfiltratin
 
 ## Exec Deny Patterns
 
-`src/tools/deny_patterns.h`: ~100+ POSIX ERE patterns shared between shell.c and background.c. Covers:
+`src/tools/deny_patterns.h`: **105** POSIX ERE patterns shared between shell.c and background.c. Covers:
 
 - rm -rf, format/mkfs, dd, shutdown, fork bombs, absolute path bypass (/bin/rm)
 - Scripting language one-liners **and script-file forms** (`python3 ./x.py`, `node x.js`, `perl`/`ruby`/`php`/`lua` invocations — not only `-c`/`-e`)
@@ -177,11 +183,11 @@ Bus message queue uses `pthread_mutex_t`. Rate limiter is mutex-protected. Audit
 
 ## Production Security Tests
 
-`test_security_prod` — `EXCLUDE_FROM_ALL`, loads `~/.smolclaw/config.json`, 300 assertions across 177 test functions. Combined with `test_sandbox` (22 assertions) and IRC smoke tests (3): 325 total security tests.
+`test_security_prod` — registered in ctest when `SC_ENABLE_WEB` is on (full / default-y profile). Minimal CI skips it by name (`ctest -E test_security_prod`). Loads `~/.smolclaw/config.json` when present (or a CI fixture). As of the last doc refresh a full run reports **315** passing checks across **188** test functions (the runtime count varies slightly with the loaded config). Core security-labelled tests (`test_sandbox`, `test_exec_safety`, `test_security`, …) still run in the minimal profile via `ctest -L security`.
 
 ```bash
 scripts/test_security.sh --local --verbose   # Full run (C + IRC)
 scripts/test_security.sh --skip-irc          # C tests only
 ```
 
-Test categories: deny patterns (110), SSRF (30), allowlist (12), secret redaction (30), XML CDATA (14), MCP names (8), symlink TOCTOU (8), bootstrap files (8), prompt injection (20), outbound scanning (4), rate limiting (6), session redaction (4), message restriction (4), TLS (4), exec allowlist (8), sensitive paths (12), OpenClaw post-mortem (2), and more. See `tests/test_security_prod.c` for the full inventory.
+Test categories include deny patterns (aligned with the 105 patterns in `deny_patterns.h`), SSRF, allowlist, secret redaction, XML CDATA, MCP names, symlink TOCTOU, bootstrap files, prompt injection, outbound scanning, rate limiting, session redaction, message restriction, TLS, exec allowlist, sensitive paths, and more. See `tests/test_security_prod.c` for the full inventory.

@@ -35,7 +35,7 @@ Plain text, deliberately greppable and citable:
 ```
 code_graph symbols under 'src': 12 results (scanned 5 C files; capped at 50)
 
-func: extract_c_symbols at src/tools/code_graph.c:341 (int extract_c_symbols(code_graph_t *g, const char *content, ...))
+func: extract_c_symbols at src/tools/code_graph.c:342 (int extract_c_symbols(code_graph_t *g, const char *content, ...))
   context: static int extract_c_symbols(code_graph_t *g, const char *content,
 
 struct: cg_symbol_t at src/tools/code_graph.c:42 (typedef struct { ... } cg_symbol_t;)
@@ -94,9 +94,9 @@ Tests: `test_code_graph` (including new `test_symbols_action` covering filter, c
 
 Running `symbols` on the smolclaw `src/` tree itself yields (among others):
 
-- `func: sc_tool_code_graph_new at src/tools/code_graph.c:1043 (...)`
-- `func: extract_c_symbols at src/tools/code_graph.c:341 (...)`
-- `func: action_symbols at src/tools/code_graph.c:833 (...)`
+- `func: sc_tool_code_graph_new at src/tools/code_graph.c:1113 (...)`
+- `func: extract_c_symbols at src/tools/code_graph.c:342 (...)`
+- `func: action_symbols at src/tools/code_graph.c:857 (...)`
 - `define: MAX_SYMBOL_RESULTS at src/tools/code_graph.c:33`
 - `struct: cg_symbol_t at src/tools/code_graph.c:42`
 
@@ -106,7 +106,7 @@ Use `name_filter=extract` or `path=src/tools` for targeted Drill-down on the too
 
 - `symbol_lookup` — thin wrapper tool; convenience alias with good defaults for `action=symbols`.
 - `kinds` post-filter (see Parameters above).
-- `set_workspace` support for dynamic workspace switching.
+- Internal `set_workspace` vtable hook for dynamic workspace switching (not an LLM-facing tool).
 
 ---
 

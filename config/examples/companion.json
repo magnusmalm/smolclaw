@@ -32,7 +32,7 @@
   },
   "camera": {
     "vision_url": "http://127.0.0.1:11434",
-    "vision_model": "gemma4:26b",
+    "vision_model": "gemma3:27b",
     "vision_timeout_secs": 300
   },
   "heartbeat": { "enabled": true, "interval": 30 }

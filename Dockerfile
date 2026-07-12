@@ -14,7 +14,7 @@ RUN pip3 install --break-system-packages kconfiglib
 WORKDIR /src
 COPY . .
 
-# Build with all features
+# Build with Kconfig defaults (default-y features; optional flags stay off)
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DSC_STRIP=ON \

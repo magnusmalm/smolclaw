@@ -8,10 +8,12 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 
 ## Highlights
 
-- **~257 KB** dynamic-minimal binary (CI-enforced budget: 1 MB), **4.6 MB** fully static (musl, zero runtime deps)
-- **672 KB** peak RSS (musl-static)
-- **33** compile-time feature flags via Kconfig — build exactly what you need; new features land default-off
-- C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector, no runtime
+- **~289 KB** dynamic-minimal binary (CI-enforced budget: 1 MB stripped), **~4.6 MB** musl-static
+  minimal (zero runtime deps; design budget 5 MB — see [SCOPE.md](SCOPE.md))
+- **34** `SC_ENABLE_*` Kconfig flags (+ `SC_STRICT_SECURITY`) — build exactly what you need; new
+  features land default-off
+- C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector; musl-static needs no runtime
+  shared libraries
 
 ## Features
 
@@ -29,16 +31,16 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 - **Memory** — Long-term memory (Markdown files), daily notes, auto-consolidation, full-text search
   (SQLite FTS5), cross-agent memory API, scratchpad (compaction-resilient working notes), automatic
   action log
-- **Security** — ~90 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool
+- **Security** — 105 deny patterns, SSRF protection, OS sandbox (Landlock + seccomp-bpf), tool
   confirmation, secret redaction, encrypted vault (AES-256-GCM), prompt injection defense, tool
   output sanitization (ANSI/control char stripping + 32KB cap), git push remote allowlist, exec
   blocks commands with dedicated tools, config integrity verification (SHA-256), audit log API
 - **Integration** — SSE streaming, MCP client (JSON-RPC 2.0, auto binary path resolution for
   Landlock sandbox), model fallback chain, in-prompt model override, Mixture of Agents (MoA-lite:
   reference fan-out → aggregator, config presets, `local_only` air-gap policy; `SC_ENABLE_MOA`,
-  default off), typing indicators, auto cost
-  reporting to an external collector (single pricing path via cost.c; local models report $0,
-  provider actuals preferred)
+  default off), typing indicators, optional cost reporting to an external collector via
+  `SC_COST_REPORT_URL` + `SC_COST_REPORT_TOKEN` (single pricing path via cost.c; local models
+  report $0, provider actuals preferred)
 - **Web UI** — Embedded single-file chat UI: inline image attachments (`/api/media`), live per-turn
   progress log with provider/model per step (`/api/progress`), optional live-stream embed
   (`channels.web.embed_stream_url`, e.g. a motion-daemon MJPEG feed)
@@ -187,7 +189,7 @@ cmake --build build-armv7l -j$(nproc)
 
 ### Feature flags (Kconfig)
 
-smolclaw uses [Kconfig](https://www.kernel.org/doc/html/latest/kbuild/kconfig-language.html) for compile-time feature selection. Most features default ON; newer or optional ones (camera, gitea, X, voice, code graph, analytics, delegate, output filter) default OFF — see `Kconfig` for the authoritative defaults.
+smolclaw uses [Kconfig](https://www.kernel.org/doc/html/latest/kbuild/kconfig-language.html) for compile-time feature selection. There are **34** `SC_ENABLE_*` flags plus `SC_STRICT_SECURITY`. Roughly half default ON (core channels, git, web tools, memory search, MCP, vault, …); optional / newer ones default OFF (X, Signal, companion, gitea, camera, X tools, voice, code graph, output filter, analytics, delegate, project/session memory, MoA, xAI OAuth, strict security). See `Kconfig` for the authoritative defaults.
 
 ```bash
 # Interactive configuration
@@ -201,7 +203,7 @@ cmake -B build && cmake --build build -j$(nproc)
 cmake -B build -DSC_ENABLE_DISCORD=OFF -DSC_ENABLE_IRC=OFF
 ```
 
-Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_SIGNAL`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_SESSION_SEARCH`, `SC_ENABLE_PROJECT_MEMORY`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`, `SC_ENABLE_MOA`, `SC_ENABLE_XAI_OAUTH`.
+Available flags: `SC_ENABLE_TELEGRAM`, `SC_ENABLE_DISCORD`, `SC_ENABLE_IRC`, `SC_ENABLE_SLACK`, `SC_ENABLE_WEB`, `SC_ENABLE_X`, `SC_ENABLE_X_TOOLS`, `SC_ENABLE_SIGNAL`, `SC_ENABLE_COMPANION`, `SC_ENABLE_GIT`, `SC_ENABLE_GITEA`, `SC_ENABLE_WEB_TOOLS`, `SC_ENABLE_VOICE`, `SC_ENABLE_STREAMING`, `SC_ENABLE_CRON`, `SC_ENABLE_SPAWN`, `SC_ENABLE_DELEGATE`, `SC_ENABLE_HEARTBEAT`, `SC_ENABLE_BACKGROUND`, `SC_ENABLE_MCP`, `SC_ENABLE_MCP_SERVER`, `SC_ENABLE_MEMORY_SEARCH`, `SC_ENABLE_SESSION_SEARCH`, `SC_ENABLE_PROJECT_MEMORY`, `SC_ENABLE_CODE_GRAPH`, `SC_ENABLE_CAMERA`, `SC_ENABLE_HOST_METRICS`, `SC_ENABLE_VAULT`, `SC_ENABLE_UPDATER`, `SC_ENABLE_TEE`, `SC_ENABLE_OUTPUT_FILTER`, `SC_ENABLE_ANALYTICS`, `SC_ENABLE_MOA`, `SC_ENABLE_XAI_OAUTH`, and `SC_STRICT_SECURITY`.
 
 ## Architecture
 
@@ -231,13 +233,14 @@ User ─── Channel ──┘         │
 | Config        | `src/config.c`              | JSON config + env var overrides                 |
 | Analytics     | `src/analytics.c`           | Token usage and performance tracking            |
 | Tee           | `src/tee.c`                 | Tool output mirroring                           |
-| Output Filter | `src/tools/output_filter.c` | Tool output sanitization and truncation         |
+| Output Filter | `src/tools/output_filter.c` | Verbose CLI output compression (cargo/git/npm…) |
+| Sanitization  | `src/util/str.c`            | Tool output ANSI/control stripping, 32KB cap    |
 | Updater       | `src/updater/`              | Transport-agnostic self-update (HTTP built-in)  |
 | Security      | `src/util/`                 | Sandbox, secrets, prompt guard, path validation |
 
 ## Configuration
 
-Config lives at `~/.smolclaw/config.json`. Override the config directory with `SMOLCLAW_HOME` (e.g., `SMOLCLAW_HOME=/tmp/my-agent` looks for `/tmp/my-agent/config.json`). Every field can be overridden via environment variables with `SMOLCLAW_` prefix.
+Config lives at `~/.smolclaw/config.json`. Override the config directory with `SMOLCLAW_HOME` (e.g., `SMOLCLAW_HOME=/tmp/my-agent` looks for `/tmp/my-agent/config.json`). **Many** (not all) fields can be overridden via environment variables; names mostly follow `SMOLCLAW_` + the uppercased JSON path, with some irregularities. The authoritative list is `apply_env_overrides()` in `src/config.c` — see **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
 
 See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the complete reference — every config key, its type, default, and description — and **[docs/EXAMPLES.md](docs/EXAMPLES.md)** for ready-to-copy scenario configs. The examples below cover the common cases.
 
@@ -529,10 +532,10 @@ Build-time version includes git metadata:
 
 ```
 $ smolclaw version
-🦞 smolclaw 0.9.1 (34938ea4, 2026-03-07T00:00:00Z)
+🦞 smolclaw 0.9.1 (<git-hash>, <build-date>)
 ```
 
-The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.9.1+34938ea4`).
+The version header (`sc_version.h`) is auto-generated at build time with `SC_VERSION`, `SC_GIT_HASH`, `SC_BUILD_DATE`, and `SC_VERSION_FULL` (e.g. `0.9.1+15bc77b1`).
 
 ### Commands
 
@@ -609,7 +612,7 @@ drop files in the directories above.
 
 smolclaw implements defense in depth:
 
-- **Deny patterns**: ~90 POSIX ERE patterns block dangerous shell commands
+- **Deny patterns**: 105 POSIX ERE patterns block dangerous shell commands
 - **SSRF protection**: DNS resolution + private IP blocking + redirect validation
 - **OS sandbox**: Landlock filesystem restrictions + seccomp-bpf syscall filter
 - **Tool confirmation**: Side-effect tools require approval (CLI) or pass deny/allow checks (gateway)

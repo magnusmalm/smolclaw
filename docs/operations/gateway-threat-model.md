@@ -34,7 +34,7 @@ In gateway mode tools marked `needs_confirm` run **without a human prompt**.
 Guards are:
 
 1. **Exec allowlist** (required at gateway start unless lab override)
-2. Deny patterns (~100+)
+2. Deny patterns (105 POSIX ERE patterns in `deny_patterns.h`)
 3. Landlock/seccomp (fail-closed on apply failure)
 4. `allowed_tools` / per-channel `tools`
 5. Channel DM policy / web bearer

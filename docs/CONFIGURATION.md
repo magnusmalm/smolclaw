@@ -34,6 +34,7 @@ Irregular names (do **not** match `SMOLCLAW_<PATH>`):
 | JSON path                        | Environment variable              |
 |----------------------------------|-----------------------------------|
 | agents.defaults.announce_on_join | SMOLCLAW_ANNOUNCE_ON_JOIN         |
+| agents.defaults.log_path         | SMOLCLAW_LOG_PATH                 |
 | channels.web.tls_cert            | SMOLCLAW_WEB_TLS_CERT             |
 | channels.web.tls_key             | SMOLCLAW_WEB_TLS_KEY              |
 | channels.x.poll_interval_sec     | SMOLCLAW_CHANNELS_X_POLL_INTERVAL |
@@ -56,6 +57,22 @@ definitions.
 
 `SMOLCLAW_VAULT_PASSWORD` unlocks the vault non-interactively (scripted setup).
 
+### External cost reporting (not config.json)
+
+Per-turn cost can optionally be POSTed to a fleet collector. This is controlled
+only by environment variables (no `config.json` keys):
+
+| Variable              | Required | Description |
+|-----------------------|----------|-------------|
+| `SC_COST_REPORT_URL`  | yes      | Base URL of the collector (no path). The agent POSTs to `{url}/api/cost`. |
+| `SC_COST_REPORT_TOKEN`| yes      | Bearer token for the collector (`Authorization: Bearer …`). |
+
+Both must be non-empty or reporting is a no-op. Failures are ignored so the agent
+loop never blocks. The posted `cost_usd` is the provider-reported actual when
+available, else `cost.c`'s estimate (local models $0). Implemented in
+`report_cost_external()` in `src/agent_turn.c`. Note the `SC_` prefix (not
+`SMOLCLAW_`).
+
 ## Top-level structure
 
 ```json
@@ -64,7 +81,7 @@ definitions.
   "agents":      { "defaults": { ... } },
   "providers":   { "<name>": { ... } },
   "channels":    { "telegram": {}, "discord": {}, "irc": {},
-                   "slack": {}, "web": {}, "x": {} },
+                   "slack": {}, "web": {}, "x": {}, "signal": {} },
   "tools":       { "web": { "brave": {}, "searxng": {}, "duckduckgo": {} } },
   "git":         { ... },
   "gitea":       { ... },
@@ -169,7 +186,7 @@ The compression transform rewrites tool-result messages older than the last
 | allow_unrestricted_exec | bool     | false    | Gateway: allow exec without allowlist (lab). [4] |
 
 - [1] Runs each session in `workspace/tasks/<id>/` (auto-pruned, last 5 kept).
-- [2] `denylist` blocks ~100+ dangerous patterns (including script-file interpreters
+- [2] `denylist` blocks 105 dangerous patterns (including script-file interpreters
   and curl upload forms); `allowlist` permits only `exec_allowed_commands`.
   `SC_STRICT_SECURITY` builds default CLI exec to allowlist. **Gateway** requires
   allowlist mode when exec tools are available unless [4].
@@ -329,12 +346,14 @@ not speak the Signal protocol natively). See
 | http_port     | int    | 7583        | signal-cli daemon port.                                |
 | http_url      | string | (derived)   | Full base URL; overrides `http_host`/`http_port`.      |
 | proxy         | string | (none)      | Optional HTTP proxy for daemon requests.               |
-| dm_policy     | string | pairing     | `pairing`, `allowlist`, or `open`.                     |
+| dm_policy     | string | allowlist   | `pairing`, `allowlist`, or `open` (factory default is allowlist). |
 | allow_from    | array  | []          | Allowed numbers / `uuid:...` entries.                  |
 | group_trigger | string | (none)      | Only group messages containing this substring trigger. |
+| tools         | array  | (all)       | Per-channel tool allowlist (file only; no env override). |
 
-Every field has an environment override (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
-`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, …). The daemon is reached at
+Scalar Signal fields support env overrides (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
+`SMOLCLAW_CHANNELS_SIGNAL_HTTP_URL`, `SMOLCLAW_CHANNELS_SIGNAL_DM_POLICY`, …).
+`allow_from` and `tools` are file-only. The daemon is reached at
 `http://<http_host>:<http_port>/api/v1/rpc`.
 
 ## `tools.web` — web search backends
@@ -387,7 +406,7 @@ Every field has an environment override (`SMOLCLAW_CHANNELS_SIGNAL_ACCOUNT`,
 | snap_command        | string | (none)        | argv prefix; JPEG path appended. [1]   |
 | events_dir          | string | camera/motion | Motion captures dir (workspace-rel).   |
 | vision_url          | string | (none)        | ollama-compatible vision endpoint. [2] |
-| vision_model        | string | (none)        | Vision model (e.g. gemma4:e4b).        |
+| vision_model        | string | (none)        | Vision model (e.g. gemma3n:e4b).       |
 | vision_timeout_secs | int    | 120           | Timeout for a describe call.           |
 
 - [1] Run without a shell; e.g. `rpicam-still -n --width 1280 --height 720 -o`.

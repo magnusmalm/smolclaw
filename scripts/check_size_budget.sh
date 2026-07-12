@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# check_size_budget.sh - enforce the SCOPE.md binary size budgets
+# check_size_budget.sh - enforce SCOPE.md binary size budgets
 #
 # "smol" is a regression test, not a vibe: the minimal build must stay
-# within budget or CI fails. Budgets (SCOPE.md):
-#   minimal dynamic : 1 MB     (stripped; 1024 KB)
-#   minimal static  : 5 MB     (musl, stripped)
+# within budget. Budgets (SCOPE.md):
+#   minimal dynamic : 1 MB     (stripped; 1024 KB) — CI-enforced
+#   minimal static  : 5 MB     (musl, stripped)    — design budget;
+#                         invoke this script on musl builds locally/release
 #
 # Usage: check_size_budget.sh <binary> <max_kb> [label]
 # Strips a COPY of the binary (original untouched), compares.

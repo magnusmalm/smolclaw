@@ -7,7 +7,8 @@ embedded build (single static binary, no runtime deps, runs on a Pi Zero
 ## Goals
 
 - Single-binary agent: LLM loop, tools, memory, channels — Kconfig-gated.
-- Embedded-first: musl-static, aarch64/armv7, size + RSS budgets enforced.
+- Embedded-first: musl-static, aarch64/armv7; **size budgets** (see Rules) and
+  low RSS as a design goal (no published numeric RSS budget).
 - Safe by default: sandbox, deny patterns, secrets redaction, isolation.
 
 ## Non-goals
@@ -19,4 +20,7 @@ embedded build (single static binary, no runtime deps, runs on a Pi Zero
 ## Rules
 
 - New features land behind Kconfig `default n`.
-- CI fails if minimal-static > 5 MB or minimal-dynamic > 1 MB.
+- **Size budgets** (stripped binaries; `scripts/check_size_budget.sh`):
+  - minimal **dynamic** ≤ 1 MB (1024 KB) — **CI-enforced** on every push
+  - minimal **static** (musl) ≤ 5 MB — design budget; run the script on
+    musl release builds (not yet a CI job)

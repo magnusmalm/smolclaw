@@ -17,13 +17,14 @@ always compiled in. Use `agents.defaults.allowed_tools` and/or
 
 ---
 
-## Scenario 1 — x86 Linux desktop, local-only models, all features
+## Scenario 1 — x86 Linux desktop, local-only models, default-y features
 
 **Profile:** developer workstation with Ollama; no cloud LLM calls; full-feature
 binary.
 Config: [`desktop-local-ollama.json`](../config/examples/desktop-local-ollama.json).
 
-**Build** (default `configs/defconfig`, all features on):
+**Build** (default `configs/defconfig` — Kconfig **default-y** feature set only;
+optional flags such as camera, gitea, X, delegate stay off unless enabled):
 
 ```bash
 cmake -B build && cmake --build build -j$(nproc)
