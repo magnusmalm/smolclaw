@@ -613,13 +613,14 @@ or automations where not every turn warrants a reply.
 ## Skills — reusable prompt templates
 
 Skills are not configured in `config.json`; they are markdown files
-(`SKILL.md` + YAML frontmatter) discovered from two directories at startup,
-with **user skills taking precedence** over project skills of the same name:
+(`SKILL.md` + YAML frontmatter) discovered from three directories at startup.
+For skills of the same name, the earliest-listed directory wins:
 
-| Path                          | Scope             |
-|-------------------------------|-------------------|
-| `~/.smolclaw/skills/`         | user (per-host)   |
-| `{workspace}/.claude/skills/` | project/workspace |
+| Path                          | Scope                                        |
+|-------------------------------|----------------------------------------------|
+| `$SMOLCLAW_HOME/skills/`      | per-agent (only when `SMOLCLAW_HOME` is set) |
+| `~/.smolclaw/skills/`         | user (per-host, shared by all agents)        |
+| `{workspace}/.claude/skills/` | project/workspace                            |
 
 Each skill is `<dir>/<name>/SKILL.md` or a flat `<dir>/<name>.md`.
 

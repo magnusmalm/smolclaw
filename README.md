@@ -15,10 +15,22 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 - C11, compiled with `-Wall -Wextra -Wpedantic`, no garbage collector; musl-static needs no runtime
   shared libraries
 
+## What smolclaw is (and isn't)
+
+smolclaw is a from-scratch C11 agent in the OpenClaw / picoclaw lineage, built for
+the small end of the spectrum: one static binary, hundreds of KB of RSS, runs on
+routers, SBCs, and old laptops. If you're coming from OpenClaw, expect the same
+core loop (channels → agent → tools → memory) but a deliberately smaller surface:
+features are selected at **compile time** (Kconfig) rather than via a plugin
+runtime, there is no extension marketplace, no Node.js ecosystem, and no web
+onboarding wizard — configuration is one JSON file. What stays in and what stays
+out is governed by [SCOPE.md](SCOPE.md).
+
 ## Features
 
 - **Channels** — CLI, Telegram, Discord, IRC, Slack (Socket Mode), Web (REST API + embedded chat
-  UI), X/Twitter (REST polling, OAuth 1.0a), Signal (via external signal-cli daemon)
+  UI), X/Twitter (REST polling, OAuth 1.0a), Signal (via external signal-cli daemon —
+  setup in [docs/channels/signal.md](docs/channels/signal.md))
 - **Providers** — Anthropic (Claude), OpenAI, OpenRouter, Groq, Gemini, DeepSeek, xAI, Zhipu, vLLM,
   Ollama
 - **Tools** — File read/write/edit/append/list, shell exec, git (init/config/push/pull; push is
@@ -60,11 +72,14 @@ A minimal, self-contained AI agent with multi-channel support, tool execution, l
 A C toolchain, CMake, Python (for Kconfig), and a few dev libraries. **Or skip
 this entirely and use [Docker](#docker).**
 
+Linux is the primary, CI-tested platform. macOS builds are best-effort (not
+covered by CI), and the OS sandbox (Landlock + seccomp-bpf) is Linux-only —
+on macOS, `exec` runs without it.
+
 **Debian / Ubuntu**
 ```bash
-sudo apt-get install -y cmake build-essential python3-pip \
+sudo apt-get install -y cmake build-essential python3-kconfiglib \
   libcurl4-openssl-dev libevent-dev libssl-dev libreadline-dev libsqlite3-dev
-pip3 install --user kconfiglib
 ```
 
 **Fedora / RHEL**
@@ -77,8 +92,16 @@ pip3 install --user kconfiglib
 **macOS (Homebrew)**
 ```bash
 brew install cmake curl libevent openssl readline sqlite
-pip3 install --user kconfiglib
+python3 -m pip install --user --break-system-packages kconfiglib
+# macOS has no nproc — use -j$(sysctl -n hw.ncpu) in the build commands below
 ```
+
+> **Note (PEP 668):** on Debian 12+, Ubuntu 23.04+, and Homebrew Python, a bare
+> `pip3 install --user kconfiglib` fails with `externally-managed-environment`.
+> Use the distro package where available (Debian/Ubuntu: `python3-kconfiglib`,
+> which includes `menuconfig`), a virtualenv that is active when you run
+> `cmake -B build`, or `--break-system-packages` (kconfiglib is a small
+> pure-Python module with no dependencies).
 
 ### 2. Build
 
@@ -97,7 +120,9 @@ cmake -B build && cmake --build build -j$(nproc)
 Then point it at a model — two common paths:
 
 **A. Cloud (Anthropic Claude).** Get a key at
-<https://console.anthropic.com/>, then edit `~/.smolclaw/config.json`:
+<https://console.anthropic.com/>, then **merge** these keys into the
+`~/.smolclaw/config.json` that `onboard` generated (don't replace the file —
+the snippets here and below show only the keys being changed):
 ```json
 {
   "agents": { "defaults": { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929" } },
@@ -118,7 +143,7 @@ More local / air-gapped recipes: [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 ```bash
 ./build/smolclaw doctor       # validates config + dependencies
-./build/smolclaw selftest     # doctor + a real LLM round-trip (exits 0 on success)
+./build/smolclaw selftest     # doctor + a real LLM round-trip (one paid API call; exits 0 on success)
 
 ./build/smolclaw agent -m "Hello!"    # single turn
 ./build/smolclaw agent                # interactive
@@ -251,7 +276,6 @@ See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the complete referenc
       "model": "claude-sonnet-4-5-20250929",
       "provider": "anthropic",
       "max_tokens": 8192,
-      "context_window": 8192,
       "temperature": 0.7
     }
   },
@@ -269,7 +293,28 @@ See **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** for the complete referenc
 ```
 
 - `max_tokens` — maximum output tokens per LLM response
-- `context_window` — provider-level context window size (e.g. Ollama `num_ctx`). Set to 0 or omit to use the provider's default. Useful for controlling VRAM usage with local models.
+- `context_window` — request-level context window size, honored only by providers that accept one (currently Ollama, where it maps to `num_ctx` — useful for controlling VRAM with local models). Cloud providers ignore it. Set to 0 or omit for the provider default.
+
+### First contact: who may talk to the bot
+
+Chat channels default to `"dm_policy": "allowlist"` with an empty `allow_from`
+list — which **denies every sender**. A freshly configured Telegram/Discord/…
+bot will connect and then ignore all messages (the gateway logs a warning at
+startup). Pick one of:
+
+- **`"allowlist"`** (default) — add sender IDs to `allow_from`:
+  ```json
+  { "channels": { "telegram": { "enabled": true, "token": "...",
+      "allow_from": ["123456789"] } } }
+  ```
+- **`"pairing"`** — unknown senders get a one-time code in reply; approve with
+  `smolclaw pairing approve <channel> <code>` (pending requests:
+  `smolclaw pairing list <channel>`).
+- **`"open"`** — allow everyone. As a guard, a channel with explicit `"open"`
+  and an empty `allow_from` is refused at startup unless
+  `agents.defaults.accept_open_dms` is `true`.
+
+Full trust model: [docs/SECURITY.md](docs/SECURITY.md).
 
 ### Per-channel tool allowlists
 
@@ -309,9 +354,16 @@ echo "mypassword" | smolclaw vault init --password-stdin
 echo "sk-secret-key" | SMOLCLAW_VAULT_PASSWORD=mypassword smolclaw vault set anthropic_api_key --value-stdin
 ```
 
+**Unattended start:** at startup the gateway takes the vault password from
+`SMOLCLAW_VAULT_PASSWORD` or, failing that, an interactive prompt. A headless
+gateway (systemd, Docker) with `vault://` references therefore **must** have
+`SMOLCLAW_VAULT_PASSWORD` in its environment — otherwise the vault stays
+locked, the references don't resolve, and provider auth fails. See
+[Running as a service](#running-as-a-service) for a systemd example.
+
 ### Multi-agent deployment
 
-smolclaw supports multi-agent setups where each agent has its own config, workspace, vault, and sessions. This is managed by setting `SMOLCLAW_HOME` per agent:
+smolclaw supports multi-agent setups where each agent has its own config, workspace, vault, sessions, and skills (`$SMOLCLAW_HOME/skills`; skills in `~/.smolclaw/skills` stay visible to all agents as a shared fallback). This is managed by setting `SMOLCLAW_HOME` per agent:
 
 ```bash
 # Each agent gets its own home directory
@@ -461,7 +513,7 @@ git clone https://github.com/magnusmalm/x-mcp.git
 cd x-mcp && npm install && npm run build
 ```
 
-The four OAuth 1.0a credentials come from the [X Developer Portal](https://developer.x.com/). The Free tier cannot read tweets — you need **Pay-Per-Use** or **Basic** minimum.
+The four OAuth 1.0a credentials come from the [X Developer Portal](https://developer.x.com/). As of mid-2026, the Free tier cannot read tweets — you need **Pay-Per-Use** or **Basic** at minimum (tier names and limits change often; check the portal).
 
 #### X channel
 
@@ -566,10 +618,11 @@ smolclaw version      Show version (includes git hash and build date)
 ### Skills
 
 Skills are reusable prompt templates — a markdown file with YAML frontmatter
-followed by the prompt body. They are discovered from two directories (user
-skills take precedence over project skills of the same name):
+followed by the prompt body. They are discovered from three directories; for
+skills with the same name, the earliest-listed directory wins:
 
-- `~/.smolclaw/skills/` — user skills
+- `$SMOLCLAW_HOME/skills/` — per-agent skills (only when `SMOLCLAW_HOME` is set)
+- `~/.smolclaw/skills/` — user skills, shared by every agent on the host
 - `{workspace}/.claude/skills/` — project skills
 
 Each skill is either `<dir>/<name>/SKILL.md` or a flat `<dir>/<name>.md`.
@@ -627,12 +680,55 @@ Operators running `smolclaw gateway` on a network should read
 [docs/operations/gateway-threat-model.md](docs/operations/gateway-threat-model.md)
 (web bearer token, `auto_confirm`, rate limits).
 
+## Running as a service
+
+There is no `make install` target — copy the binary wherever you want it:
+
+```bash
+sudo install -m 755 build/smolclaw /usr/local/bin/smolclaw
+```
+
+Minimal systemd user unit (`~/.config/systemd/user/smolclaw.service`):
+
+```ini
+[Unit]
+Description=smolclaw gateway
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/smolclaw gateway
+Restart=on-failure
+# Required if config.json uses vault:// references (see Encrypted vault):
+#Environment=SMOLCLAW_VAULT_PASSWORD=...
+# or keep it out of the unit file:
+#EnvironmentFile=%h/.config/smolclaw.env
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now smolclaw
+```
+
+`smolclaw update apply` replaces the *running* binary at its resolved path
+(`/proc/self/exe`) — i.e. wherever you installed it — leaving a `.bak` next to
+it for `smolclaw update rollback`.
+
 ## Docker
 
 ```bash
 docker build -t smolclaw .
-docker run -v ~/.smolclaw:/home/smolclaw/.smolclaw smolclaw gateway
+
+# First run: create the config, then edit ~/.smolclaw/config.json on the host
+docker run -it -v ~/.smolclaw:/home/smolclaw/.smolclaw smolclaw onboard
+
+# Run the gateway; publish the web channel port if channels.web is enabled
+docker run -v ~/.smolclaw:/home/smolclaw/.smolclaw -p 8080:8080 smolclaw gateway
 ```
+
+The image runs as user `smolclaw` (uid 1000). If your host `~/.smolclaw` is
+owned by a different uid, fix ownership or pass `--user $(id -u)`.
 
 ## License
 

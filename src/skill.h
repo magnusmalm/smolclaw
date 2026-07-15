@@ -2,7 +2,9 @@
  * skill.h - User-defined prompt templates (skills)
  *
  * Skills are markdown files with YAML frontmatter, stored in
- * ~/.smolclaw/skills/<name>/SKILL.md or ~/.smolclaw/skills/<name>.md.
+ * <dir>/<name>/SKILL.md or <dir>/<name>.md where <dir> is
+ * $SMOLCLAW_HOME/skills (per-agent, wins on name collision),
+ * ~/.smolclaw/skills (shared), or {workspace}/.claude/skills (project).
  * Invoked as /skill-name args or via the skill tool.
  */
 

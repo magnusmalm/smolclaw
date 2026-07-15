@@ -1133,12 +1133,22 @@ sc_agent_t *sc_agent_new(sc_config_t *cfg, sc_bus_t *bus, sc_provider_t *provide
     /* Load skills from standard directories */
     agent->skills = sc_skill_registry_new();
     if (agent->skills) {
-        /* User skills: ~/.smolclaw/skills/ */
+        /* Agent skills: $SMOLCLAW_HOME/skills/ (when set). Loaded first —
+         * the registry keeps the first skill of a given name, so per-agent
+         * skills shadow shared ones. */
+        char agent_skills[512] = "";
+        const char *sc_home = getenv("SMOLCLAW_HOME");
+        if (sc_home && sc_home[0]) {
+            snprintf(agent_skills, sizeof(agent_skills), "%s/skills", sc_home);
+            sc_skill_registry_load_dir(agent->skills, agent_skills);
+        }
+        /* Shared user skills: ~/.smolclaw/skills/ */
         const char *home = getenv("HOME");
         if (home) {
             char user_skills[512];
             snprintf(user_skills, sizeof(user_skills), "%s/.smolclaw/skills", home);
-            sc_skill_registry_load_dir(agent->skills, user_skills);
+            if (strcmp(user_skills, agent_skills) != 0)
+                sc_skill_registry_load_dir(agent->skills, user_skills);
         }
         /* Project skills: workspace/.claude/skills/ */
         if (workspace) {

@@ -44,6 +44,23 @@ void sc_channel_init_security(sc_channel_t *ch, const char *dm_policy,
         ch->pairing_store = sc_pairing_store_new(channel_name, dir);
         free(dir);
     }
+
+    /* Allowlist policy (the factory default) with no allow_from entries
+     * silently denies every sender — surface it so operators aren't left
+     * wondering why the bot never answers. The web channel is exempt: it
+     * authenticates via bearer token and never routes through the
+     * sc_channel_handle_message() allowlist check. */
+    if (ch->dm_policy == SC_DM_POLICY_ALLOWLIST && ch->allow_list_count == 0 &&
+        (!channel_name || strcmp(channel_name, "web") != 0)) {
+        SC_LOG_WARN("channel",
+                    "%s: dm_policy=allowlist with empty allow_from — all "
+                    "senders will be denied. Set channels.%s.allow_from or "
+                    "dm_policy=\"pairing\" (then approve via 'smolclaw "
+                    "pairing approve %s <code>')",
+                    channel_name ? channel_name : "?",
+                    channel_name ? channel_name : "<name>",
+                    channel_name ? channel_name : "<channel>");
+    }
 }
 
 int sc_channel_is_allowed(sc_channel_t *ch, const char *sender_id)
